@@ -123,7 +123,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
     setState(() => _saving = true);
     final wasPlaying = player.isPlaying;
-    await player.pause();
+    await player.stopForExternalFileEdit();
     try {
       await writeEmbeddedAudioTags(
         filePath: path,

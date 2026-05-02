@@ -144,6 +144,13 @@ class PlayerController extends ChangeNotifier {
     await _loadCurrent();
   }
 
+  /// Release the open audio file so another process (or this app) can rewrite it.
+  Future<void> stopForExternalFileEdit() async {
+    try {
+      await _player.stop();
+    } catch (_) {}
+  }
+
   Future<void> play() => _player.play();
 
   Future<void> pause() => _player.pause();
