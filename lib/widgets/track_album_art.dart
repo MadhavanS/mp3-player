@@ -19,13 +19,13 @@ class TrackAlbumArt extends StatelessWidget {
   double get _size => switch (display) {
         TrackArtDisplay.mini => 48,
         TrackArtDisplay.list => 56,
-        TrackArtDisplay.full => 280,
+        TrackArtDisplay.full => 295,
       };
 
   double get _radius => switch (display) {
         TrackArtDisplay.mini => 24,
         TrackArtDisplay.list => 14,
-        TrackArtDisplay.full => 32,
+        TrackArtDisplay.full => 34,
       };
 
   @override
