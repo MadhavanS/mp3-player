@@ -100,6 +100,14 @@ Future<void> writeEmbeddedAudioTags({
       break;
   }
 
+  if (metadata is Mp3Metadata) {
+    final m = metadata;
+    // [readMetadata] prefers TPE2 (album artist) over TPE1; stale TPE2 would mask edits.
+    m.bandOrOrchestra = null;
+    // Writer uses [contentType] as TCON when [genres] is empty — clear stale genre.
+    m.contentType = null;
+  }
+
   if (metadata is ApeMetadata) {
     throw UnsupportedError(
       'This file uses APE tags. Saving from this app is not supported yet.',

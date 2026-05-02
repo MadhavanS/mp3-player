@@ -62,22 +62,35 @@ class TrackItem {
   }
 
   /// Merge ID3 (or similar) tags; keeps filename fallbacks when fields are empty.
+  ///
+  /// When [replaceGenreFromFile] is true (reading a fresh snapshot from disk),
+  /// an empty or missing [genre] becomes `#local` instead of keeping the previous value.
   TrackItem withEmbeddedMetadata({
     String? title,
     String? artist,
     String? album,
     String? genre,
     Uint8List? albumArtBytes,
+    bool replaceGenreFromFile = false,
   }) {
     final t = title?.trim();
     final a = artist?.trim();
     final alb = album?.trim();
     final g = genre?.trim();
+    final newGenres = () {
+      if (g != null && g.isNotEmpty) {
+        return '#${g.replaceAll(RegExp(r'\s+'), '')}';
+      }
+      if (replaceGenreFromFile) {
+        return '#local';
+      }
+      return genres;
+    }();
     return TrackItem(
       title: (t != null && t.isNotEmpty) ? t : this.title,
       artist: (a != null && a.isNotEmpty) ? a : this.artist,
       metaLine: (alb != null && alb.isNotEmpty) ? alb : this.metaLine,
-      genres: (g != null && g.isNotEmpty) ? '#${g.replaceAll(RegExp(r'\s+'), '')}' : this.genres,
+      genres: newGenres,
       artColors: artColors,
       filePath: filePath,
       albumArtBytes: albumArtBytes ?? this.albumArtBytes,
