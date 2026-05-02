@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -21,6 +22,30 @@ String _mimeFromFileName(String name) {
   if (lower.endsWith('.webp')) return 'image/webp';
   if (lower.endsWith('.gif')) return 'image/gif';
   return 'image/jpeg';
+}
+
+Future<void> _resumePlaybackAfterTagSave(
+  PlayerController player,
+  bool resume,
+  Duration resumePosition,
+) async {
+  try {
+    await player.reloadCurrentSource().timeout(const Duration(seconds: 20));
+    var target = resumePosition;
+    final dur = player.audioPlayer.duration;
+    if (dur != null && target > dur) {
+      target = dur;
+    }
+    if (target.isNegative) {
+      target = Duration.zero;
+    }
+    await player.seek(target);
+    if (resume) {
+      await player.play();
+    }
+  } catch (e, st) {
+    debugPrint('Playback reload after tag save: $e\n$st');
+  }
 }
 
 class EditTrackTagsSheet extends StatefulWidget {
@@ -130,6 +155,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
     setState(() => _saving = true);
     final wasPlaying = player.isPlaying;
+    final resumePosition = player.position;
     await player.stopForExternalFileEdit();
     try {
       await writeEmbeddedAudioTags(
@@ -144,14 +170,11 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       );
       final refreshed = await readAudioMetadata(widget.track);
       player.updateTrackByPath(path, refreshed);
-      await player.reloadCurrentSource();
-      if (wasPlaying && mounted) {
-        await player.play();
-      }
       if (mounted) {
         messenger.showSnackBar(const SnackBar(content: Text('Tags saved to file.')));
         Navigator.of(context).pop();
       }
+      unawaited(_resumePlaybackAfterTagSave(player, wasPlaying, resumePosition));
     } on UnsupportedError catch (e) {
       if (mounted) {
         messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not supported.')));
@@ -322,7 +345,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                               width: 22,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text('Save to file'),
+                          : const Text('Save'),
                     ),
                   ),
                 ],
