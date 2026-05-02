@@ -79,10 +79,34 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     _artist = TextEditingController(text: t.artist == 'Unknown artist' ? '' : t.artist);
     _album = TextEditingController(text: t.metaLine == 'mp3' ? '' : t.metaLine);
     _genre = TextEditingController(text: _genreTextFromTrack(t));
+    _title.addListener(_onTagFieldChanged);
+    _artist.addListener(_onTagFieldChanged);
+    _album.addListener(_onTagFieldChanged);
+    _genre.addListener(_onTagFieldChanged);
+  }
+
+  void _onTagFieldChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Widget? _clearFieldSuffix(TextEditingController controller) {
+    if (_saving || controller.text.isEmpty) return null;
+    return IconButton(
+      icon: const Icon(Icons.clear_rounded, size: 22),
+      tooltip: 'Clear field',
+      visualDensity: VisualDensity.compact,
+      onPressed: () {
+        controller.clear();
+      },
+    );
   }
 
   @override
   void dispose() {
+    _title.removeListener(_onTagFieldChanged);
+    _artist.removeListener(_onTagFieldChanged);
+    _album.removeListener(_onTagFieldChanged);
+    _genre.removeListener(_onTagFieldChanged);
     _title.dispose();
     _artist.dispose();
     _album.dispose();
@@ -491,9 +515,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
               TextField(
                 controller: _title,
                 enabled: !_saving,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Title',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _clearFieldSuffix(_title),
                 ),
                 textCapitalization: TextCapitalization.sentences,
               ),
@@ -501,9 +526,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
               TextField(
                 controller: _artist,
                 enabled: !_saving,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Artist',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _clearFieldSuffix(_artist),
                 ),
                 textCapitalization: TextCapitalization.words,
               ),
@@ -511,9 +537,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
               TextField(
                 controller: _album,
                 enabled: !_saving,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Album',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _clearFieldSuffix(_album),
                 ),
                 textCapitalization: TextCapitalization.sentences,
               ),
@@ -521,9 +548,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
               TextField(
                 controller: _genre,
                 enabled: !_saving,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Genre (comma-separated)',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _clearFieldSuffix(_genre),
                 ),
                 textCapitalization: TextCapitalization.words,
               ),

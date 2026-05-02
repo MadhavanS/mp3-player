@@ -187,7 +187,9 @@ class _TrackTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${track.metaLine} · ${track.genres}',
+                      track.genres.isEmpty
+                          ? track.metaLine
+                          : '${track.metaLine} · ${track.genres}',
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: pal.textMuted.withValues(alpha: 0.9),
                         fontSize: 10,

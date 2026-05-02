@@ -55,7 +55,7 @@ class TrackItem {
       title: title.isEmpty ? base : title,
       artist: 'Unknown artist',
       metaLine: 'mp3',
-      genres: '#local',
+      genres: '',
       artColors: _gradientForKey(path),
       filePath: path,
     );
@@ -64,7 +64,8 @@ class TrackItem {
   /// Merge ID3 (or similar) tags; keeps filename fallbacks when fields are empty.
   ///
   /// When [replaceGenreFromFile] is true (reading a fresh snapshot from disk),
-  /// an empty or missing [genre] becomes `#local` instead of keeping the previous value.
+  /// an empty or missing [genre] clears [genres] to '' instead of keeping the
+  /// previous value.
   TrackItem withEmbeddedMetadata({
     String? title,
     String? artist,
@@ -82,7 +83,7 @@ class TrackItem {
         return '#${g.replaceAll(RegExp(r'\s+'), '')}';
       }
       if (replaceGenreFromFile) {
-        return '#local';
+        return '';
       }
       return genres;
     }();
