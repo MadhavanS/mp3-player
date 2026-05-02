@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
+import '../../services/storage_access.dart';
 import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
 import '../../theme/app_theme.dart';
@@ -121,6 +124,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     final player = PlayerController.of(context);
     final messenger = ScaffoldMessenger.of(context);
 
+    if (!await ensureCanWriteLibraryFiles(context)) {
+      return;
+    }
+
     setState(() => _saving = true);
     final wasPlaying = player.isPlaying;
     await player.stopForExternalFileEdit();
@@ -148,6 +155,16 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     } on UnsupportedError catch (e) {
       if (mounted) {
         messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not supported.')));
+      }
+    } on FileSystemException catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not write the file. On Android, enable "All files access" for this app. (${e.message})',
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {

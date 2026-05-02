@@ -49,6 +49,55 @@ Future<bool> ensureCanReadMusicFiles(BuildContext context) async {
   return false;
 }
 
+/// **Android:** Reading audio (scan) is not enough to **rewrite** files in a user-picked
+/// folder. On API 30+ you typically need **All files access** ([`MANAGE_EXTERNAL_STORAGE`]).
+/// On API ≤32, [Permission.storage] may be sufficient.
+///
+/// Call this before saving ID3 tags. Returns false if the user must enable access in Settings.
+Future<bool> ensureCanWriteLibraryFiles(BuildContext context) async {
+  if (kIsWeb) {
+    return true;
+  }
+  if (defaultTargetPlatform != TargetPlatform.android) {
+    return true;
+  }
+
+  bool granted(PermissionStatus s) => s.isGranted || s.isLimited;
+
+  if (await Permission.manageExternalStorage.isGranted) {
+    return true;
+  }
+  final manage = await Permission.manageExternalStorage.request();
+  if (manage.isGranted) {
+    return true;
+  }
+
+  if (granted(await Permission.storage.status)) {
+    return true;
+  }
+  final storage = await Permission.storage.request();
+  if (granted(storage)) {
+    return true;
+  }
+
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+          'To save tags on Android, allow "All files access" (or storage) for this app in system settings.',
+        ),
+        action: SnackBarAction(
+          label: 'Settings',
+          onPressed: () {
+            openAppSettings();
+          },
+        ),
+      ),
+    );
+  }
+  return false;
+}
+
 /// Opens a directory picker. On Android this often goes through the Storage Access
 /// Framework; the result should be an absolute path when the plug-in can map the tree.
 Future<String?> pickMusicDirectory() async {

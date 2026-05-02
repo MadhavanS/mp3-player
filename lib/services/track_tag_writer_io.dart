@@ -38,6 +38,17 @@ Future<void> _writeMp3Id3v2Safe(File original, Mp3Metadata metadata) async {
     Id3v4Writer().write(tmp, metadata);
     final out = await tmp.readAsBytes();
     await original.writeAsBytes(out, flush: true);
+    final writtenLen = await original.length();
+    if (writtenLen != out.length) {
+      throw StateError(
+        'Write verification failed (file size $writtenLen vs $out). '
+        'On Android, grant "All files access" in Settings → Apps → MP3 Player → Permissions.',
+      );
+    }
+    if (out.length >= 3 &&
+        String.fromCharCodes(out.sublist(0, 3)) != 'ID3') {
+      throw StateError('Write verification failed: missing ID3 header.');
+    }
   } finally {
     try {
       if (tmp.existsSync()) {
