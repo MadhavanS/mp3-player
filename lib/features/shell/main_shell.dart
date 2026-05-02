@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
@@ -34,20 +33,6 @@ class _MainShellState extends State<MainShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _restoreFoldersAndScan();
     });
-  }
-
-  String get _playingSourceSubtitle {
-    if (_folderPaths.isEmpty) {
-      return 'Add folders in Settings';
-    }
-    if (_folderPaths.length == 1) {
-      return '${p.basename(_folderPaths.single)}, All Genres';
-    }
-    final names = _folderPaths.map(p.basename).toList();
-    if (names.length <= 2) {
-      return '${names.join(', ')}, All Genres';
-    }
-    return '${names[0]}, ${names[1]} + ${_folderPaths.length - 2} more · All Genres';
   }
 
   Future<void> _restoreFoldersAndScan() async {
@@ -150,8 +135,6 @@ class _MainShellState extends State<MainShell> {
           return FadeTransition(
             opacity: animation,
             child: NowPlayingScreen(
-              sourceTitle: 'Playing from',
-              sourceSubtitle: _playingSourceSubtitle,
               onCollapse: () => Navigator.of(context).pop(),
             ),
           );

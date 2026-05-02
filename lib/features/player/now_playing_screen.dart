@@ -12,15 +12,8 @@ String _formatDuration(Duration d) {
 }
 
 class NowPlayingScreen extends StatefulWidget {
-  const NowPlayingScreen({
-    super.key,
-    required this.sourceTitle,
-    required this.sourceSubtitle,
-    required this.onCollapse,
-  });
+  const NowPlayingScreen({super.key, required this.onCollapse});
 
-  final String sourceTitle;
-  final String sourceSubtitle;
   final VoidCallback onCollapse;
 
   @override
@@ -29,6 +22,20 @@ class NowPlayingScreen extends StatefulWidget {
 
 class _NowPlayingScreenState extends State<NowPlayingScreen> {
   double? _dragPositionFraction;
+
+  void _openTagEditor(PlayerController player) {
+    final t = player.currentTrack;
+    if (t == null || t.filePath == null || t.filePath!.isEmpty) {
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      showDragHandle: false,
+      builder: (ctx) => EditTrackTagsSheet(track: t),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,250 +55,247 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         }
 
         return Scaffold(
-          backgroundColor: AppColors.navy,
-          body: Column(
-            children: [
-              SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit_note_rounded),
-                        color: AppColors.textOnNavy,
-                        tooltip: 'Edit tags & cover',
-                        onPressed: track.filePath == null || track.filePath!.isEmpty
-                            ? null
-                            : () {
-                                final t = player.currentTrack;
-                                if (t == null || t.filePath == null || t.filePath!.isEmpty) {
-                                  return;
-                                }
-                                showModalBottomSheet<void>(
-                                  context: context,
-                                  isScrollControlled: true,
-                                  backgroundColor: AppColors.surface,
-                                  showDragHandle: false,
-                                  builder: (ctx) => EditTrackTagsSheet(track: t),
-                                );
-                              },
-                      ),
-
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Text(
-                          widget.sourceTitle,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: AppColors.textOnNavy.withOpacity(0.85),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          widget.sourceSubtitle,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: AppColors.textOnNavy,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 32),
-                    color: AppColors.textOnNavy,
-                    onPressed: widget.onCollapse,
-                  ),
-                ],
-              ),
+          backgroundColor: AppColors.surface,
+          appBar: AppBar(
+            backgroundColor: AppColors.surface,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              tooltip: 'Back to library',
+              onPressed: widget.onCollapse,
             ),
           ),
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              decoration: const BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(sheetRadius)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x33000000),
-                    offset: Offset(0, -4),
-                    blurRadius: 24,
+          body: Column(
+            children: [
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(sheetRadius)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        offset: const Offset(0, -2),
+                        blurRadius: 16,
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(sheetRadius)),
-                child: ListenableBuilder(
-                  listenable: player,
-                  builder: (context, _) {
-                    final t = player.currentTrack;
-                    if (t == null) {
-                      return const SizedBox.shrink();
-                    }
-                    return SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(24, 32, 24, 28),
-                      child: Column(
-                        children: [
-                          TrackAlbumArt(track: t, display: TrackArtDisplay.full),
-                          const SizedBox(height: 32),
-                          Text(
-                            t.title,
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.titleLarge,
+                  child: ClipRRect(
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(sheetRadius)),
+                    child: ListenableBuilder(
+                      listenable: player,
+                      builder: (context, _) {
+                        final t = player.currentTrack;
+                        if (t == null) {
+                          return const SizedBox.shrink();
+                        }
+                        return SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(
+                            parent: BouncingScrollPhysics(),
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            t.artist,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                          const SizedBox(height: 28),
-                          StreamBuilder<Duration>(
-                            stream: player.audioPlayer.positionStream,
-                            builder: (context, posSnap) {
-                              return StreamBuilder<Duration?>(
-                                stream: player.audioPlayer.durationStream,
-                                builder: (context, durSnap) {
-                                  final dur = durSnap.data ?? player.duration;
-                                  final pos = posSnap.data ?? player.position;
-                                  final totalMs = dur?.inMilliseconds ?? 0;
-                                  final posMs = pos.inMilliseconds;
-                                  final sliderValue = _dragPositionFraction ??
-                                      (totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0);
+                          padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                          child: Column(
+                            children: [
+                              GestureDetector(
+                                onVerticalDragEnd: (details) {
+                                  final v = details.primaryVelocity;
+                                  if (v != null && v > 450) {
+                                    widget.onCollapse();
+                                  }
+                                },
+                                child: TrackAlbumArt(
+                                  track: t,
+                                  display: TrackArtDisplay.full,
+                                ),
+                              ),
+                              const SizedBox(height: 28),
+                              Text(
+                                t.title,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.titleLarge,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                t.artist,
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                              const SizedBox(height: 24),
+                              StreamBuilder<Duration>(
+                                stream: player.audioPlayer.positionStream,
+                                builder: (context, posSnap) {
+                                  return StreamBuilder<Duration?>(
+                                    stream: player.audioPlayer.durationStream,
+                                    builder: (context, durSnap) {
+                                      final dur = durSnap.data ?? player.duration;
+                                      final pos = posSnap.data ?? player.position;
+                                      final totalMs = dur?.inMilliseconds ?? 0;
+                                      final posMs = pos.inMilliseconds;
+                                      final sliderValue = _dragPositionFraction ??
+                                          (totalMs > 0
+                                              ? (posMs / totalMs).clamp(0.0, 1.0)
+                                              : 0.0);
 
+                                      return Row(
+                                        children: [
+                                          Text(
+                                            _formatDuration(pos),
+                                            style: theme.textTheme.labelSmall,
+                                          ),
+                                          Expanded(
+                                            child: Slider(
+                                              value: sliderValue.clamp(0.0, 1.0),
+                                              onChanged: totalMs > 0
+                                                  ? (v) => setState(
+                                                        () => _dragPositionFraction = v,
+                                                      )
+                                                  : null,
+                                              onChangeEnd: totalMs > 0
+                                                  ? (v) {
+                                                      player.seek(
+                                                        Duration(
+                                                          milliseconds:
+                                                              (v * totalMs).round(),
+                                                        ),
+                                                      );
+                                                      setState(
+                                                        () => _dragPositionFraction =
+                                                            null,
+                                                      );
+                                                    }
+                                                  : null,
+                                            ),
+                                          ),
+                                          Text(
+                                            dur != null
+                                                ? _formatDuration(dur)
+                                                : '--:--',
+                                            style: theme.textTheme.labelSmall,
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              ListenableBuilder(
+                                listenable: player,
+                                builder: (context, _) {
+                                  final cur = player.currentTrack;
+                                  final canEdit = cur != null &&
+                                      cur.filePath != null &&
+                                      cur.filePath!.isNotEmpty;
                                   return Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Text(
-                                        _formatDuration(pos),
-                                        style: theme.textTheme.labelSmall,
-                                      ),
-                                      Expanded(
-                                        child: Slider(
-                                          value: sliderValue.clamp(0.0, 1.0),
-                                          onChanged: totalMs > 0
-                                              ? (v) => setState(() => _dragPositionFraction = v)
-                                              : null,
-                                          onChangeEnd: totalMs > 0
-                                              ? (v) {
-                                                  player.seek(
-                                                    Duration(
-                                                      milliseconds: (v * totalMs).round(),
-                                                    ),
-                                                  );
-                                                  setState(() => _dragPositionFraction = null);
-                                                }
-                                              : null,
+                                      IconButton(
+                                        tooltip: 'Shuffle',
+                                        icon: Icon(
+                                          Icons.shuffle_rounded,
+                                          color: player.shuffleEnabled
+                                              ? AppColors.navy
+                                              : AppColors.textSecondary,
                                         ),
+                                        onPressed: player.playlist.length < 2
+                                            ? null
+                                            : () => player.toggleShuffle(),
                                       ),
-                                      Text(
-                                        dur != null ? _formatDuration(dur) : '--:--',
-                                        style: theme.textTheme.labelSmall,
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        tooltip: 'Edit tags & cover',
+                                        icon: Icon(
+                                          Icons.edit_note_rounded,
+                                          color: canEdit
+                                              ? AppColors.navy
+                                              : AppColors.textSecondary
+                                                  .withValues(alpha: 0.45),
+                                        ),
+                                        onPressed:
+                                            canEdit ? () => _openTagEditor(player) : null,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        tooltip: 'Repeat mode',
+                                        icon: Icon(
+                                          player.repeatMode == PlaylistRepeatMode.one
+                                              ? Icons.repeat_one_rounded
+                                              : Icons.repeat_rounded,
+                                          color: player.repeatMode ==
+                                                  PlaylistRepeatMode.off
+                                              ? AppColors.textSecondary
+                                                  .withValues(alpha: 0.55)
+                                              : AppColors.navy,
+                                        ),
+                                        onPressed: () => player.cycleRepeatMode(),
                                       ),
                                     ],
                                   );
                                 },
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          ListenableBuilder(
-                            listenable: player,
-                            builder: (context, _) {
-                              return Row(
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   IconButton(
-                                    tooltip: 'Shuffle',
-                                    icon: Icon(
-                                      Icons.shuffle_rounded,
-                                      color: player.shuffleEnabled
-                                          ? AppColors.navy
-                                          : AppColors.textSecondary,
-                                    ),
-                                    onPressed: player.playlist.length < 2
-                                        ? null
-                                        : () => player.toggleShuffle(),
+                                    iconSize: 36,
+                                    icon: const Icon(Icons.skip_previous_rounded),
+                                    color: AppColors.textPrimary,
+                                    onPressed: () => player.skipPrevious(),
                                   ),
-                                  const SizedBox(width: 24),
-                                  IconButton(
-                                    tooltip: 'Repeat mode',
-                                    icon: Icon(
-                                      player.repeatMode == PlaylistRepeatMode.one
-                                          ? Icons.repeat_one_rounded
-                                          : Icons.repeat_rounded,
-                                      color: player.repeatMode == PlaylistRepeatMode.off
-                                          ? AppColors.textSecondary.withOpacity(0.55)
-                                          : AppColors.navy,
+                                  const SizedBox(width: 20),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: AppColors.surface,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black
+                                              .withValues(alpha: 0.08),
+                                          blurRadius: 16,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
                                     ),
-                                    onPressed: () => player.cycleRepeatMode(),
+                                    child: IconButton.filled(
+                                      iconSize: 40,
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: AppColors.surface,
+                                        foregroundColor: AppColors.textSecondary,
+                                        padding: const EdgeInsets.all(20),
+                                        elevation: 0,
+                                      ),
+                                      onPressed: () => player.togglePlayPause(),
+                                      icon: Icon(
+                                        player.isPlaying
+                                            ? Icons.pause_rounded
+                                            : Icons.play_arrow_rounded,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 20),
+                                  IconButton(
+                                    iconSize: 36,
+                                    icon: const Icon(Icons.skip_next_rounded),
+                                    color: AppColors.textPrimary,
+                                    onPressed: () => player.skipNext(),
                                   ),
                                 ],
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                iconSize: 36,
-                                icon: const Icon(Icons.skip_previous_rounded),
-                                color: AppColors.textPrimary,
-                                onPressed: () => player.skipPrevious(),
-                              ),
-                              const SizedBox(width: 20),
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: AppColors.surface,
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.08),
-                                      blurRadius: 16,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: IconButton.filled(
-                                  iconSize: 40,
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: AppColors.surface,
-                                    foregroundColor: AppColors.textSecondary,
-                                    padding: const EdgeInsets.all(20),
-                                    elevation: 0,
-                                  ),
-                                  onPressed: () => player.togglePlayPause(),
-                                  icon: Icon(
-                                    player.isPlaying
-                                        ? Icons.pause_rounded
-                                        : Icons.play_arrow_rounded,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 20),
-                              IconButton(
-                                iconSize: 36,
-                                icon: const Icon(Icons.skip_next_rounded),
-                                color: AppColors.textPrimary,
-                                onPressed: () => player.skipNext(),
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    );
-                  },
+                        );
+                      },
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
       },
     );
   }
