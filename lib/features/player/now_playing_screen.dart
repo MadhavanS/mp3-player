@@ -35,42 +35,50 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     final theme = Theme.of(context);
     const sheetRadius = 36.0;
     final player = PlayerController.of(context);
-    final track = player.currentTrack;
 
-    if (track == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.onCollapse();
-      });
-      return const SizedBox.shrink();
-    }
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final track = player.currentTrack;
+        if (track == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) widget.onCollapse();
+          });
+          return const SizedBox.shrink();
+        }
 
-    return Scaffold(
-      backgroundColor: AppColors.navy,
-      body: Column(
-        children: [
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit_note_rounded),
-                    color: AppColors.textOnNavy,
-                    tooltip: 'Edit tags & cover',
-                    onPressed: track.filePath == null || track.filePath!.isEmpty
-                        ? null
-                        : () {
-                            showModalBottomSheet<void>(
-                              context: context,
-                              isScrollControlled: true,
-                              backgroundColor: AppColors.surface,
-                              showDragHandle: false,
-                              builder: (ctx) => EditTrackTagsSheet(track: track),
-                            );
-                          },
-                  ),
+        return Scaffold(
+          backgroundColor: AppColors.navy,
+          body: Column(
+            children: [
+              SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit_note_rounded),
+                        color: AppColors.textOnNavy,
+                        tooltip: 'Edit tags & cover',
+                        onPressed: track.filePath == null || track.filePath!.isEmpty
+                            ? null
+                            : () {
+                                final t = player.currentTrack;
+                                if (t == null || t.filePath == null || t.filePath!.isEmpty) {
+                                  return;
+                                }
+                                showModalBottomSheet<void>(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  backgroundColor: AppColors.surface,
+                                  showDragHandle: false,
+                                  builder: (ctx) => EditTrackTagsSheet(track: t),
+                                );
+                              },
+                      ),
+
                   Expanded(
                     child: Column(
                       children: [
@@ -283,6 +291,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           ),
         ],
       ),
+    );
+      },
     );
   }
 }
