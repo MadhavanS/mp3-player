@@ -1,0 +1,13 @@
+---
+description: Do not add Cursor co-author lines to git commits
+alwaysApply: true
+---
+
+# Git commits — no Cursor co-author
+
+When creating commits in this repository (via terminal or instructions to the user):
+
+- Do **not** add `Co-authored-by: Cursor`, `Co-authored-by: cursoragent@cursor.com`, or any similar Cursor attribution trailer to commit messages.
+- Use a normal subject and body only.
+
+The repo can strip these lines automatically if hooks are enabled: `git config core.hooksPath githooks` (from the repo root).

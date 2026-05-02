@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Remove Co-authored-by lines added by Cursor from commit messages.
+# Enable with: git config core.hooksPath githooks
+set -u
+msg_file="${1:-}"
+if [[ -z "$msg_file" || ! -f "$msg_file" ]]; then
+  exit 0
+fi
+tmp="${msg_file}.no-cursor-coauthor"
+grep -vE '^Co-authored-by:[[:space:]].*[Cc]ursor' "$msg_file" > "$tmp" || true
+if [[ -s "$tmp" ]]; then
+  mv "$tmp" "$msg_file"
+else
+  rm -f "$tmp"
+fi
