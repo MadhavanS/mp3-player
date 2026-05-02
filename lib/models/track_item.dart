@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
@@ -10,6 +12,7 @@ class TrackItem {
     required this.genres,
     required this.artColors,
     this.filePath,
+    this.albumArtBytes,
   });
 
   final String title;
@@ -20,6 +23,9 @@ class TrackItem {
 
   /// Absolute path when this track came from device storage.
   final String? filePath;
+
+  /// Embedded cover art from tags (JPEG/PNG), if any.
+  final Uint8List? albumArtBytes;
 
   static const Color _pink = Color(0xFFFF6B9D);
   static const Color _blue = Color(0xFF4FACFE);
@@ -52,6 +58,29 @@ class TrackItem {
       genres: '#local',
       artColors: _gradientForKey(path),
       filePath: path,
+    );
+  }
+
+  /// Merge ID3 (or similar) tags; keeps filename fallbacks when fields are empty.
+  TrackItem withEmbeddedMetadata({
+    String? title,
+    String? artist,
+    String? album,
+    String? genre,
+    Uint8List? albumArtBytes,
+  }) {
+    final t = title?.trim();
+    final a = artist?.trim();
+    final alb = album?.trim();
+    final g = genre?.trim();
+    return TrackItem(
+      title: (t != null && t.isNotEmpty) ? t : this.title,
+      artist: (a != null && a.isNotEmpty) ? a : this.artist,
+      metaLine: (alb != null && alb.isNotEmpty) ? alb : this.metaLine,
+      genres: (g != null && g.isNotEmpty) ? '#${g.replaceAll(RegExp(r'\s+'), '')}' : this.genres,
+      artColors: artColors,
+      filePath: filePath,
+      albumArtBytes: albumArtBytes ?? this.albumArtBytes,
     );
   }
 

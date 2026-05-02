@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   file_picker: ^8.1.4
   just_audio: ^0.9.46
+  metadata_god: ^1.1.0
   path: ^1.9.1
   permission_handler: ^11.3.1
 

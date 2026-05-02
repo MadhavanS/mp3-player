@@ -6,24 +6,45 @@ import 'package:just_audio/just_audio.dart';
 
 import '../models/track_item.dart';
 
+enum PlaylistRepeatMode { off, all, one }
+
 /// Local playback + playlist index. Exposes [audioPlayer] for streams in the UI.
 class PlayerController extends ChangeNotifier {
   PlayerController() {
     _playerStateSub = _player.playerStateStream.listen((_) => notifyListeners());
+    _processingSub = _player.processingStateStream.listen(_onProcessingState);
   }
 
   final AudioPlayer _player = AudioPlayer();
   late final StreamSubscription<PlayerState> _playerStateSub;
+  late final StreamSubscription<ProcessingState> _processingSub;
 
   List<TrackItem> _playlist = [];
   int _index = 0;
 
+  bool _shuffle = false;
+  List<int> _shuffleOrder = [];
+  int _shufflePos = 0;
+
+  PlaylistRepeatMode _repeat = PlaylistRepeatMode.off;
+  ProcessingState? _previousProcessing;
+  bool _isLoadingSource = false;
+
   AudioPlayer get audioPlayer => _player;
 
   List<TrackItem> get playlist => _playlist;
-  int get currentIndex => _index;
+
+  /// Index into [playlist] for the currently playing file (list row / highlight).
+  int get currentIndex {
+    if (_playlist.isEmpty) return 0;
+    return _shuffle ? _shuffleOrder[_shufflePos] : _index;
+  }
+
   TrackItem? get currentTrack =>
-      _playlist.isEmpty ? null : _playlist[_index.clamp(0, _playlist.length - 1)];
+      _playlist.isEmpty ? null : _playlist[currentIndex.clamp(0, _playlist.length - 1)];
+
+  bool get shuffleEnabled => _shuffle;
+  PlaylistRepeatMode get repeatMode => _repeat;
 
   bool get isPlaying => _player.playing;
   Duration get position => _player.position;
@@ -35,16 +56,62 @@ class PlayerController extends ChangeNotifier {
     return scope!.controller;
   }
 
+  void _onProcessingState(ProcessingState state) {
+    if (_isLoadingSource) {
+      _previousProcessing = state;
+      return;
+    }
+    final enteredComplete = _previousProcessing != ProcessingState.completed &&
+        state == ProcessingState.completed;
+    _previousProcessing = state;
+    if (enteredComplete) {
+      unawaited(_handleTrackCompleted());
+    }
+  }
+
+  Future<void> _handleTrackCompleted() async {
+    if (_playlist.isEmpty) return;
+    if (_repeat == PlaylistRepeatMode.one) {
+      await _player.seek(Duration.zero);
+      await _player.play();
+      return;
+    }
+    await skipNext();
+  }
+
+  void _resetShuffleState() {
+    _shuffle = false;
+    _shuffleOrder = [];
+    _shufflePos = 0;
+  }
+
   Future<void> setPlaylist(List<TrackItem> tracks, {int startIndex = 0}) async {
     _playlist = List<TrackItem>.from(tracks);
+    _resetShuffleState();
     _index = _playlist.isEmpty ? 0 : startIndex.clamp(0, _playlist.length - 1);
     notifyListeners();
     await _loadCurrent();
   }
 
+  void updateTrackByPath(String path, TrackItem updated) {
+    final i = _playlist.indexWhere((t) => t.filePath == path);
+    if (i < 0) return;
+    _playlist[i] = updated;
+    notifyListeners();
+  }
+
   Future<void> jumpToIndex(int i, {bool autoPlay = true}) async {
     if (i < 0 || i >= _playlist.length) return;
-    _index = i;
+    if (_shuffle) {
+      _shuffleOrder.remove(i);
+      final rest = List<int>.generate(_playlist.length, (j) => j)
+        ..remove(i)
+        ..shuffle();
+      _shuffleOrder = [i, ...rest];
+      _shufflePos = 0;
+    } else {
+      _index = i;
+    }
     notifyListeners();
     await _loadCurrent();
     if (autoPlay) {
@@ -61,10 +128,13 @@ class PlayerController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    _isLoadingSource = true;
     try {
       await _player.setFilePath(path);
     } catch (e, st) {
       debugPrint('Playback load error: $e\n$st');
+    } finally {
+      _isLoadingSource = false;
     }
     notifyListeners();
   }
@@ -83,9 +153,34 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> seek(Duration position) => _player.seek(position);
 
+  /// Next track; at end pauses unless [PlaylistRepeatMode.all].
   Future<void> skipNext() async {
     if (_playlist.isEmpty) return;
-    _index = (_index + 1) % _playlist.length;
+
+    final atLast = _shuffle
+        ? _shufflePos >= _shuffleOrder.length - 1
+        : _index >= _playlist.length - 1;
+
+    if (atLast) {
+      if (_repeat == PlaylistRepeatMode.all) {
+        if (_shuffle) {
+          _shufflePos = 0;
+        } else {
+          _index = 0;
+        }
+      } else {
+        await _player.pause();
+        notifyListeners();
+        return;
+      }
+    } else {
+      if (_shuffle) {
+        _shufflePos++;
+      } else {
+        _index++;
+      }
+    }
+
     notifyListeners();
     await _loadCurrent();
     await _player.play();
@@ -93,15 +188,65 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> skipPrevious() async {
     if (_playlist.isEmpty) return;
-    _index = (_index - 1 + _playlist.length) % _playlist.length;
+
+    final atFirst = _shuffle ? _shufflePos <= 0 : _index <= 0;
+
+    if (atFirst) {
+      if (_repeat == PlaylistRepeatMode.all) {
+        if (_shuffle) {
+          _shufflePos = _shuffleOrder.length - 1;
+        } else {
+          _index = _playlist.length - 1;
+        }
+      } else {
+        await _player.seek(Duration.zero);
+        notifyListeners();
+        return;
+      }
+    } else {
+      if (_shuffle) {
+        _shufflePos--;
+      } else {
+        _index--;
+      }
+    }
+
     notifyListeners();
     await _loadCurrent();
     await _player.play();
   }
 
+  void toggleShuffle() {
+    if (_playlist.length < 2) return;
+    if (_shuffle) {
+      _index = _shuffleOrder[_shufflePos];
+      _shuffle = false;
+      _shuffleOrder = [];
+      _shufflePos = 0;
+    } else {
+      final cur = _index;
+      final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
+      order.remove(cur);
+      _shuffleOrder = [cur, ...order];
+      _shufflePos = 0;
+      _shuffle = true;
+    }
+    notifyListeners();
+  }
+
+  void cycleRepeatMode() {
+    _repeat = switch (_repeat) {
+      PlaylistRepeatMode.off => PlaylistRepeatMode.all,
+      PlaylistRepeatMode.all => PlaylistRepeatMode.one,
+      PlaylistRepeatMode.one => PlaylistRepeatMode.off,
+    };
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _playerStateSub.cancel();
+    _processingSub.cancel();
     _player.dispose();
     super.dispose();
   }

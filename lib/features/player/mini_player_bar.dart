@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
+import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
 
 class MiniPlayerBar extends StatelessWidget {
@@ -33,18 +34,46 @@ class MiniPlayerBar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Row(
                 children: [
-                  _ArtThumb(colors: track.artColors),
+                  ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      return _ArtThumb(track: controller.currentTrack!);
+                    },
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      track.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(fontSize: 15),
+                    child: ListenableBuilder(
+                      listenable: controller,
+                      builder: (context, _) {
+                        final t = controller.currentTrack!;
+                        return Text(
+                          t.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(fontSize: 15),
+                        );
+                      },
                     ),
+                  ),
+                  ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      return IconButton(
+                        tooltip: 'Shuffle',
+                        icon: Icon(
+                          Icons.shuffle_rounded,
+                          color: controller.shuffleEnabled
+                              ? AppColors.navy
+                              : AppColors.textSecondary,
+                        ),
+                        onPressed: controller.playlist.length < 2
+                            ? null
+                            : () => controller.toggleShuffle(),
+                      );
+                    },
                   ),
                   IconButton(
                     icon: const Icon(Icons.skip_previous_rounded),
@@ -70,6 +99,24 @@ class MiniPlayerBar extends StatelessWidget {
                     color: AppColors.textPrimary,
                     onPressed: () => controller.skipNext(),
                   ),
+                  ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      final mode = controller.repeatMode;
+                      return IconButton(
+                        tooltip: 'Repeat',
+                        icon: Icon(
+                          mode == PlaylistRepeatMode.one
+                              ? Icons.repeat_one_rounded
+                              : Icons.repeat_rounded,
+                          color: mode == PlaylistRepeatMode.off
+                              ? AppColors.textSecondary.withOpacity(0.55)
+                              : AppColors.navy,
+                        ),
+                        onPressed: () => controller.cycleRepeatMode(),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
@@ -84,7 +131,8 @@ class MiniPlayerBar extends StatelessWidget {
                       final dur = durSnap.data ?? controller.duration;
                       final pos = posSnap.data ?? controller.position;
                       final total = dur?.inMilliseconds ?? 0;
-                      final p = total > 0 ? (pos.inMilliseconds / total).clamp(0.0, 1.0) : 0.0;
+                      final p =
+                          total > 0 ? (pos.inMilliseconds / total).clamp(0.0, 1.0) : 0.0;
                       return ClipRRect(
                         borderRadius: BorderRadius.circular(2),
                         child: LinearProgressIndicator(
@@ -107,12 +155,29 @@ class MiniPlayerBar extends StatelessWidget {
 }
 
 class _ArtThumb extends StatelessWidget {
-  const _ArtThumb({required this.colors});
+  const _ArtThumb({required this.track});
 
-  final List<Color> colors;
+  final TrackItem track;
 
   @override
   Widget build(BuildContext context) {
+    final bytes = track.albumArtBytes;
+    if (bytes != null && bytes.isNotEmpty) {
+      return ClipOval(
+        child: Image.memory(
+          bytes,
+          width: 48,
+          height: 48,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => _gradientCircle(),
+        ),
+      );
+    }
+    return _gradientCircle();
+  }
+
+  Widget _gradientCircle() {
     return Container(
       width: 48,
       height: 48,
@@ -121,11 +186,11 @@ class _ArtThumb extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: colors,
+          colors: track.artColors,
         ),
         boxShadow: [
           BoxShadow(
-            color: colors.first.withOpacity(0.35),
+            color: track.artColors.first.withOpacity(0.35),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),

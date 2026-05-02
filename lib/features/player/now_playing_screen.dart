@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
+import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
 
 String _formatDuration(Duration d) {
@@ -116,7 +117,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                       padding: const EdgeInsets.fromLTRB(24, 32, 24, 28),
                       child: Column(
                         children: [
-                          _AlbumArt(colors: t.artColors),
+                          _AlbumArt(track: t),
                           const SizedBox(height: 32),
                           Text(
                             t.title,
@@ -176,6 +177,42 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               );
                             },
                           ),
+                          const SizedBox(height: 12),
+                          ListenableBuilder(
+                            listenable: player,
+                            builder: (context, _) {
+                              return Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Shuffle',
+                                    icon: Icon(
+                                      Icons.shuffle_rounded,
+                                      color: player.shuffleEnabled
+                                          ? AppColors.navy
+                                          : AppColors.textSecondary,
+                                    ),
+                                    onPressed: player.playlist.length < 2
+                                        ? null
+                                        : () => player.toggleShuffle(),
+                                  ),
+                                  const SizedBox(width: 24),
+                                  IconButton(
+                                    tooltip: 'Repeat mode',
+                                    icon: Icon(
+                                      player.repeatMode == PlaylistRepeatMode.one
+                                          ? Icons.repeat_one_rounded
+                                          : Icons.repeat_rounded,
+                                      color: player.repeatMode == PlaylistRepeatMode.off
+                                          ? AppColors.textSecondary.withOpacity(0.55)
+                                          : AppColors.navy,
+                                    ),
+                                    onPressed: () => player.cycleRepeatMode(),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                           const SizedBox(height: 8),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -209,7 +246,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                   ),
                                   onPressed: () => player.togglePlayPause(),
                                   icon: Icon(
-                                    player.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                    player.isPlaying
+                                        ? Icons.pause_rounded
+                                        : Icons.play_arrow_rounded,
                                   ),
                                 ),
                               ),
@@ -222,8 +261,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 28),
-                          _StatsRow(theme: theme),
                         ],
                       ),
                     );
@@ -239,13 +276,45 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 }
 
 class _AlbumArt extends StatelessWidget {
-  const _AlbumArt({required this.colors});
+  const _AlbumArt({required this.track});
 
-  final List<Color> colors;
+  final TrackItem track;
 
   @override
   Widget build(BuildContext context) {
     const size = 280.0;
+    final bytes = track.albumArtBytes;
+    if (bytes != null && bytes.isNotEmpty) {
+      return Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(32),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.12),
+              blurRadius: 28,
+              offset: const Offset(0, 18),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(32),
+          child: Image.memory(
+            bytes,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => _gradientPlaceholder(size),
+          ),
+        ),
+      );
+    }
+    return _gradientPlaceholder(size);
+  }
+
+  Widget _gradientPlaceholder(double size) {
     return Container(
       width: size,
       height: size,
@@ -254,11 +323,11 @@ class _AlbumArt extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: colors,
+          colors: track.artColors,
         ),
         boxShadow: [
           BoxShadow(
-            color: colors.last.withOpacity(0.45),
+            color: track.artColors.last.withOpacity(0.45),
             blurRadius: 28,
             offset: const Offset(0, 18),
           ),
@@ -269,36 +338,6 @@ class _AlbumArt extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _StatsRow extends StatelessWidget {
-  const _StatsRow({required this.theme});
-
-  final ThemeData theme;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget chip(IconData icon, String label) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: AppColors.textSecondary),
-          const SizedBox(width: 4),
-          Text(label, style: theme.textTheme.labelSmall),
-        ],
-      );
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        chip(Icons.keyboard_arrow_up_rounded, '201'),
-        chip(Icons.repeat_rounded, '18'),
-        chip(Icons.play_arrow_rounded, '2,004'),
-        Icon(Icons.add_rounded, color: AppColors.textSecondary, size: 22),
-      ],
     );
   }
 }

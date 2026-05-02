@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
@@ -6,6 +7,7 @@ import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/storage_access.dart';
+import '../../services/track_metadata.dart';
 import '../player/mini_player_bar.dart';
 import '../player/now_playing_screen.dart';
 
@@ -70,6 +72,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
     setState(() => _folderPath = normalized);
     await player.setPlaylist(tracks, startIndex: 0);
     await player.play();
+
+    if (!kIsWeb && mounted) {
+      enrichPlaylistTracks(
+        tracks: tracks,
+        onTrackUpdated: player.updateTrackByPath,
+      ).catchError((Object e, StackTrace st) {
+        debugPrint('enrichPlaylistTracks: $e\n$st');
+      });
+    }
   }
 
   String? _normalizePickPath(String raw) {
@@ -287,18 +298,7 @@ class _TrackTile extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: LinearGradient(
-                    colors: track.artColors,
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-              ),
+              _TrackListArt(track: track),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -341,6 +341,46 @@ class _TrackTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TrackListArt extends StatelessWidget {
+  const _TrackListArt({required this.track});
+
+  final TrackItem track;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = track.albumArtBytes;
+    if (bytes != null && bytes.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Image.memory(
+          bytes,
+          width: 56,
+          height: 56,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => _gradientBox(),
+        ),
+      );
+    }
+    return _gradientBox();
+  }
+
+  Widget _gradientBox() {
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: track.artColors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
       ),
     );
