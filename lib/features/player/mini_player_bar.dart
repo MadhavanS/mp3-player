@@ -1,0 +1,136 @@
+import 'package:flutter/material.dart';
+
+import '../../audio/player_controller.dart';
+import '../../theme/app_theme.dart';
+
+class MiniPlayerBar extends StatelessWidget {
+  const MiniPlayerBar({
+    super.key,
+    required this.controller,
+    required this.onTap,
+  });
+
+  final PlayerController controller;
+  final VoidCallback onTap;
+
+  static const double _radius = 28;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final track = controller.currentTrack;
+    if (track == null) return const SizedBox.shrink();
+
+    return Material(
+      color: AppColors.surface,
+      elevation: 12,
+      shadowColor: Colors.black26,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(_radius)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(_radius)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              child: Row(
+                children: [
+                  _ArtThumb(colors: track.artColors),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(fontSize: 15),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.skip_previous_rounded),
+                    color: AppColors.textPrimary,
+                    onPressed: () => controller.skipPrevious(),
+                  ),
+                  ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      final playing = controller.isPlaying;
+                      return IconButton.filled(
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.navy,
+                          foregroundColor: AppColors.surface,
+                        ),
+                        onPressed: () => controller.togglePlayPause(),
+                        icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.skip_next_rounded),
+                    color: AppColors.textPrimary,
+                    onPressed: () => controller.skipNext(),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+              child: StreamBuilder<Duration>(
+                stream: controller.audioPlayer.positionStream,
+                builder: (context, posSnap) {
+                  return StreamBuilder<Duration?>(
+                    stream: controller.audioPlayer.durationStream,
+                    builder: (context, durSnap) {
+                      final dur = durSnap.data ?? controller.duration;
+                      final pos = posSnap.data ?? controller.position;
+                      final total = dur?.inMilliseconds ?? 0;
+                      final p = total > 0 ? (pos.inMilliseconds / total).clamp(0.0, 1.0) : 0.0;
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: p,
+                          minHeight: 2,
+                          backgroundColor: AppColors.textMuted.withOpacity(0.25),
+                          color: AppColors.navy.withOpacity(0.7),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ArtThumb extends StatelessWidget {
+  const _ArtThumb({required this.colors});
+
+  final List<Color> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: colors,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: colors.first.withOpacity(0.35),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+    );
+  }
+}
