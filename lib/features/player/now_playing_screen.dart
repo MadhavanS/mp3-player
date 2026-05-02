@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../audio/player_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/track_album_art.dart';
+import 'edit_track_tags_sheet.dart';
 
 String _formatDuration(Duration d) {
   final m = d.inMinutes;
@@ -55,9 +56,20 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.more_horiz_rounded),
+                    icon: const Icon(Icons.edit_note_rounded),
                     color: AppColors.textOnNavy,
-                    onPressed: () {},
+                    tooltip: 'Edit tags & cover',
+                    onPressed: track.filePath == null || track.filePath!.isEmpty
+                        ? null
+                        : () {
+                            showModalBottomSheet<void>(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: AppColors.surface,
+                              showDragHandle: false,
+                              builder: (ctx) => EditTrackTagsSheet(track: track),
+                            );
+                          },
                   ),
                   Expanded(
                     child: Column(

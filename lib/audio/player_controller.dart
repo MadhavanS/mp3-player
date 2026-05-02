@@ -139,6 +139,11 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Reload the current file from disk (e.g. after embedded tags were rewritten).
+  Future<void> reloadCurrentSource() async {
+    await _loadCurrent();
+  }
+
   Future<void> play() => _player.play();
 
   Future<void> pause() => _player.pause();
