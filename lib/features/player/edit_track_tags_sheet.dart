@@ -219,7 +219,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.textMuted.withValues(alpha: 0.4),
+                    color: context.palette.textMuted.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -232,7 +232,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
               const SizedBox(height: 4),
               Text(
                 'Changes are written into the MP3 file.',
-                style: theme.textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+                style: theme.textTheme.bodySmall?.copyWith(color: context.palette.textSecondary),
               ),
               const SizedBox(height: 20),
               Center(
@@ -250,11 +250,11 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                           : Container(
                               width: 120,
                               height: 120,
-                              color: AppColors.navy.withValues(alpha: 0.08),
+                              color: context.palette.primary.withValues(alpha: 0.12),
                               child: Icon(
                                 Icons.album_outlined,
                                 size: 48,
-                                color: AppColors.textSecondary.withValues(alpha: 0.6),
+                                color: context.palette.textSecondary.withValues(alpha: 0.6),
                               ),
                             ),
                     ),

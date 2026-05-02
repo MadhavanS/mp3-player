@@ -40,8 +40,9 @@ class LibraryScreen extends StatelessWidget {
       builder: (context, _) {
         final tracks = player.playlist;
 
+        final pal = context.palette;
         return ColoredBox(
-          color: AppColors.navy,
+          color: pal.scaffoldBackground,
           child: SafeArea(
             child: Column(
               children: [
@@ -51,7 +52,7 @@ class LibraryScreen extends StatelessWidget {
                     children: [
                       IconButton(
                         icon: const Icon(Icons.menu_rounded),
-                        color: AppColors.textOnNavy,
+                        color: pal.onScaffold,
                         tooltip: 'Open menu',
                         onPressed: onOpenDrawer,
                       ),
@@ -60,7 +61,7 @@ class LibraryScreen extends StatelessWidget {
                           kLibraryMainTitle,
                           textAlign: TextAlign.center,
                           style: theme.textTheme.titleMedium?.copyWith(
-                            color: AppColors.textOnNavy,
+                            color: pal.onScaffold,
                             fontWeight: FontWeight.w600,
                             fontSize: 15,
                           ),
@@ -78,7 +79,7 @@ class LibraryScreen extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: AppColors.textMuted.withOpacity(0.95),
+                        color: pal.textMuted.withValues(alpha: 0.95),
                       ),
                     ),
                   ),
@@ -99,6 +100,7 @@ class LibraryScreen extends StatelessWidget {
     List<TrackItem> tracks,
     PlayerController player,
   ) {
+    final pal = context.palette;
     if (tracks.isEmpty) {
       return Center(
         child: Padding(
@@ -109,13 +111,13 @@ class LibraryScreen extends StatelessWidget {
               Icon(
                 Icons.library_music_outlined,
                 size: 56,
-                color: AppColors.textOnNavy.withOpacity(0.5),
+                color: pal.onScaffold.withValues(alpha: 0.5),
               ),
               const SizedBox(height: 16),
               Text(
                 'No tracks yet',
                 style: theme.textTheme.titleMedium?.copyWith(
-                  color: AppColors.textOnNavy,
+                  color: pal.onScaffold,
                 ),
               ),
               const SizedBox(height: 8),
@@ -123,7 +125,7 @@ class LibraryScreen extends StatelessWidget {
                 'Open the menu and go to Settings to add folders. MP3 files are scanned recursively.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: AppColors.textSecondary.withOpacity(0.9),
+                  color: pal.textSecondary.withValues(alpha: 0.9),
                 ),
               ),
             ],
@@ -135,9 +137,9 @@ class LibraryScreen extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 8),
       itemCount: tracks.length,
-      separatorBuilder: (_, __) => const Divider(
+      separatorBuilder: (_, __) => Divider(
         height: 1,
-        color: Color(0x22FFFFFF),
+        color: pal.dividerOnHero,
         indent: 88,
       ),
       itemBuilder: (context, i) {
@@ -167,9 +169,10 @@ class _TrackTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final pal = context.palette;
 
     return Material(
-      color: selected ? Colors.white.withOpacity(0.06) : Colors.transparent,
+      color: selected ? pal.onScaffold.withValues(alpha: 0.08) : Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(
@@ -186,7 +189,7 @@ class _TrackTile extends StatelessWidget {
                     Text(
                       '${track.metaLine} · ${track.genres}',
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: AppColors.textMuted.withOpacity(0.9),
+                        color: pal.textMuted.withValues(alpha: 0.9),
                         fontSize: 10,
                       ),
                     ),
@@ -196,7 +199,7 @@ class _TrackTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleMedium?.copyWith(
-                        color: AppColors.textOnNavy,
+                        color: pal.onScaffold,
                         fontSize: 15,
                       ),
                     ),
@@ -206,7 +209,7 @@ class _TrackTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary.withOpacity(0.95),
+                        color: pal.textSecondary.withValues(alpha: 0.95),
                         fontSize: 13,
                       ),
                     ),
@@ -215,7 +218,7 @@ class _TrackTile extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.more_horiz_rounded),
-                color: AppColors.textOnNavy.withOpacity(0.8),
+                color: pal.onScaffold.withValues(alpha: 0.8),
                 onPressed: () {},
               ),
             ],

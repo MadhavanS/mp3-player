@@ -19,11 +19,12 @@ class MiniPlayerBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final pal = context.palette;
     final track = controller.currentTrack;
     if (track == null) return const SizedBox.shrink();
 
     return Material(
-      color: AppColors.surface,
+      color: pal.surface,
       elevation: 12,
       shadowColor: Colors.black26,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(_radius)),
@@ -63,7 +64,7 @@ class MiniPlayerBar extends StatelessWidget {
                   ),
                   IconButton(
                     icon: const Icon(Icons.skip_previous_rounded),
-                    color: AppColors.textPrimary,
+                    color: pal.textPrimary,
                     onPressed: () => controller.skipPrevious(),
                   ),
                   ListenableBuilder(
@@ -72,8 +73,8 @@ class MiniPlayerBar extends StatelessWidget {
                       final playing = controller.isPlaying;
                       return IconButton.filled(
                         style: IconButton.styleFrom(
-                          backgroundColor: AppColors.navy,
-                          foregroundColor: AppColors.surface,
+                          backgroundColor: pal.primary,
+                          foregroundColor: pal.surface,
                         ),
                         onPressed: () => controller.togglePlayPause(),
                         icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),
@@ -82,7 +83,7 @@ class MiniPlayerBar extends StatelessWidget {
                   ),
                   IconButton(
                     icon: const Icon(Icons.skip_next_rounded),
-                    color: AppColors.textPrimary,
+                    color: pal.textPrimary,
                     onPressed: () => controller.skipNext(),
                   ),
                 ],
@@ -106,8 +107,8 @@ class MiniPlayerBar extends StatelessWidget {
                         child: LinearProgressIndicator(
                           value: p,
                           minHeight: 2,
-                          backgroundColor: AppColors.textMuted.withOpacity(0.25),
-                          color: AppColors.navy.withOpacity(0.7),
+                          backgroundColor: pal.textMuted.withValues(alpha: 0.25),
+                          color: pal.primary.withValues(alpha: 0.7),
                         ),
                       );
                     },

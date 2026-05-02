@@ -96,7 +96,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: context.palette.surface,
       showDragHandle: false,
       builder: (ctx) => EditTrackTagsSheet(track: t),
     );
@@ -105,6 +105,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final pal = context.palette;
     const sheetRadius = 36.0;
     final player = PlayerController.of(context);
 
@@ -120,9 +121,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         }
 
         return Scaffold(
-          backgroundColor: AppColors.surface,
+          backgroundColor: pal.surface,
           appBar: AppBar(
-            backgroundColor: AppColors.surface,
+            backgroundColor: pal.surface,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             leading: IconButton(
@@ -137,7 +138,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 child: Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
-                    color: AppColors.surface,
+                    color: pal.surface,
                     borderRadius:
                         const BorderRadius.vertical(top: Radius.circular(sheetRadius)),
                     boxShadow: [
@@ -172,7 +173,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                 width: 44,
                                 height: 5,
                                 decoration: BoxDecoration(
-                                  color: AppColors.textMuted.withValues(alpha: 0.4),
+                                  color: pal.textMuted.withValues(alpha: 0.4),
                                   borderRadius: BorderRadius.circular(3),
                                 ),
                               ),
@@ -285,8 +286,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                 icon: Icon(
                                                   Icons.shuffle_rounded,
                                                   color: player.shuffleEnabled
-                                                      ? AppColors.navy
-                                                      : AppColors.textSecondary,
+                                                      ? pal.primary
+                                                      : pal.textSecondary,
                                                 ),
                                                 onPressed: player.playlist.length < 2
                                                     ? null
@@ -298,8 +299,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                 icon: Icon(
                                                   Icons.edit_note_rounded,
                                                   color: canEdit
-                                                      ? AppColors.navy
-                                                      : AppColors.textSecondary
+                                                      ? pal.primary
+                                                      : pal.textSecondary
                                                           .withValues(alpha: 0.45),
                                                 ),
                                                 onPressed: canEdit
@@ -315,9 +316,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                       : Icons.repeat_rounded,
                                                   color: player.repeatMode ==
                                                           PlaylistRepeatMode.off
-                                                      ? AppColors.textSecondary
+                                                      ? pal.textSecondary
                                                           .withValues(alpha: 0.55)
-                                                      : AppColors.navy,
+                                                      : pal.primary,
                                                 ),
                                                 onPressed: () => player.cycleRepeatMode(),
                                               ),
@@ -332,13 +333,13 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                           IconButton(
                                             iconSize: 36,
                                             icon: const Icon(Icons.skip_previous_rounded),
-                                            color: AppColors.textPrimary,
+                                            color: pal.textPrimary,
                                             onPressed: () => player.skipPrevious(),
                                           ),
                                           const SizedBox(width: 20),
                                           Container(
                                             decoration: BoxDecoration(
-                                              color: AppColors.surface,
+                                              color: pal.surface,
                                               shape: BoxShape.circle,
                                               boxShadow: [
                                                 BoxShadow(
@@ -352,8 +353,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                             child: IconButton.filled(
                                               iconSize: 40,
                                               style: IconButton.styleFrom(
-                                                backgroundColor: AppColors.surface,
-                                                foregroundColor: AppColors.textSecondary,
+                                                backgroundColor: pal.surface,
+                                                foregroundColor: pal.textSecondary,
                                                 padding: const EdgeInsets.all(20),
                                                 elevation: 0,
                                               ),
@@ -369,7 +370,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                           IconButton(
                                             iconSize: 36,
                                             icon: const Icon(Icons.skip_next_rounded),
-                                            color: AppColors.textPrimary,
+                                            color: pal.textPrimary,
                                             onPressed: () => player.skipNext(),
                                           ),
                                         ],

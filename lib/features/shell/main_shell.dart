@@ -15,7 +15,14 @@ import '../settings/settings_screen.dart';
 enum _ShellPage { library, settings }
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  const MainShell({
+    super.key,
+    required this.themeSetting,
+    required this.onThemeSettingChanged,
+  });
+
+  final AppThemeSetting themeSetting;
+  final ValueChanged<AppThemeSetting> onThemeSettingChanged;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -158,11 +165,13 @@ class _MainShellState extends State<MainShell> {
       builder: (context, _) {
         final current = player.currentTrack;
 
+        final pal = context.palette;
+
         return Scaffold(
           key: _scaffoldKey,
-          backgroundColor: AppColors.navy,
+          backgroundColor: pal.scaffoldBackground,
           drawer: Drawer(
-            backgroundColor: AppColors.surface,
+            backgroundColor: pal.surface,
             child: SafeArea(
               child: ListView(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -172,7 +181,7 @@ class _MainShellState extends State<MainShell> {
                     child: Text(
                       'MP3 Player',
                       style: theme.textTheme.titleLarge?.copyWith(
-                        color: AppColors.navy,
+                        color: pal.primary,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -219,6 +228,8 @@ class _MainShellState extends State<MainShell> {
                             folderPaths: _folderPaths,
                             onFoldersChanged: _onFoldersChanged,
                             onOpenDrawer: _openDrawer,
+                            themeSetting: widget.themeSetting,
+                            onThemeSettingChanged: widget.onThemeSettingChanged,
                           ),
                   ),
                   if (current != null)
@@ -229,11 +240,13 @@ class _MainShellState extends State<MainShell> {
                 ],
               ),
               if (_scanning)
-                const Positioned.fill(
+                Positioned.fill(
                   child: DecoratedBox(
-                    decoration: BoxDecoration(color: Color(0x33000000)),
+                    decoration: const BoxDecoration(color: Color(0x33000000)),
                     child: Center(
-                      child: CircularProgressIndicator(color: AppColors.surface),
+                      child: CircularProgressIndicator(
+                        color: context.palette.surface,
+                      ),
                     ),
                   ),
                 ),

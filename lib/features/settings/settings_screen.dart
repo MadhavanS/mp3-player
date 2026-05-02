@@ -10,11 +10,15 @@ class SettingsScreen extends StatefulWidget {
     required this.folderPaths,
     required this.onFoldersChanged,
     required this.onOpenDrawer,
+    required this.themeSetting,
+    required this.onThemeSettingChanged,
   });
 
   final List<String> folderPaths;
   final Future<void> Function(List<String> paths) onFoldersChanged;
   final VoidCallback onOpenDrawer;
+  final AppThemeSetting themeSetting;
+  final ValueChanged<AppThemeSetting> onThemeSettingChanged;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -85,10 +89,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final pal = context.palette;
     final paths = widget.folderPaths;
 
     return ColoredBox(
-      color: AppColors.navy,
+      color: pal.scaffoldBackground,
       child: SafeArea(
         child: Stack(
           children: [
@@ -101,15 +106,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       IconButton(
                         icon: const Icon(Icons.menu_rounded),
-                        color: AppColors.textOnNavy,
+                        color: pal.onScaffold,
                         tooltip: 'Open menu',
                         onPressed: widget.onOpenDrawer,
                       ),
                       Expanded(
                         child: Text(
-                          'Music folders',
+                          'Settings',
                           style: theme.textTheme.titleLarge?.copyWith(
-                            color: AppColors.textOnNavy,
+                            color: pal.onScaffold,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -117,81 +122,139 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'Add directories to scan for MP3 files. Paths are saved and loaded when you open the app.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary.withOpacity(0.95),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
                 Expanded(
-                  child: paths.isEmpty
-                      ? Center(
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    children: [
+                      Text(
+                        'Theme',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: pal.onScaffold,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Automatic follows the device clock (light 6:00 a.m.–7:59 p.m., dark otherwise).',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: pal.onScaffold.withValues(alpha: 0.75),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...AppThemeSetting.values.map((s) {
+                        final selected = widget.themeSetting == s;
+                        return ListTile(
+                          onTap: _busy
+                              ? null
+                              : () => widget.onThemeSettingChanged(s),
+                          leading: Icon(
+                            selected
+                                ? Icons.check_circle_rounded
+                                : Icons.circle_outlined,
+                            color: selected ? pal.primary : pal.onScaffold.withValues(alpha: 0.45),
+                          ),
+                          title: Text(
+                            s.label,
+                            style: TextStyle(
+                              color: pal.onScaffold,
+                              fontWeight:
+                                  selected ? FontWeight.w600 : FontWeight.w500,
+                            ),
+                          ),
+                          subtitle: Text(
+                            s.subtitle,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: pal.onScaffold.withValues(alpha: 0.65),
+                            ),
+                          ),
+                          contentPadding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                        );
+                      }),
+                      const SizedBox(height: 24),
+                      Divider(color: pal.dividerOnHero),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Music folders',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: pal.onScaffold,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Add directories to scan for MP3 files. Paths are saved and loaded when you open the app.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: pal.textSecondary.withValues(alpha: 0.95),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      if (paths.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 24),
                           child: Text(
                             'No folders yet. Tap the button below to add one.',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.bodyLarge?.copyWith(
-                              color: AppColors.textOnNavy.withOpacity(0.75),
+                              color: pal.onScaffold.withValues(alpha: 0.75),
                             ),
                           ),
                         )
-                      : ListView.separated(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          itemCount: paths.length,
-                          separatorBuilder: (_, __) => const Divider(
-                            height: 1,
-                            color: Color(0x22FFFFFF),
-                          ),
-                          itemBuilder: (context, i) {
-                            final path = paths[i];
-                            return ListTile(
-                              title: Text(
-                                p.basename(path),
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  color: AppColors.textOnNavy,
+                      else
+                        ...paths.asMap().entries.map((e) {
+                          final i = e.key;
+                          final path = e.value;
+                          return Column(
+                            children: [
+                              ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  p.basename(path),
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    color: pal.onScaffold,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  path,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: pal.textMuted.withValues(alpha: 0.9),
+                                  ),
+                                ),
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.delete_outline_rounded),
+                                  color: pal.onScaffold.withValues(alpha: 0.85),
+                                  tooltip: 'Remove folder',
+                                  onPressed: _busy ? null : () => _removeAt(i),
                                 ),
                               ),
-                              subtitle: Text(
-                                path,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: AppColors.textMuted.withOpacity(0.9),
-                                ),
-                              ),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete_outline_rounded),
-                                color: AppColors.textOnNavy.withOpacity(0.85),
-                                tooltip: 'Remove folder',
-                                onPressed: _busy ? null : () => _removeAt(i),
-                              ),
-                            );
-                          },
+                              Divider(height: 1, color: pal.dividerOnHero),
+                            ],
+                          );
+                        }),
+                      const SizedBox(height: 16),
+                      FilledButton.icon(
+                        onPressed: _busy ? null : _addFolder,
+                        icon: const Icon(Icons.create_new_folder_outlined),
+                        label: const Text('Add folder'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: pal.surface,
+                          foregroundColor: pal.primary,
                         ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: FilledButton.icon(
-                    onPressed: _busy ? null : _addFolder,
-                    icon: const Icon(Icons.create_new_folder_outlined),
-                    label: const Text('Add folder'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.surface,
-                      foregroundColor: AppColors.navy,
-                    ),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
                   ),
                 ),
               ],
             ),
             if (_busy)
-              const Positioned.fill(
+              Positioned.fill(
                 child: DecoratedBox(
-                  decoration: BoxDecoration(color: Color(0x33000000)),
+                  decoration: const BoxDecoration(color: Color(0x33000000)),
                   child: Center(
-                    child: CircularProgressIndicator(color: AppColors.surface),
+                    child: CircularProgressIndicator(color: pal.surface),
                   ),
                 ),
               ),
