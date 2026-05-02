@@ -100,6 +100,19 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Replace the playlist entry for [oldPath] with [updated] (new path + tags).
+  /// Reloads the audio source when the renamed file is currently playing.
+  void replaceTrackPath(String oldPath, TrackItem updated) {
+    final i = _playlist.indexWhere((t) => t.filePath == oldPath);
+    if (i < 0) return;
+    final currentPath = currentTrack?.filePath;
+    _playlist[i] = updated;
+    notifyListeners();
+    if (currentPath == oldPath) {
+      unawaited(_loadCurrent());
+    }
+  }
+
   Future<void> jumpToIndex(int i, {bool autoPlay = true}) async {
     if (i < 0 || i >= _playlist.length) return;
     if (_shuffle) {

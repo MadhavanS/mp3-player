@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
+import '../../services/site_audio_rename.dart';
 import '../../services/storage_access.dart';
 import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
@@ -68,6 +69,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   String _pickedCoverMime = 'image/jpeg';
 
   bool _saving = false;
+  bool _siteRenameBusy = false;
 
   @override
   void initState() {
@@ -128,6 +130,187 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       _artEdit = AlbumArtEditKind.keep;
       _pickedCoverBytes = null;
     });
+  }
+
+  Future<void> _previewSiteRename() async {
+    final path = widget.track.filePath;
+    if (path == null || path.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This track has no file path.')),
+      );
+      return;
+    }
+    if (kIsWeb) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This tool needs local files.')),
+      );
+      return;
+    }
+
+    setState(() => _siteRenameBusy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final snap = await readAudioMetadata(widget.track);
+      if (!mounted) return;
+      final albumTag = snap.metaLine == 'mp3' ? null : snap.metaLine;
+      final artistTag =
+          snap.artist == 'Unknown artist' ? '' : snap.artist;
+      final suggestion = computeSiteRename(
+        filePath: path,
+        albumFromTags: albumTag,
+        artistFromTags: artistTag,
+        titleFromTags: snap.title,
+      );
+      if (!mounted) return;
+      if (!suggestion.hasSuggestion) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('No cleaner name was suggested.')),
+        );
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Clean site-style filename'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Uses the same rules as SongsPK Renamer (filename + tags). '
+                  'Review before updating the file.',
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Filename',
+                  style: Theme.of(ctx).textTheme.labelSmall,
+                ),
+                Text(
+                  '${suggestion.originalBasenameWithoutExt}.mp3\n→ ${suggestion.newBasenameWithoutExt}.mp3',
+                  style: Theme.of(ctx).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                Text('Album (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+                Text(suggestion.suggestedAlbum, style: Theme.of(ctx).textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                Text('Title (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+                Text(suggestion.suggestedTitle, style: Theme.of(ctx).textTheme.bodyMedium),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                _title.text = suggestion.suggestedTitle;
+                _album.text = suggestion.suggestedAlbum;
+                Navigator.pop(ctx);
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Filled the form — tap Save to write the file.'),
+                  ),
+                );
+              },
+              child: const Text('Use in editor'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                unawaited(_applySiteRename(suggestion));
+              },
+              child: const Text('Rename & save'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text('Could not analyze file: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _siteRenameBusy = false);
+    }
+  }
+
+  Future<void> _applySiteRename(SiteRenameSuggestion suggestion) async {
+    final path = widget.track.filePath;
+    if (path == null || path.isEmpty) return;
+
+    if (!await ensureCanWriteLibraryFiles(context)) {
+      return;
+    }
+    if (!mounted) return;
+
+    final player = PlayerController.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+
+    setState(() => _saving = true);
+    final wasPlaying = player.isPlaying;
+    final resumePosition = player.position;
+    await player.stopForExternalFileEdit();
+
+    try {
+      var newPath = path;
+      if (suggestion.filenameChanged) {
+        newPath = await renameMp3File(path, suggestion.newBasenameWithoutExt);
+      }
+
+      await writeEmbeddedAudioTags(
+        filePath: newPath,
+        title: suggestion.suggestedTitle,
+        album: suggestion.suggestedAlbum,
+        artist: _artist.text,
+        genre: _genre.text,
+        artEdit: _artEdit,
+        newCoverBytes: _pickedCoverBytes,
+        newCoverMimeType: _pickedCoverMime,
+      );
+
+      final base = TrackItem.fromFilePath(newPath);
+      final refreshed = await readAudioMetadata(base);
+      if (suggestion.filenameChanged) {
+        player.replaceTrackPath(path, refreshed);
+      } else {
+        player.updateTrackByPath(path, refreshed);
+      }
+
+      if (mounted) {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('File renamed and tags updated.')),
+        );
+        Navigator.of(context).pop();
+      }
+      unawaited(_resumePlaybackAfterTagSave(player, wasPlaying, resumePosition));
+    } on StateError catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } on UnsupportedError catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not supported.')));
+      }
+    } on FileSystemException catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not update file. (${e.message})',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _save() async {
@@ -234,7 +417,25 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                 'Changes are written into the MP3 file.',
                 style: theme.textTheme.bodySmall?.copyWith(color: context.palette.textSecondary),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: (_saving || _siteRenameBusy) ? null : _previewSiteRename,
+                  icon: _siteRenameBusy
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: context.palette.primary,
+                          ),
+                        )
+                      : const Icon(Icons.auto_fix_high_outlined, size: 20),
+                  label: const Text('Clean site-style name'),
+                ),
+              ),
+              const SizedBox(height: 16),
               Center(
                 child: Column(
                   children: [
