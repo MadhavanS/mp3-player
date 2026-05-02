@@ -1,33 +1,13 @@
-import 'package:flutter/foundation.dart';
-import 'package:metadata_god/metadata_god.dart';
-
 import '../models/track_item.dart';
+import 'track_metadata_stub.dart' if (dart.library.io) 'track_metadata_io.dart' as impl;
 
-/// Reads tags via [metadata_god] (MP3, M4A, OGG, FLAC).
-Future<TrackItem> readAudioMetadata(TrackItem base) async {
-  final path = base.filePath;
-  if (path == null || path.isEmpty) return base;
+Future<TrackItem> readAudioMetadata(TrackItem base) => impl.readAudioMetadata(base);
 
-  try {
-    final m = await MetadataGod.readMetadata(file: path);
-    return base.withEmbeddedMetadata(
-      title: m.title,
-      artist: m.artist ?? m.albumArtist,
-      album: m.album,
-      genre: m.genre,
-      albumArtBytes: m.picture?.data,
-    );
-  } catch (e, st) {
-    debugPrint('readAudioMetadata: $e\n$st');
-    return base;
-  }
-}
-
-/// Loads metadata in small batches to avoid starving the UI isolate.
+/// Loads metadata in small batches to avoid UI jank from large cover extraction.
 Future<void> enrichPlaylistTracks({
   required List<TrackItem> tracks,
   required void Function(String path, TrackItem updated) onTrackUpdated,
-  int batchSize = 6,
+  int batchSize = 4,
 }) async {
   final withPath =
       tracks.where((t) => t.filePath != null && t.filePath!.isNotEmpty).toList();

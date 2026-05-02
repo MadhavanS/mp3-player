@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'audio/player_controller.dart';
-import 'features/library/library_screen.dart';
+import 'features/shell/main_shell.dart';
 import 'theme/app_theme.dart';
 
 class Mp3PlayerApp extends StatefulWidget {
@@ -28,7 +28,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
         title: 'MP3 Player',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.material,
-        home: const LibraryScreen(),
+        home: const MainShell(),
       ),
     );
   }

@@ -6,11 +6,17 @@
 // tree, read text, and verify that the values of widget properties are correct.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mp3_player/app.dart';
 import 'package:mp3_player/features/library/library_screen.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+  });
   testWidgets('Library shell smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(const Mp3PlayerApp());
 

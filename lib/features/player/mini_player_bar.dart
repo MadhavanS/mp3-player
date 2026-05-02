@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
-import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/track_album_art.dart';
 
 class MiniPlayerBar extends StatelessWidget {
   const MiniPlayerBar({
@@ -34,13 +34,16 @@ class MiniPlayerBar extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
               child: Row(
                 children: [
                   ListenableBuilder(
                     listenable: controller,
                     builder: (context, _) {
-                      return _ArtThumb(track: controller.currentTrack!);
+                      return TrackAlbumArt(
+                        track: controller.currentTrack!,
+                        display: TrackArtDisplay.mini,
+                      );
                     },
                   ),
                   const SizedBox(width: 12),
@@ -57,23 +60,6 @@ class MiniPlayerBar extends StatelessWidget {
                         );
                       },
                     ),
-                  ),
-                  ListenableBuilder(
-                    listenable: controller,
-                    builder: (context, _) {
-                      return IconButton(
-                        tooltip: 'Shuffle',
-                        icon: Icon(
-                          Icons.shuffle_rounded,
-                          color: controller.shuffleEnabled
-                              ? AppColors.navy
-                              : AppColors.textSecondary,
-                        ),
-                        onPressed: controller.playlist.length < 2
-                            ? null
-                            : () => controller.toggleShuffle(),
-                      );
-                    },
                   ),
                   IconButton(
                     icon: const Icon(Icons.skip_previous_rounded),
@@ -98,24 +84,6 @@ class MiniPlayerBar extends StatelessWidget {
                     icon: const Icon(Icons.skip_next_rounded),
                     color: AppColors.textPrimary,
                     onPressed: () => controller.skipNext(),
-                  ),
-                  ListenableBuilder(
-                    listenable: controller,
-                    builder: (context, _) {
-                      final mode = controller.repeatMode;
-                      return IconButton(
-                        tooltip: 'Repeat',
-                        icon: Icon(
-                          mode == PlaylistRepeatMode.one
-                              ? Icons.repeat_one_rounded
-                              : Icons.repeat_rounded,
-                          color: mode == PlaylistRepeatMode.off
-                              ? AppColors.textSecondary.withOpacity(0.55)
-                              : AppColors.navy,
-                        ),
-                        onPressed: () => controller.cycleRepeatMode(),
-                      );
-                    },
                   ),
                 ],
               ),
@@ -149,52 +117,6 @@ class MiniPlayerBar extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _ArtThumb extends StatelessWidget {
-  const _ArtThumb({required this.track});
-
-  final TrackItem track;
-
-  @override
-  Widget build(BuildContext context) {
-    final bytes = track.albumArtBytes;
-    if (bytes != null && bytes.isNotEmpty) {
-      return ClipOval(
-        child: Image.memory(
-          bytes,
-          width: 48,
-          height: 48,
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-          errorBuilder: (_, __, ___) => _gradientCircle(),
-        ),
-      );
-    }
-    return _gradientCircle();
-  }
-
-  Widget _gradientCircle() {
-    return Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: track.artColors,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: track.artColors.first.withOpacity(0.35),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
       ),
     );
   }

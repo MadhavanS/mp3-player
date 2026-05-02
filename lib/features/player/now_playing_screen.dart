@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
-import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/track_album_art.dart';
 
 String _formatDuration(Duration d) {
   final m = d.inMinutes;
@@ -117,7 +117,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                       padding: const EdgeInsets.fromLTRB(24, 32, 24, 28),
                       child: Column(
                         children: [
-                          _AlbumArt(track: t),
+                          TrackAlbumArt(track: t, display: TrackArtDisplay.full),
                           const SizedBox(height: 32),
                           Text(
                             t.title,
@@ -268,73 +268,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 ),
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AlbumArt extends StatelessWidget {
-  const _AlbumArt({required this.track});
-
-  final TrackItem track;
-
-  @override
-  Widget build(BuildContext context) {
-    const size = 280.0;
-    final bytes = track.albumArtBytes;
-    if (bytes != null && bytes.isNotEmpty) {
-      return Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(32),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.12),
-              blurRadius: 28,
-              offset: const Offset(0, 18),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(32),
-          child: Image.memory(
-            bytes,
-            width: size,
-            height: size,
-            fit: BoxFit.cover,
-            gaplessPlayback: true,
-            errorBuilder: (_, __, ___) => _gradientPlaceholder(size),
-          ),
-        ),
-      );
-    }
-    return _gradientPlaceholder(size);
-  }
-
-  Widget _gradientPlaceholder(double size) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(32),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: track.artColors,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: track.artColors.last.withOpacity(0.45),
-            blurRadius: 28,
-            offset: const Offset(0, 18),
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
           ),
         ],
       ),
