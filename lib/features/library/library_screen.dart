@@ -6,6 +6,7 @@ import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/music_library_path_key.dart';
+import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/track_album_art.dart';
@@ -51,7 +52,7 @@ class LibraryScreenState extends State<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _searchController.addListener(() => setState(() {}));
     _tabController.addListener(_onTabChanged);
   }
@@ -59,7 +60,7 @@ class LibraryScreenState extends State<LibraryScreen>
   void _onTabChanged() {
     if (!mounted) return;
     setState(() {
-      if (!_tabController.indexIsChanging && _tabController.index == 3) {
+      if (!_tabController.indexIsChanging && _tabController.index == 4) {
         _recentListRevision++;
       }
     });
@@ -94,19 +95,77 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   String _searchHintForTab(int i) => switch (i) {
-        0 || 1 => 'Search by title',
-        2 => 'Search favourites',
+        0 || 1 || 2 => 'Search by title',
+        3 => 'Search favourites',
         _ => 'Search recent',
       };
 
-  Future<void> _playRecentPath(BuildContext context, String path) async {
-    final player = PlayerController.of(context);
-    final idx = player.playlist.indexWhere((t) => t.filePath == path);
-    if (idx >= 0) {
-      await player.jumpToIndex(idx);
-    } else {
-      await player.setPlaylistAndPlay([TrackItem.fromFilePath(path)]);
+  List<String> _pathsMatchingBrowse(
+    List<String> paths,
+    Set<String>? browsePathKeys,
+  ) {
+    if (browsePathKeys == null) return paths;
+    if (browsePathKeys.isEmpty) return <String>[];
+    return paths.where((path) {
+      final k = canonicalMusicLibraryPathKey(path);
+      return k.isNotEmpty && browsePathKeys.contains(k);
+    }).toList();
+  }
+
+  List<String> _filterPathsBySearch(
+    List<String> paths,
+    String rawQuery,
+    List<TrackItem> library,
+  ) {
+    final q = rawQuery.trim().toLowerCase();
+    if (q.isEmpty) return paths;
+    return paths.where((path) {
+      final t = _trackForPath(path, library);
+      if (_trackMatchesQuery(t, q)) return true;
+      return p.basenameWithoutExtension(path).toLowerCase().contains(q) ||
+          path.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  /// Resolves a library [TrackItem] for [path] using canonical path keys (stable on Android).
+  static TrackItem _trackForPath(String path, List<TrackItem> library) {
+    final key = canonicalMusicLibraryPathKey(path);
+    if (key.isNotEmpty) {
+      for (final t in library) {
+        final fp = t.filePath;
+        if (fp == null || fp.isEmpty) continue;
+        if (canonicalMusicLibraryPathKey(fp) == key) return t;
+      }
     }
+    return TrackItem.fromFilePath(path);
+  }
+
+  int _playlistIndexForPath(PlayerController player, String path) {
+    final key = canonicalMusicLibraryPathKey(path);
+    if (key.isEmpty) return -1;
+    return player.playlist.indexWhere((t) {
+      final fp = t.filePath;
+      if (fp == null || fp.isEmpty) return false;
+      return canonicalMusicLibraryPathKey(fp) == key;
+    });
+  }
+
+  Future<void> _playOrderedPathsFrom(
+    BuildContext context,
+    List<String> orderedPaths,
+    int startIndex,
+  ) async {
+    if (orderedPaths.isEmpty) return;
+    final player = PlayerController.of(context);
+    final library = player.playlist;
+    final tracks = orderedPaths
+        .map((path) => _trackForPath(path, library))
+        .toList();
+    player.setPlaybackPathKeyScope(null);
+    await player.setPlaylistAndPlay(
+      tracks,
+      startIndex: startIndex.clamp(0, tracks.length - 1),
+    );
   }
 
   static List<int> _playlistIndicesInPathKeySet(
@@ -298,6 +357,7 @@ class LibraryScreenState extends State<LibraryScreen>
                             WidgetStateProperty.all<Color>(Colors.transparent),
                         tabs: const [
                           Tab(text: 'Songs'),
+                          Tab(text: 'Recently added'),
                           Tab(text: 'Playlist'),
                           Tab(text: 'Favourites'),
                           Tab(text: 'Recently played'),
@@ -319,6 +379,14 @@ class LibraryScreenState extends State<LibraryScreen>
                                 ? null
                                 : widget.onClearSongsBrowseFilter,
                           ),
+                          _buildRecentlyAddedTab(
+                            theme,
+                            pal,
+                            query,
+                            player,
+                            tracks,
+                            browsePathKeys,
+                          ),
                           _buildTracksTab(
                             theme,
                             context,
@@ -326,8 +394,15 @@ class LibraryScreenState extends State<LibraryScreen>
                             playlistIndices,
                             player,
                           ),
-                          _buildFavoritesTab(theme, pal, query),
-                          _buildRecentTab(theme, pal, query),
+                          _buildFavoritesTab(
+                            theme,
+                            pal,
+                            query,
+                            player,
+                            tracks,
+                            browsePathKeys,
+                          ),
+                          _buildRecentTab(theme, pal, query, player, tracks, browsePathKeys),
                         ],
                       ),
                     ),
@@ -341,7 +416,14 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  Widget _buildFavoritesTab(ThemeData theme, AppPalette pal, String rawQuery) {
+  Widget _buildFavoritesTab(
+    ThemeData theme,
+    AppPalette pal,
+    String rawQuery,
+    PlayerController player,
+    List<TrackItem> tracks,
+    Set<String>? browsePathKeys,
+  ) {
     return ValueListenableBuilder<int>(
       valueListenable: FavoriteSongsStore.revision,
       builder: (context, _, __) {
@@ -356,17 +438,9 @@ class LibraryScreenState extends State<LibraryScreen>
               );
             }
 
-            List<String> paths = snap.data ?? [];
-            final q = rawQuery.trim().toLowerCase();
-            if (q.isNotEmpty) {
-              paths = paths
-                  .where(
-                    (path) =>
-                        p.basenameWithoutExtension(path).toLowerCase().contains(q) ||
-                        path.toLowerCase().contains(q),
-                  )
-                  .toList();
-            }
+            var paths =
+                _pathsMatchingBrowse(snap.data ?? [], browsePathKeys);
+            paths = _filterPathsBySearch(paths, rawQuery, tracks);
 
             if ((snap.data ?? []).isEmpty) {
               return Center(
@@ -389,7 +463,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Tap the heart next to repeat on Now Playing to add songs here.',
+                        'Tap the heart in the Now Playing footer to add songs here.',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: pal.textSecondary.withValues(alpha: 0.9),
@@ -415,63 +489,100 @@ class LibraryScreenState extends State<LibraryScreen>
               );
             }
 
-            return ListView.separated(
-              padding: const EdgeInsets.only(bottom: 8),
-              itemCount: paths.length,
-              separatorBuilder: (_, __) =>
-                  Divider(height: 1, color: pal.dividerOnHero, indent: 56),
-              itemBuilder: (context, i) {
-                final path = paths[i];
-                final title =
-                    path.isEmpty ? path : p.basenameWithoutExtension(path);
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => _playRecentPath(context, path),
-                    child: Padding(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            backgroundColor: pal.onScaffold.withValues(alpha: 0.1),
-                            child: Icon(
-                              Icons.favorite_rounded,
-                              color: pal.primary.withValues(alpha: 0.9),
-                              size: 22,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    color: pal.onScaffold,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  path,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color:
-                                        pal.textMuted.withValues(alpha: 0.92),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+            return ListenableBuilder(
+              listenable: player,
+              builder: (context, _) {
+                final library = player.playlist;
+                return ListView.separated(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  itemCount: paths.length,
+                  separatorBuilder: (_, __) => Divider(
+                    height: 1,
+                    color: pal.dividerOnHero,
+                    indent: 88,
                   ),
+                  itemBuilder: (context, i) {
+                    final path = paths[i];
+                    final track = _trackForPath(path, library);
+                    final plIndex = _playlistIndexForPath(player, path);
+                    final selected = plIndex >= 0 && plIndex == player.currentIndex;
+                    return Material(
+                      color: selected
+                          ? pal.onScaffold.withValues(alpha: 0.08)
+                          : Colors.transparent,
+                      child: InkWell(
+                        onTap: () => _playOrderedPathsFrom(context, paths, i),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              TrackAlbumArt(
+                                track: track,
+                                display: TrackArtDisplay.list,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      track.genres.isEmpty
+                                          ? track.metaLine
+                                          : '${track.metaLine} · ${track.genres}',
+                                      style: theme.textTheme.labelSmall?.copyWith(
+                                        color: pal.textMuted.withValues(alpha: 0.9),
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      track.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium?.copyWith(
+                                        color: pal.onScaffold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      track.artist,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                        color: pal.textSecondary.withValues(alpha: 0.95),
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (plIndex >= 0)
+                                PopupMenuButton<TrackOverflowAction>(
+                                  tooltip: 'Track options',
+                                  icon: Icon(
+                                    Icons.more_horiz_rounded,
+                                    color: pal.onScaffold.withValues(alpha: 0.8),
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                  onSelected: (action) {
+                                    _onTrackOverflow(context, player, plIndex, action);
+                                  },
+                                  itemBuilder: (context) => trackOverflowPopupMenuEntries(
+                                    enableDeleteFromDevice:
+                                        trackCanDeleteFromDevice(track),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 );
               },
             );
@@ -481,7 +592,236 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  Widget _buildRecentTab(ThemeData theme, AppPalette pal, String rawQuery) {
+  Widget _buildRecentlyAddedTab(
+    ThemeData theme,
+    AppPalette pal,
+    String rawQuery,
+    PlayerController player,
+    List<TrackItem> tracks,
+    Set<String>? browsePathKeys,
+  ) {
+    if (tracks.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.library_music_outlined,
+                size: 56,
+                color: pal.onScaffold.withValues(alpha: 0.5),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'No tracks yet',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: pal.onScaffold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Open the menu and go to Settings to add folders.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textSecondary.withValues(alpha: 0.9),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ValueListenableBuilder<int>(
+      valueListenable: RecentlyAddedStore.revision,
+      builder: (context, _, __) {
+        return FutureBuilder<List<String>>(
+          future: RecentlyAddedStore.orderedPathsForLibrary(tracks),
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return Center(
+                child: CircularProgressIndicator(color: pal.primary),
+              );
+            }
+
+            final baseOrdered = snap.data ?? [];
+            var paths = _pathsMatchingBrowse(baseOrdered, browsePathKeys);
+            paths = _filterPathsBySearch(paths, rawQuery, tracks);
+
+            if (baseOrdered.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.schedule_rounded,
+                        size: 54,
+                        color: pal.onScaffold.withValues(alpha: 0.45),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'Nothing to show yet',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: pal.onScaffold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap refresh in the library header after adding music so new tracks are recorded.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: pal.textSecondary.withValues(alpha: 0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            if (paths.isEmpty) {
+              final hasBrowse = browsePathKeys != null;
+              final q = rawQuery.trim();
+              final message = hasBrowse && q.isEmpty
+                  ? 'No recently added songs in this folder.'
+                  : 'No recently added songs match your search.';
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: pal.textMuted,
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            return ListenableBuilder(
+              listenable: player,
+              builder: (context, _) {
+                final library = player.playlist;
+                return ListView.separated(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  itemCount: paths.length,
+                  separatorBuilder: (_, __) => Divider(
+                    height: 1,
+                    color: pal.dividerOnHero,
+                    indent: 88,
+                  ),
+                  itemBuilder: (context, i) {
+                    final path = paths[i];
+                    final track = _trackForPath(path, library);
+                    final plIndex = _playlistIndexForPath(player, path);
+                    final selected =
+                        plIndex >= 0 && plIndex == player.currentIndex;
+                    return Material(
+                      color: selected
+                          ? pal.onScaffold.withValues(alpha: 0.08)
+                          : Colors.transparent,
+                      child: InkWell(
+                        onTap: () =>
+                            _playOrderedPathsFrom(context, paths, i),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              TrackAlbumArt(
+                                track: track,
+                                display: TrackArtDisplay.list,
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      track.genres.isEmpty
+                                          ? track.metaLine
+                                          : '${track.metaLine} · ${track.genres}',
+                                      style:
+                                          theme.textTheme.labelSmall?.copyWith(
+                                        color:
+                                            pal.textMuted.withValues(alpha: 0.9),
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      track.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style:
+                                          theme.textTheme.titleMedium?.copyWith(
+                                        color: pal.onScaffold,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      track.artist,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style:
+                                          theme.textTheme.bodyMedium?.copyWith(
+                                        color: pal.textSecondary
+                                            .withValues(alpha: 0.95),
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (plIndex >= 0)
+                                PopupMenuButton<TrackOverflowAction>(
+                                  tooltip: 'Track options',
+                                  icon: Icon(
+                                    Icons.more_horiz_rounded,
+                                    color: pal.onScaffold.withValues(alpha: 0.8),
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                  onSelected: (action) {
+                                    _onTrackOverflow(
+                                        context, player, plIndex, action);
+                                  },
+                                  itemBuilder: (context) =>
+                                      trackOverflowPopupMenuEntries(
+                                    enableDeleteFromDevice:
+                                        trackCanDeleteFromDevice(track),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildRecentTab(
+    ThemeData theme,
+    AppPalette pal,
+    String rawQuery,
+    PlayerController player,
+    List<TrackItem> tracks,
+    Set<String>? browsePathKeys,
+  ) {
     return FutureBuilder<List<String>>(
       key: ValueKey(_recentListRevision),
       future: RecentlyPlayedStore.loadPaths(),
@@ -494,17 +834,8 @@ class LibraryScreenState extends State<LibraryScreen>
           );
         }
 
-        List<String> paths = snap.data ?? [];
-        final q = rawQuery.trim().toLowerCase();
-        if (q.isNotEmpty) {
-          paths = paths
-              .where(
-                (path) =>
-                    p.basenameWithoutExtension(path).toLowerCase().contains(q) ||
-                    path.toLowerCase().contains(q),
-              )
-              .toList();
-        }
+        var paths = _pathsMatchingBrowse(snap.data ?? [], browsePathKeys);
+        paths = _filterPathsBySearch(paths, rawQuery, tracks);
 
         if ((snap.data ?? []).isEmpty) {
           return Center(
@@ -540,11 +871,16 @@ class LibraryScreenState extends State<LibraryScreen>
         }
 
         if (paths.isEmpty) {
+          final hasBrowse = browsePathKeys != null;
+          final q = rawQuery.trim();
+          final message = hasBrowse && q.isEmpty
+              ? 'No recent songs in this folder.'
+              : 'No recent songs match your search.';
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(28),
               child: Text(
-                'No recent songs match your search.',
+                message,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: pal.textMuted,
                 ),
@@ -553,64 +889,104 @@ class LibraryScreenState extends State<LibraryScreen>
           );
         }
 
-        return ListView.separated(
-          padding: const EdgeInsets.only(bottom: 8),
-          itemCount: paths.length,
-          separatorBuilder: (_, __) =>
-              Divider(height: 1, color: pal.dividerOnHero, indent: 56),
-          itemBuilder: (context, i) {
-            final path = paths[i];
-            final title =
-                path.isEmpty ? path : p.basenameWithoutExtension(path);
-            return Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () =>
-                    _playRecentPath(context, path),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: pal.onScaffold.withValues(alpha: 0.1),
-                        child: Icon(
-                          Icons.music_note_rounded,
-                          color: pal.onScaffold.withValues(alpha: 0.75),
-                          size: 22,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: pal.onScaffold,
-                                fontSize: 15,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              path,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color:
-                                    pal.textMuted.withValues(alpha: 0.92),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+        return ListenableBuilder(
+          listenable: player,
+          builder: (context, _) {
+            final library = player.playlist;
+            return ListView.separated(
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: paths.length,
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                color: pal.dividerOnHero,
+                indent: 88,
               ),
+              itemBuilder: (context, i) {
+                final path = paths[i];
+                final track = _trackForPath(path, library);
+                final plIndex = _playlistIndexForPath(player, path);
+                final selected =
+                    plIndex >= 0 && plIndex == player.currentIndex;
+                return Material(
+                  color: selected
+                      ? pal.onScaffold.withValues(alpha: 0.08)
+                      : Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _playOrderedPathsFrom(context, paths, i),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          TrackAlbumArt(
+                            track: track,
+                            display: TrackArtDisplay.list,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  track.genres.isEmpty
+                                      ? track.metaLine
+                                      : '${track.metaLine} · ${track.genres}',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: pal.textMuted.withValues(alpha: 0.9),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  track.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: pal.onScaffold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  track.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color:
+                                        pal.textSecondary.withValues(alpha: 0.95),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (plIndex >= 0)
+                            PopupMenuButton<TrackOverflowAction>(
+                              tooltip: 'Track options',
+                              icon: Icon(
+                                Icons.more_horiz_rounded,
+                                color: pal.onScaffold.withValues(alpha: 0.8),
+                              ),
+                              padding: EdgeInsets.zero,
+                              onSelected: (action) {
+                                _onTrackOverflow(
+                                    context, player, plIndex, action);
+                              },
+                              itemBuilder: (context) =>
+                                  trackOverflowPopupMenuEntries(
+                                enableDeleteFromDevice:
+                                    trackCanDeleteFromDevice(track),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             );
           },
         );

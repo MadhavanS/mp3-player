@@ -7,6 +7,7 @@ import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/file_path_mtime_sort.dart';
 import '../../services/mp3_scanner.dart';
+import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/saved_music_folders.dart';
 import '../../services/track_metadata.dart';
@@ -120,6 +121,7 @@ class _MainShellState extends State<MainShell> {
         preservePlaybackAfterRescan ? player.position : Duration.zero;
 
     if (paths.isEmpty) {
+      await RecentlyAddedStore.mergeScanPaths([]);
       await player.setPlaylist([], startIndex: 0);
       return;
     }
@@ -131,6 +133,9 @@ class _MainShellState extends State<MainShell> {
     } finally {
       if (mounted) setState(() => _scanning = false);
     }
+    if (!mounted) return;
+
+    await RecentlyAddedStore.mergeScanPaths(files);
     if (!mounted) return;
 
     if (files.isEmpty) {
