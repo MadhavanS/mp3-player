@@ -276,25 +276,16 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                     child: _NowPlayingAlbumArtCard(
                                       pal: pal,
                                       playerChrome: playerChrome,
-                                      child: TrackAlbumArt(
+                                      theme: theme,
+                                      title: t.title,
+                                      artist: t.artist,
+                                      artwork: TrackAlbumArt(
                                         track: t,
                                         display:
                                             TrackArtDisplay.nowPlaying,
                                         showShadow: false,
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 18),
-                                  Text(
-                                    t.title,
-                                    textAlign: TextAlign.center,
-                                    style: theme.textTheme.titleLarge,
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    t.artist,
-                                    textAlign: TextAlign.center,
-                                    style: theme.textTheme.bodyMedium,
                                   ),
                                   const SizedBox(height: 20),
                                   StreamBuilder<Duration>(
@@ -578,32 +569,65 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 }
 
-/// Elevated surface frame around the hero artwork (reference-style “card”).
+/// Elevated surface frame around hero artwork, title, and artist.
 class _NowPlayingAlbumArtCard extends StatelessWidget {
   const _NowPlayingAlbumArtCard({
     required this.pal,
     required this.playerChrome,
-    required this.child,
+    required this.theme,
+    required this.title,
+    required this.artist,
+    required this.artwork,
   });
 
   final AppPalette pal;
   final bool playerChrome;
-  final Widget child;
+  final ThemeData theme;
+  final String title;
+  final String artist;
+  final Widget artwork;
 
   @override
   Widget build(BuildContext context) {
     final outerR = playerChrome ? 32.0 : 24.0;
-    return Material(
-      color: pal.surface,
-      elevation: playerChrome ? 10 : 5,
-      shadowColor: Colors.black.withValues(
-        alpha: playerChrome ? 0.42 : 0.28,
-      ),
-      borderRadius: BorderRadius.circular(outerR),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: child,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 420),
+      child: Material(
+        color: pal.surface,
+        elevation: playerChrome ? 10 : 5,
+        shadowColor: Colors.black.withValues(
+          alpha: playerChrome ? 0.42 : 0.28,
+        ),
+        borderRadius: BorderRadius.circular(outerR),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(child: artwork),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  height: 1.25,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                artist,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
