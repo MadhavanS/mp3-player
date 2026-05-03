@@ -93,6 +93,62 @@ class PlayerController extends ChangeNotifier {
     await _loadCurrent();
   }
 
+  /// Appends [items] to the current queue. If the queue was empty, loads and starts
+  /// playback at the first appended item.
+  ///
+  /// Shuffle is turned off so indices stay consistent (current song keeps playing).
+  Future<void> appendToPlaylist(List<TrackItem> items) async {
+    if (items.isEmpty) return;
+    if (_shuffle && _playlist.isNotEmpty) {
+      _index = _shuffleOrder[_shufflePos].clamp(0, _playlist.length - 1);
+      _shuffle = false;
+      _shuffleOrder = [];
+      _shufflePos = 0;
+    }
+    final wasEmpty = _playlist.isEmpty;
+    _playlist = [..._playlist, ...items];
+    notifyListeners();
+    if (wasEmpty) {
+      _index = 0;
+      await _loadCurrent();
+      await _player.play();
+    }
+  }
+
+  /// Replaces the queue with [tracks] and starts playback at [startIndex].
+  Future<void> setPlaylistAndPlay(List<TrackItem> tracks, {int startIndex = 0}) async {
+    await setPlaylist(tracks, startIndex: startIndex);
+    await _player.play();
+  }
+
+  static bool _sameQueuedIdentity(TrackItem a, TrackItem b) {
+    final pa = a.filePath;
+    final pb = b.filePath;
+    if (pa != null &&
+        pa.isNotEmpty &&
+        pb != null &&
+        pb.isNotEmpty) {
+      return pa == pb;
+    }
+    return a.title == b.title && a.artist == b.artist;
+  }
+
+  /// Whether [track] is already in the queue (same path or same title + artist).
+  bool isTrackInPlaylist(TrackItem track) =>
+      _playlist.any((t) => _sameQueuedIdentity(t, track));
+
+  /// Appends [track] to the end of the queue only if it is not already present.
+  /// Returns `false` if it was already queued (same file path, or same title + artist
+  /// when paths are missing). Starts playback if the queue was empty and the track
+  /// was added.
+  Future<bool> addToPlaylistIfAbsent(TrackItem track) async {
+    if (_playlist.any((t) => _sameQueuedIdentity(t, track))) {
+      return false;
+    }
+    await appendToPlaylist([track]);
+    return true;
+  }
+
   void updateTrackByPath(String path, TrackItem updated) {
     final i = _playlist.indexWhere((t) => t.filePath == path);
     if (i < 0) return;

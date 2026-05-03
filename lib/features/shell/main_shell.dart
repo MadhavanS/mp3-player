@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
+import '../../services/file_path_mtime_sort.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/saved_music_folders.dart';
 import '../../services/track_metadata.dart';
@@ -50,7 +53,7 @@ class _MainShellState extends State<MainShell> {
     await _scanFoldersAndSetPlaylist(paths, playAfter: false);
   }
 
-  /// Merges MP3 paths from all roots; order is stable (by folder order, then scan order).
+  /// Merges unique MP3 paths from all roots, then sorts by file last-modified (newest first).
   Future<List<String>> _collectMp3Paths(List<String> roots) async {
     final seen = <String>{};
     final out = <String>[];
@@ -60,6 +63,7 @@ class _MainShellState extends State<MainShell> {
         if (seen.add(f)) out.add(f);
       }
     }
+    await sortPathsByModifiedNewestFirst(out);
     return out;
   }
 
@@ -67,9 +71,16 @@ class _MainShellState extends State<MainShell> {
     List<String> paths, {
     required bool playAfter,
     int startIndex = 0,
+    bool preservePlaybackAfterRescan = false,
   }) async {
+    final player = PlayerController.of(context);
+    final pathToPreserve =
+        preservePlaybackAfterRescan ? player.currentTrack?.filePath : null;
+    final wasPlaying = preservePlaybackAfterRescan && player.isPlaying;
+    final playbackPosition =
+        preservePlaybackAfterRescan ? player.position : Duration.zero;
+
     if (paths.isEmpty) {
-      final player = PlayerController.of(context);
       await player.setPlaylist([], startIndex: 0);
       return;
     }
@@ -89,15 +100,35 @@ class _MainShellState extends State<MainShell> {
           content: Text('No .mp3 files found in the saved folders.'),
         ),
       );
-      final player = PlayerController.of(context);
       await player.setPlaylist([], startIndex: 0);
       return;
     }
 
-    final player = PlayerController.of(context);
     final tracks = files.map(TrackItem.fromFilePath).toList();
-    await player.setPlaylist(tracks, startIndex: startIndex.clamp(0, tracks.length - 1));
-    if (playAfter) await player.play();
+    var resolvedStart = startIndex.clamp(0, tracks.length - 1);
+    if (pathToPreserve != null) {
+      final idx = tracks.indexWhere((t) => t.filePath == pathToPreserve);
+      if (idx >= 0) resolvedStart = idx;
+    }
+
+    await player.setPlaylist(tracks, startIndex: resolvedStart);
+
+    if (preservePlaybackAfterRescan && pathToPreserve != null && tracks.isNotEmpty) {
+      final atPath = tracks[resolvedStart].filePath;
+      if (atPath == pathToPreserve && playbackPosition > Duration.zero) {
+        await player.seek(playbackPosition);
+      }
+    }
+
+    if (playAfter) {
+      await player.play();
+    } else if (preservePlaybackAfterRescan) {
+      if (wasPlaying) {
+        await player.play();
+      } else {
+        await player.pause();
+      }
+    }
 
     if (!kIsWeb && mounted) {
       enrichPlaylistTracks(
@@ -114,6 +145,25 @@ class _MainShellState extends State<MainShell> {
     if (!mounted) return;
     setState(() => _folderPaths = List<String>.from(paths));
     await _scanFoldersAndSetPlaylist(paths, playAfter: false);
+  }
+
+  Future<void> _refreshLibraryScan() async {
+    if (_folderPaths.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Add music folders in Settings first.',
+          ),
+        ),
+      );
+      return;
+    }
+    await _scanFoldersAndSetPlaylist(
+      _folderPaths,
+      playAfter: false,
+      preservePlaybackAfterRescan: true,
+    );
   }
 
   void _openDrawer() {
@@ -223,6 +273,12 @@ class _MainShellState extends State<MainShell> {
                         ? LibraryScreen(
                             folderPaths: _folderPaths,
                             onOpenDrawer: _openDrawer,
+                            onRefreshLibrary:
+                                _folderPaths.isEmpty || _scanning
+                                    ? null
+                                    : () {
+                                        unawaited(_refreshLibraryScan());
+                                      },
                           )
                         : SettingsScreen(
                             folderPaths: _folderPaths,

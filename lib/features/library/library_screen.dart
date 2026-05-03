@@ -8,15 +8,19 @@ import '../../widgets/track_album_art.dart';
 
 const String kLibraryMainTitle = 'Poll, Top Tracks this Week';
 
+enum _TrackMenuAction { playFromHere, playOnlyThis, addToPlaylist }
+
 class LibraryScreen extends StatelessWidget {
   const LibraryScreen({
     super.key,
     required this.folderPaths,
     required this.onOpenDrawer,
+    this.onRefreshLibrary,
   });
 
   final List<String> folderPaths;
   final VoidCallback onOpenDrawer;
+  final VoidCallback? onRefreshLibrary;
 
   String get _folderHint {
     if (folderPaths.isEmpty) return '';
@@ -28,6 +32,37 @@ class LibraryScreen extends StatelessWidget {
     final player = PlayerController.of(context);
     if (i < 0 || i >= player.playlist.length) return;
     await player.jumpToIndex(i);
+  }
+
+  Future<void> _onTrackMenu(
+    BuildContext context,
+    PlayerController player,
+    int index,
+    _TrackMenuAction action,
+  ) async {
+    final tracks = List<TrackItem>.from(player.playlist);
+    if (index < 0 || index >= tracks.length) return;
+
+    switch (action) {
+      case _TrackMenuAction.playFromHere:
+        await player.setPlaylistAndPlay(tracks.sublist(index));
+      case _TrackMenuAction.playOnlyThis:
+        await player.setPlaylistAndPlay([tracks[index]]);
+      case _TrackMenuAction.addToPlaylist:
+        final t = tracks[index];
+        final added = await player.addToPlaylistIfAbsent(t);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                added
+                    ? 'Added to playlist: ${t.title}'
+                    : 'Already in playlist: ${t.title}',
+              ),
+            ),
+          );
+        }
+    }
   }
 
   @override
@@ -67,7 +102,12 @@ class LibraryScreen extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 48),
+                      IconButton(
+                        icon: const Icon(Icons.refresh_rounded),
+                        color: pal.onScaffold,
+                        tooltip: 'Refresh library',
+                        onPressed: onRefreshLibrary,
+                      ),
                     ],
                   ),
                 ),
@@ -149,6 +189,7 @@ class LibraryScreen extends StatelessWidget {
           track: track,
           selected: selected,
           onTap: () => _selectTrack(context, i),
+          onMenuAction: (action) => _onTrackMenu(context, player, i, action),
         );
       },
     );
@@ -160,11 +201,13 @@ class _TrackTile extends StatelessWidget {
     required this.track,
     required this.selected,
     required this.onTap,
+    required this.onMenuAction,
   });
 
   final TrackItem track;
   final bool selected;
   final VoidCallback onTap;
+  final void Function(_TrackMenuAction action) onMenuAction;
 
   @override
   Widget build(BuildContext context) {
@@ -218,10 +261,44 @@ class _TrackTile extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.more_horiz_rounded),
-                color: pal.onScaffold.withValues(alpha: 0.8),
-                onPressed: () {},
+              PopupMenuButton<_TrackMenuAction>(
+                tooltip: 'Track options',
+                icon: Icon(
+                  Icons.more_horiz_rounded,
+                  color: pal.onScaffold.withValues(alpha: 0.8),
+                ),
+                padding: EdgeInsets.zero,
+                onSelected: onMenuAction,
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: _TrackMenuAction.playFromHere,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.playlist_play_rounded),
+                      title: Text('Play from here'),
+                      subtitle: Text('New queue: this track to end of list'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _TrackMenuAction.playOnlyThis,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.music_note_rounded),
+                      title: Text('Play this song only'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _TrackMenuAction.addToPlaylist,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.playlist_add_rounded),
+                      title: Text('Add to playlist'),
+                      subtitle: Text(
+                        'Appends to the queue if this song is not already in it',
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
