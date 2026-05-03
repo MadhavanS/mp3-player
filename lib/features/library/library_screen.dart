@@ -199,12 +199,12 @@ class LibraryScreenState extends State<LibraryScreen>
     final theme = Theme.of(context);
     final player = PlayerController.of(context);
 
-    return ValueListenableBuilder<Set<String>?>(
-      valueListenable: widget.songsBrowsePathKeys,
-      builder: (context, browsePathKeys, _) {
-        return ListenableBuilder(
-          listenable: player,
-          builder: (context, _) {
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        return ValueListenableBuilder<Set<String>?>(
+          valueListenable: widget.songsBrowsePathKeys,
+          builder: (context, browsePathKeys, _) {
             final tracks = player.playlist;
             final query = _searchController.text.trim();
             final baseFilteredIndices = tracks.isEmpty

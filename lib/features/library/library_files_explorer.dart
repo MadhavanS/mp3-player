@@ -343,26 +343,30 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
 
     final player = PlayerController.of(context);
     final idx = player.playlist.indexWhere((t) => t.filePath == filePath);
+
+    /// Pop with path keys **before** starting playback so [MainShell] and
+    /// [LibraryScreen] update `_songsBrowsePathKeysNotifier` before
+    /// [PlayerController.jumpToIndex] notifies listeners — otherwise player
+    /// rebuilds Shell/Library while browse keys are still null and the Songs
+    /// tab sticks on the full list until the next Files trip.
+    final cb = widget.onSongChosenFromExplorer;
+    if (cb != null) {
+      if (kIsWeb) {
+        await cb(null);
+      } else {
+        final scanned = await scanMp3Files(folderScope, recursive: true);
+        final keys = <String>{
+          for (final path in scanned) canonicalMusicLibraryPathKey(path),
+        }..removeWhere((k) => k.isEmpty);
+        await cb(keys);
+      }
+    }
+
     if (idx >= 0) {
       await player.jumpToIndex(idx);
     } else {
       await player.setPlaylistAndPlay([TrackItem.fromFilePath(filePath)]);
     }
-
-    final cb = widget.onSongChosenFromExplorer;
-    if (cb == null) return;
-
-    if (kIsWeb) {
-      await cb(null);
-      return;
-    }
-
-    final scanned = await scanMp3Files(folderScope, recursive: true);
-    final keys = <String>{
-      for (final path in scanned)
-        canonicalMusicLibraryPathKey(path),
-    }..removeWhere((k) => k.isEmpty);
-    await cb(keys);
   }
 
   String _durationSuffix(PlayerController player, String filePath) {
