@@ -90,6 +90,10 @@ class PlayerController extends ChangeNotifier {
     return null;
   }
 
+  /// Whether [skipNext] will advance to another item (shuffle, scoped order,
+  /// repeat-all). When false, skip only pauses or no-ops at the queue end.
+  bool get canSkipNext => upcomingTrack != null;
+
   bool get shuffleEnabled => _shuffle;
 
   PlaylistRepeatMode get repeatMode => _repeat;

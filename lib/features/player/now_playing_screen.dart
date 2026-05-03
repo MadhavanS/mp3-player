@@ -192,31 +192,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                             ? () => showStandaloneSiteRenameDialog(context, cur)
                             : null,
                       ),
-                      const SizedBox(width: 24),
-                      PopupMenuButton<TrackOverflowAction>(
-                        tooltip: 'Track options',
-                        padding: EdgeInsets.zero,
-                        icon: Icon(
-                          Icons.more_horiz_rounded,
-                          size: 28,
-                          color: pal.textPrimary.withValues(alpha: 0.82),
-                        ),
-                        onSelected: (action) {
-                          unawaited(
-                            applyTrackOverflowAction(
-                              context,
-                              player,
-                              player.currentIndex,
-                              action,
-                            ),
-                          );
-                        },
-                        itemBuilder: (context) =>
-                            trackOverflowPopupMenuEntries(
-                          enableDeleteFromDevice:
-                              trackCanDeleteFromDevice(cur),
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -266,33 +241,31 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               onPressed: _safeCollapse,
             ),
             title: null,
-            actions: playerChrome
-                ? [
-                    PopupMenuButton<TrackOverflowAction>(
-                      tooltip: 'Track options',
-                      padding: EdgeInsets.zero,
-                      position: PopupMenuPosition.under,
-                      icon: Icon(
-                        Icons.more_vert_rounded,
-                        color: pal.onScaffold,
-                      ),
-                      onSelected: (action) {
-                        unawaited(
-                          applyTrackOverflowAction(
-                            context,
-                            player,
-                            player.currentIndex,
-                            action,
-                          ),
-                        );
-                      },
-                      itemBuilder: (context) => trackOverflowPopupMenuEntries(
-                        enableDeleteFromDevice:
-                            trackCanDeleteFromDevice(track),
-                      ),
+            actions: [
+              PopupMenuButton<TrackOverflowAction>(
+                tooltip: 'Track options',
+                padding: EdgeInsets.zero,
+                position: PopupMenuPosition.under,
+                icon: Icon(
+                  Icons.more_vert_rounded,
+                  color: playerChrome ? pal.onScaffold : pal.textPrimary,
+                ),
+                onSelected: (action) {
+                  unawaited(
+                    applyTrackOverflowAction(
+                      context,
+                      player,
+                      player.currentIndex,
+                      action,
                     ),
-                  ]
-                : null,
+                  );
+                },
+                itemBuilder: (context) => trackOverflowPopupMenuEntries(
+                  enableDeleteFromDevice:
+                      trackCanDeleteFromDevice(track),
+                ),
+              ),
+            ],
           ),
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -449,14 +422,31 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                           },
                                         ),
                                         const SizedBox(width: 16),
-                                        IconButton(
-                                          iconSize: 36,
-                                          icon: const Icon(
-                                            Icons.skip_next_rounded,
-                                          ),
-                                          color: pal.textPrimary,
-                                          onPressed: () =>
-                                              player.skipNext(),
+                                        ListenableBuilder(
+                                          listenable: player,
+                                          builder: (context, _) {
+                                            final canNext =
+                                                player.canSkipNext;
+                                            return IconButton(
+                                              tooltip: canNext
+                                                  ? 'Next track'
+                                                  : 'End of playlist',
+                                              iconSize: 36,
+                                              icon: const Icon(
+                                                Icons.skip_next_rounded,
+                                              ),
+                                              color: canNext
+                                                  ? pal.textPrimary
+                                                  : pal.textSecondary
+                                                      .withValues(
+                                                        alpha: 0.38,
+                                                      ),
+                                              onPressed: canNext
+                                                  ? () =>
+                                                      player.skipNext()
+                                                  : null,
+                                            );
+                                          },
                                         ),
                                         const SizedBox(width: 4),
                                         IconButton(
@@ -564,14 +554,31 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                           },
                                         ),
                                         const SizedBox(width: 20),
-                                        IconButton(
-                                          iconSize: 36,
-                                          icon: const Icon(
-                                            Icons.skip_next_rounded,
-                                          ),
-                                          color: pal.textPrimary,
-                                          onPressed: () =>
-                                              player.skipNext(),
+                                        ListenableBuilder(
+                                          listenable: player,
+                                          builder: (context, _) {
+                                            final canNext =
+                                                player.canSkipNext;
+                                            return IconButton(
+                                              tooltip: canNext
+                                                  ? 'Next track'
+                                                  : 'End of playlist',
+                                              iconSize: 36,
+                                              icon: const Icon(
+                                                Icons.skip_next_rounded,
+                                              ),
+                                              color: canNext
+                                                  ? pal.textPrimary
+                                                  : pal.textSecondary
+                                                      .withValues(
+                                                        alpha: 0.38,
+                                                      ),
+                                              onPressed: canNext
+                                                  ? () =>
+                                                      player.skipNext()
+                                                  : null,
+                                            );
+                                          },
                                         ),
                                       ],
                                     ),
