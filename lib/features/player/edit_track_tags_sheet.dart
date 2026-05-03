@@ -51,9 +51,17 @@ Future<void> _resumePlaybackAfterTagSave(
 }
 
 class EditTrackTagsSheet extends StatefulWidget {
-  const EditTrackTagsSheet({super.key, required this.track});
+  const EditTrackTagsSheet({
+    super.key,
+    required this.track,
+    this.openSiteRenameOnOpen = false,
+  });
 
   final TrackItem track;
+
+  /// When true (e.g. opened from Now Playing wand), runs site-style rename preview
+  /// once the sheet is on screen (non-web only).
+  final bool openSiteRenameOnOpen;
 
   @override
   State<EditTrackTagsSheet> createState() => _EditTrackTagsSheetState();
@@ -84,6 +92,12 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     _artist.addListener(_onTagFieldChanged);
     _album.addListener(_onTagFieldChanged);
     _genre.addListener(_onTagFieldChanged);
+    if (widget.openSiteRenameOnOpen && !kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_previewSiteRename());
+      });
+    }
   }
 
   void _onTagFieldChanged() {
@@ -451,22 +465,36 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                 style: theme.textTheme.bodySmall?.copyWith(color: context.palette.textSecondary),
               ),
               const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: (_saving || _siteRenameBusy) ? null : _previewSiteRename,
-                  icon: _siteRenameBusy
-                      ? SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Clean site-style name',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: (_saving || _siteRenameBusy) ? null : _previewSiteRename,
+                    icon: _siteRenameBusy
+                        ? SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: context.palette.primary,
+                            ),
+                          )
+                        : Icon(
+                            Icons.auto_fix_high_outlined,
+                            size: 24,
                             color: context.palette.primary,
                           ),
-                        )
-                      : const Icon(Icons.auto_fix_high_outlined, size: 20),
-                  label: const Text('Clean site-style name'),
-                ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: (_saving || _siteRenameBusy) ? null : _previewSiteRename,
+                      child: const Text('Clean site-style name'),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Center(
