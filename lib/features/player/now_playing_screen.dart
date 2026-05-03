@@ -119,8 +119,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         final canEdit =
             cur.filePath != null && cur.filePath!.isNotEmpty;
 
+        final playerChrome = context.usesPlayerChrome;
         return Material(
-          color: pal.surface,
+          color: playerChrome ? pal.scaffoldBackground : pal.surface,
           child: SafeArea(
             top: false,
             minimum: const EdgeInsets.only(bottom: 4),
@@ -199,17 +200,54 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           return const SizedBox.shrink();
         }
 
+        final playerChrome = context.usesPlayerChrome;
+        final pageBg =
+            playerChrome ? pal.scaffoldBackground : pal.surface;
+
         return Scaffold(
-          backgroundColor: pal.surface,
+          backgroundColor: pageBg,
           appBar: AppBar(
-            backgroundColor: pal.surface,
+            backgroundColor: pageBg,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
+            automaticallyImplyLeading: false,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded),
-              tooltip: 'Back to library',
+              icon: Icon(
+                playerChrome
+                    ? Icons.expand_more_rounded
+                    : Icons.arrow_back_rounded,
+              ),
+              tooltip: playerChrome ? 'Collapse' : 'Back to library',
               onPressed: _safeCollapse,
             ),
+            title: playerChrome ? _SavedStatusChip(pal: pal) : null,
+            actions: playerChrome
+                ? [
+                    PopupMenuButton<TrackOverflowAction>(
+                      tooltip: 'Track options',
+                      padding: EdgeInsets.zero,
+                      position: PopupMenuPosition.under,
+                      icon: Icon(
+                        Icons.more_vert_rounded,
+                        color: pal.onScaffold,
+                      ),
+                      onSelected: (action) {
+                        unawaited(
+                          applyTrackOverflowAction(
+                            context,
+                            player,
+                            player.currentIndex,
+                            action,
+                          ),
+                        );
+                      },
+                      itemBuilder: (context) => trackOverflowPopupMenuEntries(
+                        enableDeleteFromDevice:
+                            trackCanDeleteFromDevice(track),
+                      ),
+                    ),
+                  ]
+                : null,
           ),
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -311,85 +349,193 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                     },
                                   ),
                                   const SizedBox(height: 12),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      IconButton(
-                                        tooltip: 'Shuffle',
-                                        icon: Icon(
-                                          Icons.shuffle_rounded,
-                                          color: player.shuffleEnabled
-                                              ? pal.primary
-                                              : pal.textSecondary,
-                                        ),
-                                        onPressed: player.playlist.length < 2
-                                            ? null
-                                            : () => player.toggleShuffle(),
-                                      ),
-                                      const SizedBox(width: 24),
-                                      IconButton(
-                                        tooltip: 'Repeat mode',
-                                        icon: Icon(
-                                          player.repeatMode == PlaylistRepeatMode.one
-                                              ? Icons.repeat_one_rounded
-                                              : Icons.repeat_rounded,
-                                          color: player.repeatMode == PlaylistRepeatMode.off
-                                              ? pal.textSecondary
-                                                  .withValues(alpha: 0.55)
-                                              : pal.primary,
-                                        ),
-                                        onPressed: () => player.cycleRepeatMode(),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      IconButton(
-                                        iconSize: 36,
-                                        icon: const Icon(Icons.skip_previous_rounded),
-                                        color: pal.textPrimary,
-                                        onPressed: () => player.skipPrevious(),
-                                      ),
-                                      const SizedBox(width: 20),
-                                      Container(
-                                        decoration: BoxDecoration(
-                                          color: pal.surface,
-                                          shape: BoxShape.circle,
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withValues(alpha: 0.08),
-                                              blurRadius: 16,
-                                              offset: const Offset(0, 6),
-                                            ),
-                                          ],
-                                        ),
-                                        child: IconButton.filled(
-                                          iconSize: 40,
-                                          style: IconButton.styleFrom(
-                                            backgroundColor: pal.surface,
-                                            foregroundColor: pal.textSecondary,
-                                            padding: const EdgeInsets.all(20),
-                                            elevation: 0,
-                                          ),
-                                          onPressed: () => player.togglePlayPause(),
+                                  if (playerChrome)
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          tooltip: 'Shuffle',
                                           icon: Icon(
-                                            player.isPlaying
-                                                ? Icons.pause_rounded
-                                                : Icons.play_arrow_rounded,
+                                            Icons.shuffle_rounded,
+                                            color: player.shuffleEnabled
+                                                ? pal.primary
+                                                : pal.textSecondary,
                                           ),
+                                          onPressed: player.playlist.length <
+                                                  2
+                                              ? null
+                                              : () => player.toggleShuffle(),
                                         ),
-                                      ),
-                                      const SizedBox(width: 20),
-                                      IconButton(
-                                        iconSize: 36,
-                                        icon: const Icon(Icons.skip_next_rounded),
-                                        color: pal.textPrimary,
-                                        onPressed: () => player.skipNext(),
-                                      ),
-                                    ],
-                                  ),
+                                        const SizedBox(width: 4),
+                                        IconButton(
+                                          iconSize: 36,
+                                          icon: const Icon(
+                                            Icons.skip_previous_rounded,
+                                          ),
+                                          color: pal.textPrimary,
+                                          onPressed: () =>
+                                              player.skipPrevious(),
+                                        ),
+                                        const SizedBox(width: 16),
+                                        ListenableBuilder(
+                                          listenable: player,
+                                          builder: (context, _) {
+                                            final playing =
+                                                player.isPlaying;
+                                            return IconButton.filled(
+                                              tooltip: playing
+                                                  ? 'Pause'
+                                                  : 'Play',
+                                              iconSize: 36,
+                                              style: IconButton.styleFrom(
+                                                backgroundColor:
+                                                    pal.primary,
+                                                foregroundColor:
+                                                    Colors.white,
+                                                fixedSize:
+                                                    const Size(76, 76),
+                                              ),
+                                              onPressed: () => player
+                                                  .togglePlayPause(),
+                                              icon: Icon(
+                                                playing
+                                                    ? Icons.pause_rounded
+                                                    : Icons
+                                                        .play_arrow_rounded,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                        const SizedBox(width: 16),
+                                        IconButton(
+                                          iconSize: 36,
+                                          icon: const Icon(
+                                            Icons.skip_next_rounded,
+                                          ),
+                                          color: pal.textPrimary,
+                                          onPressed: () =>
+                                              player.skipNext(),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        IconButton(
+                                          tooltip: 'Repeat mode',
+                                          icon: Icon(
+                                            player.repeatMode ==
+                                                    PlaylistRepeatMode.one
+                                                ? Icons.repeat_one_rounded
+                                                : Icons.repeat_rounded,
+                                            color:
+                                                player.repeatMode ==
+                                                        PlaylistRepeatMode
+                                                            .off
+                                                    ? pal.textSecondary
+                                                        .withValues(
+                                                          alpha: 0.55,
+                                                        )
+                                                    : pal.primary,
+                                          ),
+                                          onPressed: () => player
+                                              .cycleRepeatMode(),
+                                        ),
+                                      ],
+                                    )
+                                  else ...[
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          tooltip: 'Shuffle',
+                                          icon: Icon(
+                                            Icons.shuffle_rounded,
+                                            color: player.shuffleEnabled
+                                                ? pal.primary
+                                                : pal.textSecondary,
+                                          ),
+                                          onPressed:
+                                              player.playlist.length < 2
+                                                  ? null
+                                                  : () =>
+                                                      player.toggleShuffle(),
+                                        ),
+                                        const SizedBox(width: 24),
+                                        IconButton(
+                                          tooltip: 'Repeat mode',
+                                          icon: Icon(
+                                            player.repeatMode ==
+                                                    PlaylistRepeatMode.one
+                                                ? Icons.repeat_one_rounded
+                                                : Icons.repeat_rounded,
+                                            color: player.repeatMode ==
+                                                    PlaylistRepeatMode.off
+                                                ? pal.textSecondary
+                                                    .withValues(alpha: 0.55)
+                                                : pal.primary,
+                                          ),
+                                          onPressed: () => player
+                                              .cycleRepeatMode(),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          iconSize: 36,
+                                          icon: const Icon(
+                                            Icons.skip_previous_rounded,
+                                          ),
+                                          color: pal.textPrimary,
+                                          onPressed: () =>
+                                              player.skipPrevious(),
+                                        ),
+                                        const SizedBox(width: 20),
+                                        ListenableBuilder(
+                                          listenable: player,
+                                          builder: (context, _) {
+                                            final playing =
+                                                player.isPlaying;
+                                            return IconButton.filled(
+                                              tooltip: playing
+                                                  ? 'Pause'
+                                                  : 'Play',
+                                              iconSize: 40,
+                                              style: IconButton.styleFrom(
+                                                backgroundColor:
+                                                    pal.primary,
+                                                foregroundColor:
+                                                    Colors.white,
+                                                padding:
+                                                    const EdgeInsets.all(20),
+                                                elevation: 0,
+                                              ),
+                                              onPressed: () => player
+                                                  .togglePlayPause(),
+                                              icon: Icon(
+                                                playing
+                                                    ? Icons.pause_rounded
+                                                    : Icons
+                                                        .play_arrow_rounded,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                        const SizedBox(width: 20),
+                                        IconButton(
+                                          iconSize: 36,
+                                          icon: const Icon(
+                                            Icons.skip_next_rounded,
+                                          ),
+                                          color: pal.textPrimary,
+                                          onPressed: () =>
+                                              player.skipNext(),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                   const SizedBox(height: 8),
                                 ],
                               );
@@ -408,6 +554,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               theme: theme,
                               repeatMode: player.repeatMode,
                               queueLength: player.playlist.length,
+                              playerChrome: playerChrome,
                             );
                           },
                         ),
@@ -425,6 +572,43 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 }
 
+class _SavedStatusChip extends StatelessWidget {
+  const _SavedStatusChip({required this.pal});
+
+  final AppPalette pal;
+
+  @override
+  Widget build(BuildContext context) {
+    const fg = Color(0xFF0D1117);
+    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: fg,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.85,
+          fontSize: 11,
+        );
+    return IgnorePointer(
+      child: Material(
+        color: pal.accent,
+        borderRadius: BorderRadius.circular(22),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_rounded, size: 17, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                'SAVED',
+                style: labelStyle,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _UpNextPanel extends StatelessWidget {
   const _UpNextPanel({
     required this.next,
@@ -432,6 +616,7 @@ class _UpNextPanel extends StatelessWidget {
     required this.theme,
     required this.repeatMode,
     required this.queueLength,
+    required this.playerChrome,
   });
 
   final TrackItem? next;
@@ -439,6 +624,11 @@ class _UpNextPanel extends StatelessWidget {
   final ThemeData theme;
   final PlaylistRepeatMode repeatMode;
   final int queueLength;
+  final bool playerChrome;
+
+  static const _lightCardTint = Color(0xFFF2F2F7);
+  static const _onLightCardPrimary = Color(0xFF121212);
+  static const _onLightCardSecondary = Color(0xFF5C5C5C);
 
   @override
   Widget build(BuildContext context) {
@@ -447,9 +637,112 @@ class _UpNextPanel extends StatelessWidget {
       fontWeight: FontWeight.w600,
       letterSpacing: 0.5,
     );
-    final titleStyle = theme.textTheme.titleMedium?.copyWith(color: pal.textPrimary);
+    final titleStyle =
+        theme.textTheme.titleMedium?.copyWith(color: pal.textPrimary);
     final artistStyle =
         theme.textTheme.bodyMedium?.copyWith(color: pal.textSecondary);
+
+    Widget upNextInner() {
+      if (next != null && playerChrome) {
+        final titleInside = Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: _onLightCardPrimary,
+              fontSize: 15,
+            );
+        final artistInside =
+            Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: _onLightCardSecondary,
+                  fontSize: 13,
+                );
+        return Material(
+          color: _lightCardTint,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                TrackAlbumArt(track: next!, display: TrackArtDisplay.list),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        next!.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: titleInside,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        next!.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: artistInside,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      if (next != null) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            TrackAlbumArt(track: next!, display: TrackArtDisplay.list),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    next!.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: titleStyle,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    next!.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: artistStyle,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      }
+      if (repeatMode == PlaylistRepeatMode.one &&
+          queueLength > 0 &&
+          next == null) {
+        return Text(
+          'This track repeats when it finishes.',
+          style: artistStyle?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.95),
+          ),
+        );
+      }
+      if (queueLength <= 1) {
+        return Text(
+          'Only one song in queue.',
+          style: artistStyle?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.95),
+          ),
+        );
+      }
+      return Text(
+        'No more tracks queued.',
+        style: artistStyle?.copyWith(
+          color: pal.textMuted.withValues(alpha: 0.95),
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 4, 24, 12),
@@ -466,57 +759,7 @@ class _UpNextPanel extends StatelessWidget {
                 style: labelStyle,
               ),
               const SizedBox(height: 12),
-              if (next != null)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    TrackAlbumArt(track: next!, display: TrackArtDisplay.list),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            next!.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: titleStyle,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            next!.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: artistStyle,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                )
-              else if (repeatMode == PlaylistRepeatMode.one &&
-                  queueLength > 0 &&
-                  next == null)
-                Text(
-                  'This track repeats when it finishes.',
-                  style: artistStyle?.copyWith(
-                    color: pal.textMuted.withValues(alpha: 0.95),
-                  ),
-                )
-              else if (queueLength <= 1)
-                Text(
-                  'Only one song in queue.',
-                  style: artistStyle?.copyWith(
-                    color: pal.textMuted.withValues(alpha: 0.95),
-                  ),
-                )
-              else
-                Text(
-                  'No more tracks queued.',
-                  style: artistStyle?.copyWith(
-                    color: pal.textMuted.withValues(alpha: 0.95),
-                  ),
-                ),
+              upNextInner(),
             ],
           ),
         ),

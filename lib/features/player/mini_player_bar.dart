@@ -20,12 +20,13 @@ class MiniPlayerBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final pal = context.palette;
+    final playerChrome = context.usesPlayerChrome;
     final track = controller.currentTrack;
     if (track == null) return const SizedBox.shrink();
 
     return Material(
-      color: pal.surface,
-      elevation: 12,
+      color: playerChrome ? pal.scaffoldBackground : pal.surface,
+      elevation: playerChrome ? 18 : 12,
       shadowColor: Colors.black26,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(_radius)),
       child: InkWell(
@@ -74,7 +75,7 @@ class MiniPlayerBar extends StatelessWidget {
                       return IconButton.filled(
                         style: IconButton.styleFrom(
                           backgroundColor: pal.primary,
-                          foregroundColor: pal.surface,
+                          foregroundColor: Colors.white,
                         ),
                         onPressed: () => controller.togglePlayPause(),
                         icon: Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded),

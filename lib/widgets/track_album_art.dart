@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/track_item.dart';
+import '../theme/app_theme.dart';
 
 /// Where to show artwork: mini player, library row, full hero, compact now-playing.
 enum TrackArtDisplay { mini, list, full, nowPlaying }
@@ -30,8 +31,19 @@ class TrackAlbumArt extends StatelessWidget {
         TrackArtDisplay.nowPlaying => 22,
       };
 
+  double _radiusFor(BuildContext context) {
+    if (!context.usesPlayerChrome) return _radius;
+    return switch (display) {
+      TrackArtDisplay.mini => _radius,
+      TrackArtDisplay.list => 18,
+      TrackArtDisplay.full => 38,
+      TrackArtDisplay.nowPlaying => 28,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
+    final r = _radiusFor(context);
     final bytes = track.albumArtBytes;
     if (bytes != null && bytes.isNotEmpty) {
       final image = Image.memory(
@@ -41,7 +53,7 @@ class TrackAlbumArt extends StatelessWidget {
         fit: BoxFit.cover,
         gaplessPlayback: true,
         filterQuality: FilterQuality.medium,
-        errorBuilder: (_, __, ___) => _gradientDecoration(),
+        errorBuilder: (_, __, ___) => _gradientDecoration(context),
       );
 
       if (display == TrackArtDisplay.mini) {
@@ -51,16 +63,16 @@ class TrackAlbumArt extends StatelessWidget {
         width: _size,
         height: _size,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(_radius),
+          borderRadius: BorderRadius.circular(r),
           boxShadow: _imageShadows(),
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(_radius),
+          borderRadius: BorderRadius.circular(r),
           child: image,
         ),
       );
     }
-    return _gradientDecoration();
+    return _gradientDecoration(context);
   }
 
   List<BoxShadow> _imageShadows() => switch (display) {
@@ -81,11 +93,12 @@ class TrackAlbumArt extends StatelessWidget {
         _ => const [],
       };
 
-  Widget _gradientDecoration() {
+  Widget _gradientDecoration(BuildContext context) {
+    final r = _radiusFor(context);
     final gradient = BoxDecoration(
       borderRadius: display == TrackArtDisplay.mini
           ? null
-          : BorderRadius.circular(_radius),
+          : BorderRadius.circular(r),
       shape: display == TrackArtDisplay.mini ? BoxShape.circle : BoxShape.rectangle,
       gradient: LinearGradient(
         begin: Alignment.topLeft,

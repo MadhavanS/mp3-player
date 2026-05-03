@@ -169,9 +169,39 @@ class AppPalette extends ThemeExtension<AppPalette> {
   }
 }
 
+/// Carries which [AppThemePalette] backs the current [MaterialApp.theme] so UI
+/// can diverge layouts (Player reference) beyond token colors alone.
+@immutable
+class ActiveAppThemePalette extends ThemeExtension<ActiveAppThemePalette> {
+  const ActiveAppThemePalette({required this.palette});
+
+  final AppThemePalette palette;
+
+  @override
+  ActiveAppThemePalette copyWith({AppThemePalette? palette}) {
+    return ActiveAppThemePalette(palette: palette ?? this.palette);
+  }
+
+  @override
+  ActiveAppThemePalette lerp(
+    covariant ActiveAppThemePalette? other,
+    double t,
+  ) {
+    return t < 0.5 ? this : (other ?? this);
+  }
+}
+
 extension AppThemeContext on BuildContext {
   AppPalette get palette =>
       Theme.of(this).extension<AppPalette>() ?? AppPalette.light;
+
+  /// Prefer this over guessing from colors (matches [ThemeSettingsStore] resolve).
+  AppThemePalette get appliedThemePalette =>
+      Theme.of(this).extension<ActiveAppThemePalette>()?.palette ??
+      AppThemePalette.dark;
+
+  bool get usesPlayerChrome =>
+      appliedThemePalette == AppThemePalette.player;
 }
 
 extension AppThemeSettingPreviewStripe on AppThemeSetting {
@@ -215,7 +245,10 @@ abstract final class AppTheme {
       useMaterial3: true,
       brightness: brightness,
       scaffoldBackgroundColor: ext.scaffoldBackground,
-      extensions: [ext],
+      extensions: [
+        ext,
+        ActiveAppThemePalette(palette: palette),
+      ],
       colorScheme: ColorScheme.fromSeed(
         seedColor: ext.primary,
         brightness: brightness,
