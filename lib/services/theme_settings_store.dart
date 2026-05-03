@@ -19,6 +19,8 @@ abstract final class ThemeSettingsStore {
         return AppThemeSetting.dark;
       case 'grey':
         return AppThemeSetting.grey;
+      case 'player':
+        return AppThemeSetting.player;
       case 'automatic':
         return AppThemeSetting.automatic;
       default:

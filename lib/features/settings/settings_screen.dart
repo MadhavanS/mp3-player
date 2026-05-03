@@ -143,32 +143,90 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(height: 8),
                       ...AppThemeSetting.values.map((s) {
                         final selected = widget.themeSetting == s;
-                        return ListTile(
-                          onTap: _busy
-                              ? null
-                              : () => widget.onThemeSettingChanged(s),
-                          leading: Icon(
-                            selected
-                                ? Icons.check_circle_rounded
-                                : Icons.circle_outlined,
-                            color: selected ? pal.primary : pal.onScaffold.withValues(alpha: 0.45),
-                          ),
-                          title: Text(
-                            s.label,
-                            style: TextStyle(
-                              color: pal.onScaffold,
-                              fontWeight:
-                                  selected ? FontWeight.w600 : FontWeight.w500,
+                        final swatches = s.previewSwatches(DateTime.now());
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Material(
+                            color: pal.surface.withValues(alpha: 0.35),
+                            borderRadius: BorderRadius.circular(14),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: _busy
+                                  ? null
+                                  : () => widget.onThemeSettingChanged(s),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Icon(
+                                        selected
+                                            ? Icons.check_circle_rounded
+                                            : Icons.circle_outlined,
+                                        color: selected
+                                            ? pal.primary
+                                            : pal.onScaffold
+                                                .withValues(alpha: 0.45),
+                                        size: 22,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            s.label,
+                                            style: TextStyle(
+                                              color: pal.onScaffold,
+                                              fontWeight: selected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w500,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            s.subtitle,
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                              color: pal.onScaffold
+                                                  .withValues(alpha: 0.65),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            child: SizedBox(
+                                              height: 10,
+                                              child: Row(
+                                                children: [
+                                                  for (final c in swatches)
+                                                    Expanded(
+                                                      child:
+                                                          DecoratedBox(
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          color: c,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
-                          subtitle: Text(
-                            s.subtitle,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: pal.onScaffold.withValues(alpha: 0.65),
-                            ),
-                          ),
-                          contentPadding: EdgeInsets.zero,
-                          visualDensity: VisualDensity.compact,
                         );
                       }),
                       const SizedBox(height: 24),
