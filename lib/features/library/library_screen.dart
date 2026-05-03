@@ -6,11 +6,12 @@ import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/track_album_art.dart';
 
-const String kLibraryMainTitle = 'Poll, Top Tracks this Week';
+/// Key for the library search field (widget tests).
+const Key librarySearchFieldKey = Key('library_search_field');
 
 enum _TrackMenuAction { playFromHere, playOnlyThis, addToPlaylist }
 
-class LibraryScreen extends StatelessWidget {
+class LibraryScreen extends StatefulWidget {
   const LibraryScreen({
     super.key,
     required this.folderPaths,
@@ -22,34 +23,75 @@ class LibraryScreen extends StatelessWidget {
   final VoidCallback onOpenDrawer;
   final VoidCallback? onRefreshLibrary;
 
-  String get _folderHint {
-    if (folderPaths.isEmpty) return '';
-    if (folderPaths.length == 1) return p.basename(folderPaths.single);
-    return '${folderPaths.length} folders';
+  @override
+  State<LibraryScreen> createState() => _LibraryScreenState();
+}
+
+class _LibraryScreenState extends State<LibraryScreen> {
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() => setState(() {}));
   }
 
-  Future<void> _selectTrack(BuildContext context, int i) async {
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String get _folderHint {
+    if (widget.folderPaths.isEmpty) return '';
+    if (widget.folderPaths.length == 1) {
+      return p.basename(widget.folderPaths.single);
+    }
+    return '${widget.folderPaths.length} folders';
+  }
+
+  static bool _trackMatchesQuery(TrackItem t, String q) {
+    if (q.isEmpty) return true;
+    return t.title.toLowerCase().contains(q);
+  }
+
+  static List<int> _filteredPlaylistIndices(
+    List<TrackItem> tracks,
+    String rawQuery,
+  ) {
+    final q = rawQuery.trim().toLowerCase();
+    if (q.isEmpty) {
+      return List<int>.generate(tracks.length, (i) => i);
+    }
+    final out = <int>[];
+    for (var i = 0; i < tracks.length; i++) {
+      if (_trackMatchesQuery(tracks[i], q)) out.add(i);
+    }
+    return out;
+  }
+
+  Future<void> _selectTrack(BuildContext context, int playlistIndex) async {
     final player = PlayerController.of(context);
-    if (i < 0 || i >= player.playlist.length) return;
-    await player.jumpToIndex(i);
+    if (playlistIndex < 0 || playlistIndex >= player.playlist.length) return;
+    await player.jumpToIndex(playlistIndex);
   }
 
   Future<void> _onTrackMenu(
     BuildContext context,
     PlayerController player,
-    int index,
+    int playlistIndex,
     _TrackMenuAction action,
   ) async {
     final tracks = List<TrackItem>.from(player.playlist);
-    if (index < 0 || index >= tracks.length) return;
+    if (playlistIndex < 0 || playlistIndex >= tracks.length) return;
 
     switch (action) {
       case _TrackMenuAction.playFromHere:
-        await player.setPlaylistAndPlay(tracks.sublist(index));
+        await player.setPlaylistAndPlay(tracks.sublist(playlistIndex));
       case _TrackMenuAction.playOnlyThis:
-        await player.setPlaylistAndPlay([tracks[index]]);
+        await player.setPlaylistAndPlay([tracks[playlistIndex]]);
       case _TrackMenuAction.addToPlaylist:
-        final t = tracks[index];
+        final t = tracks[playlistIndex];
         final added = await player.addToPlaylistIfAbsent(t);
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -65,6 +107,43 @@ class LibraryScreen extends StatelessWidget {
     }
   }
 
+  InputDecoration _searchDecoration(AppPalette pal, ThemeData theme) {
+    final hasQuery = _searchController.text.trim().isNotEmpty;
+    return InputDecoration(
+      hintText: 'Search by title',
+      hintStyle: theme.textTheme.bodyMedium?.copyWith(
+        color: pal.textMuted.withValues(alpha: 0.72),
+      ),
+      isDense: true,
+      filled: true,
+      fillColor: pal.onScaffold.withValues(alpha: 0.1),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      prefixIcon: Icon(
+        Icons.search_rounded,
+        color: pal.textMuted.withValues(alpha: 0.9),
+        size: 22,
+      ),
+      suffixIcon: hasQuery
+          ? IconButton(
+              tooltip: 'Clear search',
+              icon: Icon(
+                Icons.close_rounded,
+                color: pal.onScaffold.withValues(alpha: 0.75),
+                size: 20,
+              ),
+              onPressed: () {
+                _searchController.clear();
+                FocusScope.of(context).unfocus();
+              },
+            )
+          : null,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -74,6 +153,9 @@ class LibraryScreen extends StatelessWidget {
       listenable: player,
       builder: (context, _) {
         final tracks = player.playlist;
+        final query = _searchController.text.trim();
+        final filteredIndices =
+            tracks.isEmpty ? <int>[] : _filteredPlaylistIndices(tracks, query);
 
         final pal = context.palette;
         return ColoredBox(
@@ -84,29 +166,32 @@ class LibraryScreen extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       IconButton(
                         icon: const Icon(Icons.menu_rounded),
                         color: pal.onScaffold,
                         tooltip: 'Open menu',
-                        onPressed: onOpenDrawer,
+                        onPressed: widget.onOpenDrawer,
                       ),
                       Expanded(
-                        child: Text(
-                          kLibraryMainTitle,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.titleMedium?.copyWith(
+                        child: TextField(
+                          key: librarySearchFieldKey,
+                          controller: _searchController,
+                          textInputAction: TextInputAction.search,
+                          keyboardType: TextInputType.text,
+                          style: theme.textTheme.bodyMedium?.copyWith(
                             color: pal.onScaffold,
-                            fontWeight: FontWeight.w600,
                             fontSize: 15,
                           ),
+                          decoration: _searchDecoration(pal, theme),
                         ),
                       ),
                       IconButton(
                         icon: const Icon(Icons.refresh_rounded),
                         color: pal.onScaffold,
                         tooltip: 'Refresh library',
-                        onPressed: onRefreshLibrary,
+                        onPressed: widget.onRefreshLibrary,
                       ),
                     ],
                   ),
@@ -124,7 +209,13 @@ class LibraryScreen extends StatelessWidget {
                     ),
                   ),
                 Expanded(
-                  child: _buildListBody(theme, context, tracks, player),
+                  child: _buildListBody(
+                    theme,
+                    context,
+                    tracks,
+                    filteredIndices,
+                    player,
+                  ),
                 ),
               ],
             ),
@@ -138,6 +229,7 @@ class LibraryScreen extends StatelessWidget {
     ThemeData theme,
     BuildContext context,
     List<TrackItem> tracks,
+    List<int> filteredIndices,
     PlayerController player,
   ) {
     final pal = context.palette;
@@ -174,22 +266,69 @@ class LibraryScreen extends StatelessWidget {
       );
     }
 
+    if (filteredIndices.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.search_off_rounded,
+                size: 56,
+                color: pal.onScaffold.withValues(alpha: 0.45),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'No matches',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: pal.onScaffold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Nothing in your library has a title matching your search.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textSecondary.withValues(alpha: 0.9),
+                ),
+              ),
+              if (_searchController.text.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '“${_searchController.text.trim()}”',
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: pal.textMuted.withValues(alpha: 0.95),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 8),
-      itemCount: tracks.length,
+      itemCount: filteredIndices.length,
       separatorBuilder: (_, __) => Divider(
         height: 1,
         color: pal.dividerOnHero,
         indent: 88,
       ),
       itemBuilder: (context, i) {
-        final track = tracks[i];
-        final selected = i == player.currentIndex;
+        final playlistIndex = filteredIndices[i];
+        final track = tracks[playlistIndex];
+        final selected = playlistIndex == player.currentIndex;
         return _TrackTile(
           track: track,
           selected: selected,
-          onTap: () => _selectTrack(context, i),
-          onMenuAction: (action) => _onTrackMenu(context, player, i, action),
+          onTap: () => _selectTrack(context, playlistIndex),
+          onMenuAction: (action) =>
+              _onTrackMenu(context, player, playlistIndex, action),
         );
       },
     );
