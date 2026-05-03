@@ -352,12 +352,14 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     final cb = widget.onSongChosenFromExplorer;
     if (cb != null) {
       if (kIsWeb) {
+        player.setPlaybackPathKeyScope(null);
         await cb(null);
       } else {
         final scanned = await scanMp3Files(folderScope, recursive: true);
         final keys = <String>{
           for (final path in scanned) canonicalMusicLibraryPathKey(path),
         }..removeWhere((k) => k.isEmpty);
+        player.setPlaybackPathKeyScope(keys);
         await cb(keys);
       }
     }

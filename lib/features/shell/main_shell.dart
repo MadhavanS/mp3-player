@@ -272,7 +272,9 @@ class _MainShellState extends State<MainShell> {
     );
     if (!mounted) return;
     if (pickedKeys != null) {
-      _songsBrowsePathKeysNotifier.value = Set<String>.from(pickedKeys);
+      final keys = Set<String>.from(pickedKeys);
+      _songsBrowsePathKeysNotifier.value = keys;
+      PlayerController.of(context).setPlaybackPathKeyScope(keys);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _libraryScreenKey.currentState?.switchToSongsTab();
@@ -362,8 +364,11 @@ class _MainShellState extends State<MainShell> {
                             key: _libraryScreenKey,
                             folderPaths: _folderPaths,
                             songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
-                            onClearSongsBrowseFilter: () =>
-                                _songsBrowsePathKeysNotifier.value = null,
+                            onClearSongsBrowseFilter: () {
+                              _songsBrowsePathKeysNotifier.value = null;
+                              PlayerController.of(context)
+                                  .setPlaybackPathKeyScope(null);
+                            },
                             onOpenDrawer: _openDrawer,
                             onRefreshLibrary:
                                 _folderPaths.isEmpty || _scanning

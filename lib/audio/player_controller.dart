@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../models/track_item.dart';
+import '../services/music_library_path_key.dart';
 
 enum PlaylistRepeatMode { off, all, one }
 
@@ -28,6 +29,10 @@ class PlayerController extends ChangeNotifier {
   PlaylistRepeatMode _repeat = PlaylistRepeatMode.off;
   ProcessingState? _previousProcessing;
   bool _isLoadingSource = false;
+
+  /// When non-null, [skipNext], [skipPrevious], [upcomingTrack], and repeat-all wrap
+  /// only among tracks whose path key is in this set (same as Songs tab folder filter).
+  Set<String>? _playbackPathKeysScope;
 
   AudioPlayer get audioPlayer => _player;
 
@@ -56,13 +61,31 @@ class PlayerController extends ChangeNotifier {
       }
       return null;
     }
-    final n = _playlist.length;
-    final i = _index;
-    if (i < n - 1) {
-      return _playlist[i + 1];
+
+    final ordered = _playbackScopedIndices();
+    if (ordered.isEmpty) return null;
+    final p = ordered.indexOf(_index);
+
+    /// Stale folder filter vs queue — fall back to full-library sequence once.
+    if (p < 0) {
+      if (_playbackPathKeysScope != null) {
+        final n = _playlist.length;
+        final i = _index;
+        if (i >= 0 && i < n - 1) {
+          return _playlist[i + 1];
+        }
+        if (_repeat == PlaylistRepeatMode.all) {
+          return _playlist.first;
+        }
+      }
+      return null;
+    }
+
+    if (p < ordered.length - 1) {
+      return _playlist[ordered[p + 1]];
     }
     if (_repeat == PlaylistRepeatMode.all) {
-      return _playlist.first;
+      return _playlist[ordered.first];
     }
     return null;
   }
@@ -70,6 +93,44 @@ class PlayerController extends ChangeNotifier {
   bool get shuffleEnabled => _shuffle;
 
   PlaylistRepeatMode get repeatMode => _repeat;
+
+  /// Limits next/previous and repeat-all to tracks inside the scoped folder (see Files flow).
+  void setPlaybackPathKeyScope(Set<String>? pathKeys) {
+    _playbackPathKeysScope =
+        pathKeys == null ? null : Set<String>.from(pathKeys);
+    if (_playbackPathKeysScope != null) {
+      _resetShuffleState();
+    }
+    notifyListeners();
+  }
+
+  bool _playlistIndexMatchesScope(int i) {
+    if (_playbackPathKeysScope == null) return true;
+    if (i < 0 || i >= _playlist.length) return false;
+    final fp = _playlist[i].filePath;
+    if (fp == null || fp.trim().isEmpty) return false;
+    final k = canonicalMusicLibraryPathKey(fp);
+    return k.isNotEmpty && _playbackPathKeysScope!.contains(k);
+  }
+
+  List<int> _playbackScopedIndices() {
+    final n = _playlist.length;
+    if (n == 0) return [];
+    final scope = _playbackPathKeysScope;
+    if (scope == null) {
+      return List<int>.generate(n, (i) => i);
+    }
+    final out = <int>[];
+    for (var i = 0; i < n; i++) {
+      final fp = _playlist[i].filePath;
+      if (fp == null || fp.trim().isEmpty) continue;
+      final k = canonicalMusicLibraryPathKey(fp);
+      if (k.isNotEmpty && scope.contains(k)) {
+        out.add(i);
+      }
+    }
+    return out;
+  }
 
   bool get isPlaying => _player.playing;
   Duration get position => _player.position;
@@ -229,6 +290,9 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> jumpToIndex(int i, {bool autoPlay = true}) async {
     if (i < 0 || i >= _playlist.length) return;
+    if (_playbackPathKeysScope != null && !_playlistIndexMatchesScope(i)) {
+      _playbackPathKeysScope = null;
+    }
     if (_shuffle) {
       _shuffleOrder.remove(i);
       final rest = List<int>.generate(_playlist.length, (j) => j)
@@ -296,28 +360,54 @@ class PlayerController extends ChangeNotifier {
   Future<void> skipNext() async {
     if (_playlist.isEmpty) return;
 
-    final atLast = _shuffle
-        ? _shufflePos >= _shuffleOrder.length - 1
-        : _index >= _playlist.length - 1;
+    if (_shuffle) {
+      final atLast = _shufflePos >= _shuffleOrder.length - 1;
 
-    if (atLast) {
-      if (_repeat == PlaylistRepeatMode.all) {
-        if (_shuffle) {
+      if (atLast) {
+        if (_repeat == PlaylistRepeatMode.all) {
           _shufflePos = 0;
         } else {
-          _index = 0;
+          await _player.pause();
+          notifyListeners();
+          return;
         }
       } else {
-        await _player.pause();
-        notifyListeners();
+        _shufflePos++;
+      }
+
+      notifyListeners();
+      await _loadCurrent();
+      await _player.play();
+      return;
+    }
+
+    final ordered = _playbackScopedIndices();
+    if (ordered.isEmpty) {
+      await _player.pause();
+      notifyListeners();
+      return;
+    }
+
+    final p = ordered.indexOf(_index);
+    if (p < 0) {
+      if (_playbackPathKeysScope != null) {
+        _playbackPathKeysScope = null;
+        await skipNext();
         return;
       }
+      await _player.pause();
+      notifyListeners();
+      return;
+    }
+
+    if (p < ordered.length - 1) {
+      _index = ordered[p + 1];
+    } else if (_repeat == PlaylistRepeatMode.all) {
+      _index = ordered.first;
     } else {
-      if (_shuffle) {
-        _shufflePos++;
-      } else {
-        _index++;
-      }
+      await _player.pause();
+      notifyListeners();
+      return;
     }
 
     notifyListeners();
@@ -328,26 +418,54 @@ class PlayerController extends ChangeNotifier {
   Future<void> skipPrevious() async {
     if (_playlist.isEmpty) return;
 
-    final atFirst = _shuffle ? _shufflePos <= 0 : _index <= 0;
+    if (_shuffle) {
+      final atFirst = _shufflePos <= 0;
 
-    if (atFirst) {
-      if (_repeat == PlaylistRepeatMode.all) {
-        if (_shuffle) {
+      if (atFirst) {
+        if (_repeat == PlaylistRepeatMode.all) {
           _shufflePos = _shuffleOrder.length - 1;
         } else {
-          _index = _playlist.length - 1;
+          await _player.seek(Duration.zero);
+          notifyListeners();
+          return;
         }
       } else {
-        await _player.seek(Duration.zero);
-        notifyListeners();
+        _shufflePos--;
+      }
+
+      notifyListeners();
+      await _loadCurrent();
+      await _player.play();
+      return;
+    }
+
+    final ordered = _playbackScopedIndices();
+    if (ordered.isEmpty) {
+      await _player.seek(Duration.zero);
+      notifyListeners();
+      return;
+    }
+
+    final p = ordered.indexOf(_index);
+    if (p < 0) {
+      if (_playbackPathKeysScope != null) {
+        _playbackPathKeysScope = null;
+        await skipPrevious();
         return;
       }
+      await _player.seek(Duration.zero);
+      notifyListeners();
+      return;
+    }
+
+    if (p > 0) {
+      _index = ordered[p - 1];
+    } else if (_repeat == PlaylistRepeatMode.all) {
+      _index = ordered.last;
     } else {
-      if (_shuffle) {
-        _shufflePos--;
-      } else {
-        _index--;
-      }
+      await _player.seek(Duration.zero);
+      notifyListeners();
+      return;
     }
 
     notifyListeners();
@@ -357,6 +475,9 @@ class PlayerController extends ChangeNotifier {
 
   void toggleShuffle() {
     if (_playlist.length < 2) return;
+    if (_playbackPathKeysScope != null) {
+      return;
+    }
     if (_shuffle) {
       _index = _shuffleOrder[_shufflePos];
       _shuffle = false;
