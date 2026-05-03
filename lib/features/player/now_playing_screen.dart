@@ -273,9 +273,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               return Column(
                                 children: [
                                   Center(
-                                    child: TrackAlbumArt(
-                                      track: t,
-                                      display: TrackArtDisplay.nowPlaying,
+                                    child: _NowPlayingAlbumArtCard(
+                                      pal: pal,
+                                      playerChrome: playerChrome,
+                                      child: TrackAlbumArt(
+                                        track: t,
+                                        display:
+                                            TrackArtDisplay.nowPlaying,
+                                        showShadow: false,
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 18),
@@ -568,6 +574,37 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Elevated surface frame around the hero artwork (reference-style “card”).
+class _NowPlayingAlbumArtCard extends StatelessWidget {
+  const _NowPlayingAlbumArtCard({
+    required this.pal,
+    required this.playerChrome,
+    required this.child,
+  });
+
+  final AppPalette pal;
+  final bool playerChrome;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final outerR = playerChrome ? 32.0 : 24.0;
+    return Material(
+      color: pal.surface,
+      elevation: playerChrome ? 10 : 5,
+      shadowColor: Colors.black.withValues(
+        alpha: playerChrome ? 0.42 : 0.28,
+      ),
+      borderRadius: BorderRadius.circular(outerR),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: child,
+      ),
     );
   }
 }

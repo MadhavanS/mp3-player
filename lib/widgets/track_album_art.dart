@@ -12,10 +12,13 @@ class TrackAlbumArt extends StatelessWidget {
     super.key,
     required this.track,
     required this.display,
+    this.showShadow = true,
   });
 
   final TrackItem track;
   final TrackArtDisplay display;
+  /// When false, skips drop shadow on the artwork (e.g. when wrapped in an outer card).
+  final bool showShadow;
 
   double get _size => switch (display) {
         TrackArtDisplay.mini => 48,
@@ -64,7 +67,8 @@ class TrackAlbumArt extends StatelessWidget {
         height: _size,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(r),
-          boxShadow: _imageShadows(),
+          boxShadow:
+              showShadow ? _imageShadows() : const <BoxShadow>[],
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(r),
@@ -105,40 +109,42 @@ class TrackAlbumArt extends StatelessWidget {
         end: Alignment.bottomRight,
         colors: track.artColors,
       ),
-      boxShadow: switch (display) {
-        TrackArtDisplay.mini => [
-            BoxShadow(
-              color: track.artColors.first.withOpacity(0.35),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
-        TrackArtDisplay.list => const [],
-        TrackArtDisplay.full => [
-            BoxShadow(
-              color: track.artColors.last.withOpacity(0.45),
-              blurRadius: 28,
-              offset: const Offset(0, 18),
-            ),
-            BoxShadow(
-              color: Colors.black.withOpacity(0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        TrackArtDisplay.nowPlaying => [
-            BoxShadow(
-              color: track.artColors.last.withOpacity(0.38),
-              blurRadius: 20,
-              offset: const Offset(0, 12),
-            ),
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 5),
-            ),
-          ],
-      },
+      boxShadow: showShadow
+          ? switch (display) {
+              TrackArtDisplay.mini => [
+                  BoxShadow(
+                    color: track.artColors.first.withOpacity(0.35),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              TrackArtDisplay.list => const [],
+              TrackArtDisplay.full => [
+                  BoxShadow(
+                    color: track.artColors.last.withOpacity(0.45),
+                    blurRadius: 28,
+                    offset: const Offset(0, 18),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.06),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              TrackArtDisplay.nowPlaying => [
+                  BoxShadow(
+                    color: track.artColors.last.withOpacity(0.38),
+                    blurRadius: 20,
+                    offset: const Offset(0, 12),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+            }
+          : const <BoxShadow>[],
     );
 
     return Container(
