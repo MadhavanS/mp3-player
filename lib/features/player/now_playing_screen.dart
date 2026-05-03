@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
@@ -274,7 +275,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                 children: [
                                   Center(
                                     child: _NowPlayingAlbumArtCard(
-                                      pal: pal,
                                       playerChrome: playerChrome,
                                       theme: theme,
                                       title: t.title,
@@ -569,10 +569,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 }
 
-/// Elevated surface frame around hero artwork, title, and artist.
+/// Frosted glass frame (blur + translucent gradient) around artwork and metadata.
 class _NowPlayingAlbumArtCard extends StatelessWidget {
   const _NowPlayingAlbumArtCard({
-    required this.pal,
     required this.playerChrome,
     required this.theme,
     required this.title,
@@ -580,7 +579,6 @@ class _NowPlayingAlbumArtCard extends StatelessWidget {
     required this.artwork,
   });
 
-  final AppPalette pal;
   final bool playerChrome;
   final ThemeData theme;
   final String title;
@@ -590,42 +588,77 @@ class _NowPlayingAlbumArtCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final outerR = playerChrome ? 32.0 : 24.0;
+    final isDark = theme.brightness == Brightness.dark;
+    final blurSigma = playerChrome ? 26.0 : 18.0;
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.22)
+        : Colors.black.withValues(alpha: 0.08);
+    final glassTop =
+        isDark ? Colors.white.withValues(alpha: 0.13) : Colors.white.withValues(alpha: 0.82);
+    final glassBottom =
+        isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white.withValues(alpha: 0.68);
+
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 420),
-      child: Material(
-        color: pal.surface,
-        elevation: playerChrome ? 10 : 5,
-        shadowColor: Colors.black.withValues(
-          alpha: playerChrome ? 0.42 : 0.28,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(outerR),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: playerChrome ? 0.42 : 0.24,
+              ),
+              blurRadius: playerChrome ? 28 : 20,
+              offset: Offset(0, playerChrome ? 12 : 8),
+            ),
+          ],
         ),
-        borderRadius: BorderRadius.circular(outerR),
-        clipBehavior: Clip.antiAlias,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(child: artwork),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleLarge?.copyWith(
-                  height: 1.25,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(outerR),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(outerR),
+                border: Border.all(width: 1, color: borderColor),
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    glassTop,
+                    glassBottom,
+                  ],
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                artist,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(child: artwork),
+                    const SizedBox(height: 16),
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      artist,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
               ),
-            ],
+            ),
           ),
         ),
       ),
