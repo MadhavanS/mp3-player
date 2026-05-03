@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
+import '../../services/favorite_songs_store.dart';
 import '../../services/music_library_path_key.dart';
 import '../../services/recently_played_store.dart';
 import '../../theme/app_theme.dart';
@@ -50,7 +51,7 @@ class LibraryScreenState extends State<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _searchController.addListener(() => setState(() {}));
     _tabController.addListener(_onTabChanged);
   }
@@ -58,7 +59,7 @@ class LibraryScreenState extends State<LibraryScreen>
   void _onTabChanged() {
     if (!mounted) return;
     setState(() {
-      if (!_tabController.indexIsChanging && _tabController.index == 2) {
+      if (!_tabController.indexIsChanging && _tabController.index == 3) {
         _recentListRevision++;
       }
     });
@@ -94,6 +95,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
   String _searchHintForTab(int i) => switch (i) {
         0 || 1 => 'Search by title',
+        2 => 'Search favourites',
         _ => 'Search recent',
       };
 
@@ -297,6 +299,7 @@ class LibraryScreenState extends State<LibraryScreen>
                         tabs: const [
                           Tab(text: 'Songs'),
                           Tab(text: 'Playlist'),
+                          Tab(text: 'Favourites'),
                           Tab(text: 'Recently played'),
                         ],
                       ),
@@ -323,6 +326,7 @@ class LibraryScreenState extends State<LibraryScreen>
                             playlistIndices,
                             player,
                           ),
+                          _buildFavoritesTab(theme, pal, query),
                           _buildRecentTab(theme, pal, query),
                         ],
                       ),
@@ -330,6 +334,146 @@ class LibraryScreenState extends State<LibraryScreen>
                   ],
                 ),
               ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFavoritesTab(ThemeData theme, AppPalette pal, String rawQuery) {
+    return ValueListenableBuilder<int>(
+      valueListenable: FavoriteSongsStore.revision,
+      builder: (context, _, __) {
+        return FutureBuilder<List<String>>(
+          future: FavoriteSongsStore.loadPaths(),
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return Center(
+                child: CircularProgressIndicator(
+                  color: pal.primary,
+                ),
+              );
+            }
+
+            List<String> paths = snap.data ?? [];
+            final q = rawQuery.trim().toLowerCase();
+            if (q.isNotEmpty) {
+              paths = paths
+                  .where(
+                    (path) =>
+                        p.basenameWithoutExtension(path).toLowerCase().contains(q) ||
+                        path.toLowerCase().contains(q),
+                  )
+                  .toList();
+            }
+
+            if ((snap.data ?? []).isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.favorite_border_rounded,
+                        size: 54,
+                        color: pal.onScaffold.withValues(alpha: 0.45),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'No favourites yet',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: pal.onScaffold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Tap the heart next to repeat on Now Playing to add songs here.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: pal.textSecondary.withValues(alpha: 0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            if (paths.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Text(
+                    'No favourites match your search.',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: pal.textMuted,
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            return ListView.separated(
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: paths.length,
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: pal.dividerOnHero, indent: 56),
+              itemBuilder: (context, i) {
+                final path = paths[i];
+                final title =
+                    path.isEmpty ? path : p.basenameWithoutExtension(path);
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _playRecentPath(context, path),
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: pal.onScaffold.withValues(alpha: 0.1),
+                            child: Icon(
+                              Icons.favorite_rounded,
+                              color: pal.primary.withValues(alpha: 0.9),
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: pal.onScaffold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  path,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color:
+                                        pal.textMuted.withValues(alpha: 0.92),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             );
           },
         );

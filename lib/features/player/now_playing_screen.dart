@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
+import '../../services/favorite_songs_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/track_album_art.dart';
@@ -138,6 +139,46 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     });
   }
 
+  Widget _favoriteButton(AppPalette pal, TrackItem cur) {
+    final path = cur.filePath ?? '';
+    final canFav = path.isNotEmpty;
+    return FutureBuilder<void>(
+      future: FavoriteSongsStore.ensureLoaded(),
+      builder: (context, snap) {
+        final ready = snap.connectionState == ConnectionState.done;
+        return ListenableBuilder(
+          listenable: FavoriteSongsStore.revision,
+          builder: (context, _) {
+            final isFav = canFav && FavoriteSongsStore.isFavorite(path);
+            return IconButton(
+              iconSize: 28,
+              tooltip: isFav ? 'Remove from favourites' : 'Add to favourites',
+              icon: Icon(
+                isFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                color: !canFav
+                    ? pal.textSecondary.withValues(alpha: 0.35)
+                    : isFav
+                        ? pal.primary
+                        : pal.textSecondary.withValues(alpha: 0.55),
+              ),
+              onPressed: !ready || !canFav
+                  ? null
+                  : () async {
+                      final nowFav =
+                          await FavoriteSongsStore.toggleFavorite(path);
+                      if (!context.mounted) return;
+                      ActionPillToast.showUsingRootNavigator(
+                        nowFav ? 'Favourited' : 'Removed from favourites',
+                        uppercaseLabel: true,
+                      );
+                    },
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _footerTrackTools(
     AppPalette pal,
     PlayerController player,
@@ -179,6 +220,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         onPressed:
                             canEdit ? () => _openTagEditor(player) : null,
                       ),
+                      _favoriteButton(pal, cur),
                       IconButton(
                         tooltip: 'Clean site-style name',
                         iconSize: 28,
