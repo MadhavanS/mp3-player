@@ -5,11 +5,10 @@ import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/track_album_art.dart';
+import '../player/track_overflow_actions.dart';
 
 /// Key for the library search field (widget tests).
 const Key librarySearchFieldKey = Key('library_search_field');
-
-enum _TrackMenuAction { playFromHere, playOnlyThis, addToPlaylist }
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({
@@ -76,35 +75,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await player.jumpToIndex(playlistIndex);
   }
 
-  Future<void> _onTrackMenu(
+  Future<void> _onTrackOverflow(
     BuildContext context,
     PlayerController player,
     int playlistIndex,
-    _TrackMenuAction action,
+    TrackOverflowAction action,
   ) async {
-    final tracks = List<TrackItem>.from(player.playlist);
-    if (playlistIndex < 0 || playlistIndex >= tracks.length) return;
-
-    switch (action) {
-      case _TrackMenuAction.playFromHere:
-        await player.setPlaylistAndPlay(tracks.sublist(playlistIndex));
-      case _TrackMenuAction.playOnlyThis:
-        await player.setPlaylistAndPlay([tracks[playlistIndex]]);
-      case _TrackMenuAction.addToPlaylist:
-        final t = tracks[playlistIndex];
-        final added = await player.addToPlaylistIfAbsent(t);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                added
-                    ? 'Added to playlist: ${t.title}'
-                    : 'Already in playlist: ${t.title}',
-              ),
-            ),
-          );
-        }
-    }
+    await applyTrackOverflowAction(context, player, playlistIndex, action);
   }
 
   InputDecoration _searchDecoration(AppPalette pal, ThemeData theme) {
@@ -327,8 +304,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
           track: track,
           selected: selected,
           onTap: () => _selectTrack(context, playlistIndex),
-          onMenuAction: (action) =>
-              _onTrackMenu(context, player, playlistIndex, action),
+          onOverflowAction: (action) =>
+              _onTrackOverflow(context, player, playlistIndex, action),
         );
       },
     );
@@ -340,13 +317,13 @@ class _TrackTile extends StatelessWidget {
     required this.track,
     required this.selected,
     required this.onTap,
-    required this.onMenuAction,
+    required this.onOverflowAction,
   });
 
   final TrackItem track;
   final bool selected;
   final VoidCallback onTap;
-  final void Function(_TrackMenuAction action) onMenuAction;
+  final void Function(TrackOverflowAction action) onOverflowAction;
 
   @override
   Widget build(BuildContext context) {
@@ -400,44 +377,17 @@ class _TrackTile extends StatelessWidget {
                   ],
                 ),
               ),
-              PopupMenuButton<_TrackMenuAction>(
+              PopupMenuButton<TrackOverflowAction>(
                 tooltip: 'Track options',
                 icon: Icon(
                   Icons.more_horiz_rounded,
                   color: pal.onScaffold.withValues(alpha: 0.8),
                 ),
                 padding: EdgeInsets.zero,
-                onSelected: onMenuAction,
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: _TrackMenuAction.playFromHere,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.playlist_play_rounded),
-                      title: Text('Play from here'),
-                      subtitle: Text('New queue: this track to end of list'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _TrackMenuAction.playOnlyThis,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.music_note_rounded),
-                      title: Text('Play this song only'),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _TrackMenuAction.addToPlaylist,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.playlist_add_rounded),
-                      title: Text('Add to playlist'),
-                      subtitle: Text(
-                        'Appends to the queue if this song is not already in it',
-                      ),
-                    ),
-                  ),
-                ],
+                onSelected: onOverflowAction,
+                itemBuilder: (context) => trackOverflowPopupMenuEntries(
+                  enableDeleteFromDevice: trackCanDeleteFromDevice(track),
+                ),
               ),
             ],
           ),

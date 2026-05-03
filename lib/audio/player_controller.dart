@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 
@@ -167,6 +166,39 @@ class PlayerController extends ChangeNotifier {
     if (currentPath == oldPath) {
       unawaited(_loadCurrent());
     }
+  }
+
+  /// Removes one queue entry and keeps playback coherent. Shuffle is turned off.
+  Future<void> removePlaylistEntryAt(int i) async {
+    if (_playlist.isEmpty || i < 0 || i >= _playlist.length) return;
+
+    if (_shuffle) {
+      _index = currentIndex.clamp(0, _playlist.length - 1);
+      _resetShuffleState();
+    }
+
+    final isCurrent = i == _index;
+    if (isCurrent) {
+      await stopForExternalFileEdit();
+    }
+
+    _playlist.removeAt(i);
+
+    final len = _playlist.length;
+    if (len == 0) {
+      _index = 0;
+      notifyListeners();
+      return;
+    }
+
+    if (i < _index) {
+      _index--;
+    } else if (isCurrent) {
+      _index = i.clamp(0, len - 1);
+    }
+
+    notifyListeners();
+    await _loadCurrent();
   }
 
   Future<void> jumpToIndex(int i, {bool autoPlay = true}) async {

@@ -344,7 +344,14 @@ String _senSongs(String str) {
 
 String _starMusiq(String str) {
   var temp = StringBuffer();
-  for (final s in str.split('_')) {
+  var parts = <String>[];
+  if (str.contains('_')) 
+    parts = str.split('_');
+  else if (str.contains('-'))
+    parts = str.split('-');
+  else
+    parts = str.split(' ');
+  for (final s in parts) {
     if (_patternFind(s.trim(), r'^[0-9]')) {
       temp.write(s.replaceAll(RegExp(r'[0-9]'), ''));
     } else {

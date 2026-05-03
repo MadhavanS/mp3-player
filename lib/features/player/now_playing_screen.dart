@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/track_album_art.dart';
 import 'edit_track_tags_sheet.dart';
+import 'track_overflow_actions.dart';
 
 String _formatDuration(Duration d) {
   final m = d.inMinutes;
@@ -102,6 +105,82 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
+  Widget _footerTrackTools(
+    AppPalette pal,
+    PlayerController player,
+  ) {
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final cur = player.currentTrack;
+        if (cur == null) return const SizedBox.shrink();
+
+        final canEdit =
+            cur.filePath != null && cur.filePath!.isNotEmpty;
+
+        return Material(
+          color: pal.surface,
+          child: SafeArea(
+            top: false,
+            minimum: const EdgeInsets.only(bottom: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Divider(height: 1, thickness: 1, color: pal.dividerOnHero),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 10, 24, 14),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: 'Edit tags & cover',
+                        iconSize: 28,
+                        icon: Icon(
+                          Icons.edit_note_rounded,
+                          color: canEdit
+                              ? pal.primary
+                              : pal.textSecondary.withValues(alpha: 0.45),
+                        ),
+                        onPressed:
+                            canEdit ? () => _openTagEditor(player) : null,
+                      ),
+                      const SizedBox(width: 32),
+                      PopupMenuButton<TrackOverflowAction>(
+                        tooltip: 'Track options',
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          Icons.more_horiz_rounded,
+                          size: 28,
+                          color: pal.textPrimary.withValues(alpha: 0.82),
+                        ),
+                        onSelected: (action) {
+                          unawaited(
+                            applyTrackOverflowAction(
+                              context,
+                              player,
+                              player.currentIndex,
+                              action,
+                            ),
+                          );
+                        },
+                        itemBuilder: (context) =>
+                            trackOverflowPopupMenuEntries(
+                          enableDeleteFromDevice:
+                              trackCanDeleteFromDevice(cur),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -133,6 +212,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             ),
           ),
           body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
                 child: Container(
@@ -271,60 +351,37 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                         },
                                       ),
                                       const SizedBox(height: 8),
-                                      ListenableBuilder(
-                                        listenable: player,
-                                        builder: (context, _) {
-                                          final cur = player.currentTrack;
-                                          final canEdit = cur != null &&
-                                              cur.filePath != null &&
-                                              cur.filePath!.isNotEmpty;
-                                          return Row(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              IconButton(
-                                                tooltip: 'Shuffle',
-                                                icon: Icon(
-                                                  Icons.shuffle_rounded,
-                                                  color: player.shuffleEnabled
-                                                      ? pal.primary
-                                                      : pal.textSecondary,
-                                                ),
-                                                onPressed: player.playlist.length < 2
-                                                    ? null
-                                                    : () => player.toggleShuffle(),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              IconButton(
-                                                tooltip: 'Edit tags & cover',
-                                                icon: Icon(
-                                                  Icons.edit_note_rounded,
-                                                  color: canEdit
-                                                      ? pal.primary
-                                                      : pal.textSecondary
-                                                          .withValues(alpha: 0.45),
-                                                ),
-                                                onPressed: canEdit
-                                                    ? () => _openTagEditor(player)
-                                                    : null,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              IconButton(
-                                                tooltip: 'Repeat mode',
-                                                icon: Icon(
-                                                  player.repeatMode == PlaylistRepeatMode.one
-                                                      ? Icons.repeat_one_rounded
-                                                      : Icons.repeat_rounded,
-                                                  color: player.repeatMode ==
-                                                          PlaylistRepeatMode.off
-                                                      ? pal.textSecondary
-                                                          .withValues(alpha: 0.55)
-                                                      : pal.primary,
-                                                ),
-                                                onPressed: () => player.cycleRepeatMode(),
-                                              ),
-                                            ],
-                                          );
-                                        },
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'Shuffle',
+                                            icon: Icon(
+                                              Icons.shuffle_rounded,
+                                              color: player.shuffleEnabled
+                                                  ? pal.primary
+                                                  : pal.textSecondary,
+                                            ),
+                                            onPressed: player.playlist.length < 2
+                                                ? null
+                                                : () => player.toggleShuffle(),
+                                          ),
+                                          const SizedBox(width: 24),
+                                          IconButton(
+                                            tooltip: 'Repeat mode',
+                                            icon: Icon(
+                                              player.repeatMode == PlaylistRepeatMode.one
+                                                  ? Icons.repeat_one_rounded
+                                                  : Icons.repeat_rounded,
+                                              color: player.repeatMode ==
+                                                      PlaylistRepeatMode.off
+                                                  ? pal.textSecondary
+                                                      .withValues(alpha: 0.55)
+                                                  : pal.primary,
+                                            ),
+                                            onPressed: () => player.cycleRepeatMode(),
+                                          ),
+                                        ],
                                       ),
                                       const SizedBox(height: 4),
                                       Row(
@@ -381,12 +438,13 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               },
                             ),
                           ),
-                          ),
+                        ),
                       ],
                     ),
                   ),
                 ),
               ),
+              _footerTrackTools(pal, player),
             ],
           ),
         );
