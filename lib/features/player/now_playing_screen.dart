@@ -220,7 +220,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               tooltip: playerChrome ? 'Collapse' : 'Back to library',
               onPressed: _safeCollapse,
             ),
-            title: playerChrome ? _SavedStatusChip(pal: pal) : null,
+            title: null,
             actions: playerChrome
                 ? [
                     PopupMenuButton<TrackOverflowAction>(
@@ -604,43 +604,6 @@ class _NowPlayingAlbumArtCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: child,
-      ),
-    );
-  }
-}
-
-class _SavedStatusChip extends StatelessWidget {
-  const _SavedStatusChip({required this.pal});
-
-  final AppPalette pal;
-
-  @override
-  Widget build(BuildContext context) {
-    const fg = Color(0xFF0D1117);
-    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: fg,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.85,
-          fontSize: 11,
-        );
-    return IgnorePointer(
-      child: Material(
-        color: pal.accent,
-        borderRadius: BorderRadius.circular(22),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.check_rounded, size: 17, color: fg),
-              const SizedBox(width: 6),
-              Text(
-                'SAVED',
-                style: labelStyle,
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

@@ -6,6 +6,7 @@ import 'audio/player_controller.dart';
 import 'features/shell/main_shell.dart';
 import 'services/theme_settings_store.dart';
 import 'theme/app_theme.dart';
+import 'widgets/action_pill_toast.dart';
 
 class Mp3PlayerApp extends StatefulWidget {
   const Mp3PlayerApp({super.key});
@@ -67,6 +68,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     return PlayerControllerScope(
       controller: _player,
       child: MaterialApp(
+        navigatorKey: appNavigatorKey,
         title: 'MP3 Player',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.themeFor(resolved),

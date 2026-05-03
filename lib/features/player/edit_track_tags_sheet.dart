@@ -12,6 +12,7 @@ import '../../services/storage_access.dart';
 import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/action_pill_toast.dart';
 
 String _genreTextFromTrack(TrackItem t) {
   return t.genres.replaceAll('#', ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -304,10 +305,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       }
 
       if (mounted) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('File renamed and tags updated.')),
-        );
         Navigator.of(context).pop();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ActionPillToast.showUsingRootNavigator(
+            'File updated',
+            uppercaseLabel: true,
+          );
+        });
       }
       unawaited(_resumePlaybackAfterTagSave(player, wasPlaying, resumePosition));
     } on StateError catch (e) {
@@ -378,8 +382,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       final refreshed = await readAudioMetadata(widget.track);
       player.updateTrackByPath(path, refreshed);
       if (mounted) {
-        messenger.showSnackBar(const SnackBar(content: Text('Tags saved to file.')));
         Navigator.of(context).pop();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ActionPillToast.showUsingRootNavigator(
+            'Tags saved',
+            uppercaseLabel: true,
+          );
+        });
       }
       unawaited(_resumePlaybackAfterTagSave(player, wasPlaying, resumePosition));
     } on UnsupportedError catch (e) {

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/track_file_delete.dart';
+import '../../widgets/action_pill_toast.dart';
 
 enum TrackOverflowAction {
   playFromHere,
@@ -93,14 +94,10 @@ Future<void> applyTrackOverflowAction(
       final t = tracks[playlistIndex];
       final added = await player.addToPlaylistIfAbsent(t);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            added
-                ? 'Added to playlist: ${t.title}'
-                : 'Already in playlist: ${t.title}',
-          ),
-        ),
+      ActionPillToast.show(
+        context,
+        added ? 'Added to playlist' : 'Already in playlist',
+        uppercaseLabel: true,
       );
 
     case TrackOverflowAction.deleteFromDevice:
@@ -168,8 +165,10 @@ Future<void> applyTrackOverflowAction(
       await player.removePlaylistEntryAt(playlistIndex);
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Deleted: $basename')),
+        ActionPillToast.show(
+          context,
+          'Deleted',
+          uppercaseLabel: true,
         );
       }
   }
