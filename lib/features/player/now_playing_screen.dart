@@ -666,6 +666,105 @@ class _NowPlayingAlbumArtCard extends StatelessWidget {
   }
 }
 
+/// Player theme: frosted “Up next” row matching hero glass + primary-tinted labels.
+class _UpNextGlassTrackCard extends StatelessWidget {
+  const _UpNextGlassTrackCard({
+    required this.pal,
+    required this.theme,
+    required this.track,
+  });
+
+  final AppPalette pal;
+  final ThemeData theme;
+  final TrackItem track;
+
+  static const _r = 22.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = theme.brightness == Brightness.dark;
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.22)
+        : Colors.black.withValues(alpha: 0.08);
+    final glassTop = isDark
+        ? Colors.white.withValues(alpha: 0.11)
+        : Colors.white.withValues(alpha: 0.78);
+    final glassBottom = isDark
+        ? Colors.white.withValues(alpha: 0.045)
+        : Colors.white.withValues(alpha: 0.62);
+
+    final titleStyle = theme.textTheme.titleSmall?.copyWith(
+      fontWeight: FontWeight.w700,
+      color: pal.primary,
+      fontSize: 15,
+    );
+    final artistStyle = theme.textTheme.bodySmall?.copyWith(
+      color: pal.primary.withValues(alpha: 0.78),
+      fontSize: 13,
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(_r),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.38),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(_r),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(_r),
+              border: Border.all(width: 1, color: borderColor),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [glassTop, glassBottom],
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  TrackAlbumArt(track: track, display: TrackArtDisplay.list),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          track.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: titleStyle,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          track.artist,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: artistStyle,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _UpNextPanel extends StatelessWidget {
   const _UpNextPanel({
     required this.next,
@@ -683,10 +782,6 @@ class _UpNextPanel extends StatelessWidget {
   final int queueLength;
   final bool playerChrome;
 
-  static const _lightCardTint = Color(0xFFF2F2F7);
-  static const _onLightCardPrimary = Color(0xFF121212);
-  static const _onLightCardSecondary = Color(0xFF5C5C5C);
-
   @override
   Widget build(BuildContext context) {
     final labelStyle = theme.textTheme.labelMedium?.copyWith(
@@ -701,49 +796,10 @@ class _UpNextPanel extends StatelessWidget {
 
     Widget upNextInner() {
       if (next != null && playerChrome) {
-        final titleInside = Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: _onLightCardPrimary,
-              fontSize: 15,
-            );
-        final artistInside =
-            Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: _onLightCardSecondary,
-                  fontSize: 13,
-                );
-        return Material(
-          color: _lightCardTint,
-          borderRadius: BorderRadius.circular(20),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                TrackAlbumArt(track: next!, display: TrackArtDisplay.list),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        next!.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: titleInside,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        next!.artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: artistInside,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+        return _UpNextGlassTrackCard(
+          pal: pal,
+          theme: theme,
+          track: next!,
         );
       }
       if (next != null) {
