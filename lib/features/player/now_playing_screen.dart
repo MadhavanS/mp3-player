@@ -7,8 +7,10 @@ import 'package:flutter/material.dart';
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/action_pill_toast.dart';
 import '../../widgets/track_album_art.dart';
 import 'edit_track_tags_sheet.dart';
+import 'site_rename_standalone_dialog.dart';
 import 'track_overflow_actions.dart';
 
 String _formatDuration(Duration d) {
@@ -94,10 +96,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     return false;
   }
 
-  void _showTagSheet(
-    PlayerController player, {
-    bool openSiteRenameOnOpen = false,
-  }) {
+  void _showTagSheet(PlayerController player) {
     final t = player.currentTrack;
     if (t == null || t.filePath == null || t.filePath!.isEmpty) {
       return;
@@ -107,18 +106,37 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       isScrollControlled: true,
       backgroundColor: context.palette.surface,
       showDragHandle: false,
-      builder: (ctx) => EditTrackTagsSheet(
-        track: t,
-        openSiteRenameOnOpen: openSiteRenameOnOpen,
-      ),
+      builder: (ctx) => EditTrackTagsSheet(track: t),
     );
   }
 
   void _openTagEditor(PlayerController player) =>
       _showTagSheet(player);
 
-  void _openTagEditorSiteRename(PlayerController player) =>
-      _showTagSheet(player, openSiteRenameOnOpen: true);
+  void _notifyShuffle(PlayerController player) {
+    if (player.playlist.length < 2) return;
+    player.toggleShuffle();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ActionPillToast.showUsingRootNavigator(
+        player.shuffleEnabled ? 'Shuffle on' : 'Shuffle off',
+        uppercaseLabel: true,
+      );
+    });
+  }
+
+  void _notifyRepeat(PlayerController player) {
+    player.cycleRepeatMode();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final msg = switch (player.repeatMode) {
+        PlaylistRepeatMode.off => 'Repeat off',
+        PlaylistRepeatMode.all => 'Repeat all',
+        PlaylistRepeatMode.one => 'Repeat current',
+      };
+      ActionPillToast.showUsingRootNavigator(msg, uppercaseLabel: true);
+    });
+  }
 
   Widget _footerTrackTools(
     AppPalette pal,
@@ -171,7 +189,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               : pal.textSecondary.withValues(alpha: 0.45),
                         ),
                         onPressed: canEdit && !kIsWeb
-                            ? () => _openTagEditorSiteRename(player)
+                            ? () => showStandaloneSiteRenameDialog(context, cur)
                             : null,
                       ),
                       const SizedBox(width: 24),
@@ -314,12 +332,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 16),
-                                  _PlaybackModePillsRow(
-                                    player: player,
-                                    pal: pal,
-                                    theme: theme,
-                                  ),
-                                  const SizedBox(height: 16),
                                   StreamBuilder<Duration>(
                                     stream: player.audioPlayer.positionStream,
                                     builder: (context, posSnap) {
@@ -394,7 +406,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                           onPressed: player.playlist.length <
                                                   2
                                               ? null
-                                              : () => player.toggleShuffle(),
+                                              : () => _notifyShuffle(player),
                                         ),
                                         const SizedBox(width: 4),
                                         IconButton(
@@ -464,8 +476,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                         )
                                                     : pal.primary,
                                           ),
-                                          onPressed: () => player
-                                              .cycleRepeatMode(),
+                                          onPressed: () => _notifyRepeat(player),
                                         ),
                                       ],
                                     )
@@ -486,7 +497,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                               player.playlist.length < 2
                                                   ? null
                                                   : () =>
-                                                      player.toggleShuffle(),
+                                                      _notifyShuffle(player),
                                         ),
                                         const SizedBox(width: 24),
                                         IconButton(
@@ -502,8 +513,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                     .withValues(alpha: 0.55)
                                                 : pal.primary,
                                           ),
-                                          onPressed: () => player
-                                              .cycleRepeatMode(),
+                                          onPressed: () =>
+                                              _notifyRepeat(player),
                                         ),
                                       ],
                                     ),
@@ -597,121 +608,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           ),
         );
       },
-    );
-  }
-}
-
-/// Shuffle / repeat state pills — tap repeats the same behavior as transport icons.
-class _PlaybackModePillsRow extends StatelessWidget {
-  const _PlaybackModePillsRow({
-    required this.player,
-    required this.pal,
-    required this.theme,
-  });
-
-  final PlayerController player;
-  final AppPalette pal;
-  final ThemeData theme;
-
-  static String _repeatLabel(PlaylistRepeatMode m) => switch (m) {
-        PlaylistRepeatMode.off => 'Repeat off',
-        PlaylistRepeatMode.all => 'Repeat all',
-        PlaylistRepeatMode.one => 'Repeat current',
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: player,
-      builder: (context, _) {
-        final shuffleOn = player.shuffleEnabled;
-        final repeat = player.repeatMode;
-        return Wrap(
-          alignment: WrapAlignment.center,
-          spacing: 10,
-          runSpacing: 8,
-          children: [
-            _ModeStatusPill(
-              label: shuffleOn ? 'Shuffle on' : 'Shuffle off',
-              selected: shuffleOn,
-              pal: pal,
-              theme: theme,
-              onTap: player.playlist.length < 2
-                  ? null
-                  : () => player.toggleShuffle(),
-            ),
-            _ModeStatusPill(
-              label: _repeatLabel(repeat),
-              selected: repeat != PlaylistRepeatMode.off,
-              pal: pal,
-              theme: theme,
-              onTap: () => player.cycleRepeatMode(),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _ModeStatusPill extends StatelessWidget {
-  const _ModeStatusPill({
-    required this.label,
-    required this.selected,
-    required this.pal,
-    required this.theme,
-    this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final AppPalette pal;
-  final ThemeData theme;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = theme.brightness == Brightness.dark;
-    final border = selected
-        ? pal.primary.withValues(alpha: 0.72)
-        : pal.onScaffold.withValues(alpha: isDark ? 0.22 : 0.2);
-    final fill = selected
-        ? pal.primary.withValues(alpha: 0.16)
-        : (isDark
-            ? Colors.white.withValues(alpha: 0.07)
-            : Colors.black.withValues(alpha: 0.04));
-    final fg =
-        selected ? pal.primary : pal.textMuted.withValues(alpha: 0.92);
-    const r = 22.0;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(r),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(r),
-            border: Border.all(width: 1, color: border),
-            color: fill,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 8,
-            ),
-            child: Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: fg,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.25,
-                fontSize: 12.5,
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

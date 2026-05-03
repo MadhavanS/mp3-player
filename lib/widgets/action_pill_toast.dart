@@ -121,6 +121,11 @@ abstract final class ActionPillToast {
 
     unawaited(
       Future<void>.delayed(dwell, () {
+        // [dismiss]/a newer toast may already have removed [entry]; removing twice asserts.
+        if (!entry.mounted) {
+          if (identical(_current, entry)) _current = null;
+          return;
+        }
         entry.remove();
         if (identical(_current, entry)) _current = null;
       }),

@@ -54,14 +54,9 @@ class EditTrackTagsSheet extends StatefulWidget {
   const EditTrackTagsSheet({
     super.key,
     required this.track,
-    this.openSiteRenameOnOpen = false,
   });
 
   final TrackItem track;
-
-  /// When true (e.g. opened from Now Playing wand), runs site-style rename preview
-  /// once the sheet is on screen (non-web only).
-  final bool openSiteRenameOnOpen;
 
   @override
   State<EditTrackTagsSheet> createState() => _EditTrackTagsSheetState();
@@ -92,12 +87,6 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     _artist.addListener(_onTagFieldChanged);
     _album.addListener(_onTagFieldChanged);
     _genre.addListener(_onTagFieldChanged);
-    if (widget.openSiteRenameOnOpen && !kIsWeb) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        unawaited(_previewSiteRename());
-      });
-    }
   }
 
   void _onTagFieldChanged() {
