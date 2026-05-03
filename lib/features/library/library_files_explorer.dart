@@ -150,13 +150,14 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   Widget _filesHeader({
     required ThemeData theme,
     required AppPalette pal,
-    required String title,
+    String? title,
     required bool showBack,
     required VoidCallback? onBack,
     required Widget subtitleWidget,
     required VoidCallback? onHomeRoots,
     required List<PopupMenuEntry<void>>? menuItems,
   }) {
+    final showTitle = title != null && title.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
       child: Column(
@@ -178,14 +179,16 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: pal.onScaffold,
-                        fontWeight: FontWeight.w700,
+                    if (showTitle) ...[
+                      Text(
+                        title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: pal.onScaffold,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
+                      const SizedBox(height: 2),
+                    ],
                     subtitleWidget,
                   ],
                 ),
@@ -464,7 +467,6 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
           _filesHeader(
             theme: theme,
             pal: pal,
-            title: 'Files',
             showBack: false,
             onBack: null,
             subtitleWidget: headerSubtitle,
@@ -580,7 +582,6 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
             _filesHeader(
               theme: theme,
               pal: pal,
-              title: 'Files',
               showBack: true,
               onBack: _goBack,
               subtitleWidget: headerSubtitle,

@@ -91,43 +91,46 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
 
     return Scaffold(
       backgroundColor: pal.scaffoldBackground,
-      appBar: AppBar(
-        backgroundColor: pal.scaffoldBackground,
-        foregroundColor: pal.onScaffold,
-        elevation: 0,
-        title: Text(
-          'Files',
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: pal.onScaffold,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: TextField(
-              controller: _searchController,
-              textInputAction: TextInputAction.search,
-              keyboardType: TextInputType.text,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: pal.onScaffold,
-                fontSize: 15,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 12, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    tooltip: 'Close',
+                    color: pal.onScaffold,
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      keyboardType: TextInputType.text,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: pal.onScaffold,
+                        fontSize: 15,
+                      ),
+                      decoration: _searchDecoration(pal, theme),
+                    ),
+                  ),
+                ],
               ),
-              decoration: _searchDecoration(pal, theme),
             ),
-          ),
-          Expanded(
-            child: LibraryFilesExplorer(
-              musicRoots: widget.musicRoots,
-              query: q,
-              onOverflow: widget.onOverflow,
-              onSongChosenFromExplorer: _onSongChosenFromExplorer,
+            Expanded(
+              child: LibraryFilesExplorer(
+                musicRoots: widget.musicRoots,
+                query: q,
+                onOverflow: widget.onOverflow,
+                onSongChosenFromExplorer: _onSongChosenFromExplorer,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

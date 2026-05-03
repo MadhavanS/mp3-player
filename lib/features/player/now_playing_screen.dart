@@ -192,6 +192,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 
   Widget _footerTrackTools(
+    BuildContext context,
     AppPalette pal,
     PlayerController player,
   ) {
@@ -204,9 +205,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         final canEdit =
             cur.filePath != null && cur.filePath!.isNotEmpty;
 
-        final playerChrome = context.usesPlayerChrome;
+        final footerChrome = context.usesPlayerChrome;
+        final navIconColor =
+            footerChrome ? pal.onScaffold : pal.textPrimary;
         return Material(
-          color: playerChrome ? pal.scaffoldBackground : pal.surface,
+          color: footerChrome ? pal.scaffoldBackground : pal.surface,
           child: SafeArea(
             top: false,
             minimum: const EdgeInsets.only(bottom: 4),
@@ -216,35 +219,82 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               children: [
                 Divider(height: 1, thickness: 1, color: pal.dividerOnHero),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 10, 24, 14),
+                  padding: const EdgeInsets.fromLTRB(8, 10, 8, 14),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       IconButton(
-                        tooltip: 'Edit tags & cover',
+                        tooltip:
+                            footerChrome ? 'Collapse' : 'Back to library',
                         iconSize: 28,
                         icon: Icon(
-                          Icons.edit_note_rounded,
-                          color: canEdit
-                              ? pal.primary
-                              : pal.textSecondary.withValues(alpha: 0.45),
+                          footerChrome
+                              ? Icons.expand_more_rounded
+                              : Icons.arrow_back_rounded,
+                          color: navIconColor,
                         ),
-                        onPressed:
-                            canEdit ? () => _openTagEditor(player) : null,
+                        onPressed: _safeCollapse,
                       ),
-                      _favoriteButton(pal, cur),
-                      IconButton(
-                        tooltip: 'Clean site-style name',
-                        iconSize: 28,
-                        icon: Icon(
-                          Icons.auto_fix_high_outlined,
-                          color: canEdit
-                              ? pal.primary
-                              : pal.textSecondary.withValues(alpha: 0.45),
+                      Expanded(
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Edit tags & cover',
+                              iconSize: 28,
+                              icon: Icon(
+                                Icons.edit_note_rounded,
+                                color: canEdit
+                                    ? pal.primary
+                                    : pal.textSecondary
+                                        .withValues(alpha: 0.45),
+                              ),
+                              onPressed: canEdit
+                                  ? () => _openTagEditor(player)
+                                  : null,
+                            ),
+                            _favoriteButton(pal, cur),
+                            IconButton(
+                              tooltip: 'Clean site-style name',
+                              iconSize: 28,
+                              icon: Icon(
+                                Icons.auto_fix_high_outlined,
+                                color: canEdit
+                                    ? pal.primary
+                                    : pal.textSecondary
+                                        .withValues(alpha: 0.45),
+                              ),
+                              onPressed: canEdit && !kIsWeb
+                                  ? () =>
+                                      showStandaloneSiteRenameDialog(
+                                          context, cur)
+                                  : null,
+                            ),
+                          ],
                         ),
-                        onPressed: canEdit && !kIsWeb
-                            ? () => showStandaloneSiteRenameDialog(context, cur)
-                            : null,
+                      ),
+                      PopupMenuButton<TrackOverflowAction>(
+                        tooltip: 'Track options',
+                        padding: EdgeInsets.zero,
+                        position: PopupMenuPosition.under,
+                        icon: Icon(
+                          Icons.more_vert_rounded,
+                          color: navIconColor,
+                        ),
+                        onSelected: (action) {
+                          unawaited(
+                            applyTrackOverflowAction(
+                              context,
+                              player,
+                              player.currentIndex,
+                              action,
+                            ),
+                          );
+                        },
+                        itemBuilder: (context) => trackOverflowPopupMenuEntries(
+                          enableDeleteFromDevice:
+                              trackCanDeleteFromDevice(cur),
+                        ),
                       ),
                     ],
                   ),
@@ -280,54 +330,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 
         return Scaffold(
           backgroundColor: pageBg,
-          appBar: AppBar(
-            backgroundColor: pageBg,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            automaticallyImplyLeading: false,
-            leading: IconButton(
-              icon: Icon(
-                playerChrome
-                    ? Icons.expand_more_rounded
-                    : Icons.arrow_back_rounded,
-              ),
-              tooltip: playerChrome ? 'Collapse' : 'Back to library',
-              onPressed: _safeCollapse,
-            ),
-            title: null,
-            actions: [
-              PopupMenuButton<TrackOverflowAction>(
-                tooltip: 'Track options',
-                padding: EdgeInsets.zero,
-                position: PopupMenuPosition.under,
-                icon: Icon(
-                  Icons.more_vert_rounded,
-                  color: playerChrome ? pal.onScaffold : pal.textPrimary,
-                ),
-                onSelected: (action) {
-                  unawaited(
-                    applyTrackOverflowAction(
-                      context,
-                      player,
-                      player.currentIndex,
-                      action,
-                    ),
-                  );
-                },
-                itemBuilder: (context) => trackOverflowPopupMenuEntries(
-                  enableDeleteFromDevice:
-                      trackCanDeleteFromDevice(track),
-                ),
-              ),
-            ],
-          ),
-          body: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: NotificationListener<ScrollNotification>(
-                  onNotification: _onScrollForDismiss,
-                  child: CustomScrollView(
+          body: SafeArea(
+            bottom: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _onScrollForDismiss,
+                    child: CustomScrollView(
                     physics: const AlwaysScrollableScrollPhysics(
                       parent: BouncingScrollPhysics(),
                     ),
@@ -666,9 +677,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   ),
                 ),
               ),
-              _footerTrackTools(pal, player),
+              _footerTrackTools(context, pal, player),
             ],
           ),
+        ),
         );
       },
     );
