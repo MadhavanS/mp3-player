@@ -1,3 +1,5 @@
+import 'dart:math' show min;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -8,6 +10,7 @@ import '../../services/favorite_songs_store.dart';
 import '../../services/music_library_path_key.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
+import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/track_album_art.dart';
 import '../player/track_overflow_actions.dart';
@@ -77,21 +80,6 @@ class LibraryScreenState extends State<LibraryScreen>
   static bool _trackMatchesQuery(TrackItem t, String q) {
     if (q.isEmpty) return true;
     return t.title.toLowerCase().contains(q);
-  }
-
-  static List<int> _playlistQueueIndices(
-    List<TrackItem> tracks,
-    int currentIndex,
-    String rawQuery,
-  ) {
-    if (tracks.isEmpty) return [];
-    final start = currentIndex.clamp(0, tracks.length - 1);
-    final q = rawQuery.trim().toLowerCase();
-    final out = <int>[];
-    for (var i = start; i < tracks.length; i++) {
-      if (q.isEmpty || _trackMatchesQuery(tracks[i], q)) out.add(i);
-    }
-    return out;
   }
 
   String _searchHintForTab(int i) => switch (i) {
@@ -205,6 +193,420 @@ class LibraryScreenState extends State<LibraryScreen>
     await player.jumpToIndex(playlistIndex);
   }
 
+  Future<void> _showCreatePlaylistDialog(BuildContext context) async {
+    final pal = context.palette;
+    final theme = Theme.of(context);
+    final controller = TextEditingController();
+    try {
+      final name = await showDialog<String>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            backgroundColor: pal.surface,
+            title: Text(
+              'Create playlist',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: pal.textPrimary,
+              ),
+            ),
+            content: TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                hintText: 'Playlist name',
+                hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textMuted,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: pal.dividerOnHero),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: pal.primary, width: 1.5),
+                ),
+              ),
+              onSubmitted: (v) {
+                final t = v.trim();
+                if (t.isNotEmpty) Navigator.of(ctx).pop(t);
+              },
+            ),
+            actions: [
+              OutlinedButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final t = controller.text.trim();
+                  if (t.isNotEmpty) Navigator.of(ctx).pop(t);
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+      if (!context.mounted || name == null || name.trim().isEmpty) return;
+      await UserPlaylistsStore.createPlaylist(name.trim());
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  List<UserPlaylistEntry> _filterPlaylistsBySearch(
+    List<UserPlaylistEntry> all,
+    String rawQuery,
+  ) {
+    final q = rawQuery.trim().toLowerCase();
+    if (q.isEmpty) return all;
+    return all.where((e) => e.name.toLowerCase().contains(q)).toList();
+  }
+
+  Future<void> _showUserPlaylistSheet(
+    BuildContext context,
+    UserPlaylistEntry playlist,
+    List<TrackItem> library,
+    PlayerController player,
+  ) async {
+    final pal = context.palette;
+    final theme = Theme.of(context);
+    final paths = List<String>.from(playlist.paths);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: pal.surface,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(ctx).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          playlist.name,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: pal.textPrimary,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Delete playlist',
+                        icon: Icon(Icons.delete_outline_rounded,
+                            color: pal.textSecondary),
+                        onPressed: () async {
+                          await UserPlaylistsStore.deletePlaylist(playlist.id);
+                          if (ctx.mounted) Navigator.of(ctx).pop();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                if (paths.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
+                    child: Text(
+                      'This playlist is empty.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: pal.textSecondary,
+                      ),
+                    ),
+                  )
+                else ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () {
+                          Navigator.of(ctx).pop();
+                          _playOrderedPathsFrom(context, paths, 0);
+                        },
+                        icon: const Icon(Icons.play_arrow_rounded),
+                        label: const Text('Play all'),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: min(
+                      MediaQuery.sizeOf(ctx).height * 0.55,
+                      24 + paths.length * 76.0,
+                    ),
+                    child: ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+                      itemCount: paths.length,
+                      separatorBuilder: (_, __) => Divider(
+                        height: 1,
+                        color: pal.dividerOnHero,
+                        indent: 88,
+                      ),
+                      itemBuilder: (context, i) {
+                        final path = paths[i];
+                        final track = _trackForPath(path, library);
+                        final plIndex = _playlistIndexForPath(player, path);
+                        final selected =
+                            plIndex >= 0 && plIndex == player.currentIndex;
+                        return Material(
+                          color: selected
+                              ? pal.onScaffold.withValues(alpha: 0.06)
+                              : Colors.transparent,
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            leading: TrackAlbumArt(
+                              track: track,
+                              display: TrackArtDisplay.list,
+                            ),
+                            title: Text(
+                              track.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: pal.textPrimary,
+                                fontSize: 15,
+                              ),
+                            ),
+                            subtitle: Text(
+                              track.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: pal.textSecondary,
+                              ),
+                            ),
+                            onTap: () {
+                              Navigator.of(ctx).pop();
+                              _playOrderedPathsFrom(context, paths, i);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPlaylistTab(
+    ThemeData theme,
+    BuildContext context,
+    AppPalette pal,
+    String query,
+    List<TrackItem> tracks,
+    PlayerController player,
+  ) {
+    return ValueListenableBuilder<int>(
+      valueListenable: UserPlaylistsStore.revision,
+      builder: (context, _, __) {
+        return FutureBuilder<List<UserPlaylistEntry>>(
+          future: UserPlaylistsStore.loadAll(),
+          builder: (context, snap) {
+            final allPlaylists = snap.data ?? [];
+            final filteredPlaylists =
+                _filterPlaylistsBySearch(allPlaylists, query);
+
+            return ListView(
+              padding: const EdgeInsets.only(bottom: 24),
+              children: [
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () async {
+                      await _showCreatePlaylistDialog(context);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: pal.primary.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.add_rounded,
+                              color: pal.primary,
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Create new playlist',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: pal.onScaffold,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Name a playlist, then add songs from any track menu.',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color:
+                                        pal.textSecondary.withValues(alpha: 0.9),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: pal.onScaffold.withValues(alpha: 0.45),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Your playlists',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: pal.onScaffold.withValues(alpha: 0.75),
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ),
+                ),
+                if (snap.connectionState != ConnectionState.done)
+                  const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Center(
+                      child: SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      ),
+                    ),
+                  )
+                else if (filteredPlaylists.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                    child: Text(
+                      query.trim().isEmpty
+                          ? 'No saved playlists yet.'
+                          : 'No playlists match your search.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: pal.textMuted,
+                      ),
+                    ),
+                  )
+                else
+                  ...List.generate(filteredPlaylists.length, (i) {
+                    final pl = filteredPlaylists[i];
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (i > 0)
+                          Divider(
+                            height: 1,
+                            color: pal.dividerOnHero,
+                            indent: 56,
+                          ),
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              _showUserPlaylistSheet(
+                                context,
+                                pl,
+                                tracks,
+                                player,
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor:
+                                        pal.onScaffold.withValues(alpha: 0.1),
+                                    child: Icon(
+                                      Icons.queue_music_rounded,
+                                      color: pal.onScaffold.withValues(alpha: 0.75),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          pl.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.titleMedium
+                                              ?.copyWith(
+                                            color: pal.onScaffold,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${pl.paths.length} songs',
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                            color: pal.textMuted
+                                                .withValues(alpha: 0.92),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: pal.onScaffold.withValues(alpha: 0.45),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _onTrackOverflow(
     BuildContext context,
     PlayerController player,
@@ -276,10 +678,6 @@ class LibraryScreenState extends State<LibraryScreen>
               tracks,
               browsePathKeys,
             );
-            final playlistIndices = tracks.isEmpty
-                ? <int>[]
-                : _playlistQueueIndices(
-                    tracks, player.currentIndex, query);
 
             final pal = context.palette;
             final hint = _searchHintForTab(_tabController.index);
@@ -387,11 +785,12 @@ class LibraryScreenState extends State<LibraryScreen>
                             tracks,
                             browsePathKeys,
                           ),
-                          _buildTracksTab(
+                          _buildPlaylistTab(
                             theme,
                             context,
+                            pal,
+                            query,
                             tracks,
-                            playlistIndices,
                             player,
                           ),
                           _buildFavoritesTab(

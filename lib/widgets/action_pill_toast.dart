@@ -8,12 +8,11 @@ import '../theme/app_theme.dart';
 /// after modal routes ([showModalBottomSheet], dialogs) dispose their context.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
-/// Short mint pill at the top of the screen for completed actions (save, delete,
-/// etc.). Replaces overlapping previous pill if invoked again immediately.
+/// Short pill toast at the top of the screen ([AppPalette.primary] fill, white label —
+/// same accent as the play button). Replaces overlapping previous pill if invoked again immediately.
 abstract final class ActionPillToast {
   ActionPillToast._();
 
-  static const _fg = Color(0xFF0D1117);
   static const _fallbackAccent = Color(0xFF5FE3B3);
 
   static OverlayEntry? _current;
@@ -47,7 +46,8 @@ abstract final class ActionPillToast {
 
     final themeData = Theme.of(context);
     final pal = themeData.extension<AppPalette>();
-    final accent = pal?.accent ?? _fallbackAccent;
+    final pillBg = pal?.primary ?? _fallbackAccent;
+    const pillFg = Colors.white;
 
     dismiss();
 
@@ -56,7 +56,7 @@ abstract final class ActionPillToast {
       builder: (ctx) {
         final top = MediaQuery.paddingOf(ctx).top + 10;
         final textStyle = themeData.textTheme.labelSmall?.copyWith(
-          color: _fg,
+          color: pillFg,
           fontWeight: FontWeight.w800,
           letterSpacing: uppercaseLabel ? 0.85 : 0.35,
           fontSize: uppercaseLabel ? 11 : 12,
@@ -74,7 +74,7 @@ abstract final class ActionPillToast {
                     constraints: const BoxConstraints(maxWidth: 360),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: accent,
+                        color: pillBg,
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
@@ -92,7 +92,7 @@ abstract final class ActionPillToast {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(icon, size: 17, color: _fg),
+                            Icon(icon, size: 17, color: pillFg),
                             const SizedBox(width: 8),
                             Flexible(
                               child: Text(

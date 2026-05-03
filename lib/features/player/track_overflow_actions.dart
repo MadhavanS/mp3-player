@@ -1,3 +1,5 @@
+import 'dart:math' show min;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
@@ -5,6 +7,8 @@ import 'package:path/path.dart' as p;
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/track_file_delete.dart';
+import '../../services/user_playlists_store.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 
 enum TrackOverflowAction {
@@ -46,9 +50,7 @@ List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
         contentPadding: EdgeInsets.zero,
         leading: Icon(Icons.playlist_add_rounded),
         title: Text('Add to playlist'),
-        subtitle: Text(
-          'Appends to the queue if this song is not already in it',
-        ),
+        subtitle: Text('Choose a saved playlist'),
       ),
     ),
     if (enableDeleteFromDevice) ...[
@@ -74,6 +76,115 @@ List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
   ];
 }
 
+Future<void> _showUserPlaylistPickerAndAdd(
+  BuildContext context,
+  String filePath,
+) async {
+  final raw = filePath.trim();
+  if (raw.isEmpty) {
+    if (context.mounted) {
+      ActionPillToast.show(
+        context,
+        'No file path',
+        uppercaseLabel: true,
+      );
+    }
+    return;
+  }
+
+  final playlists = await UserPlaylistsStore.loadAll();
+  if (!context.mounted) return;
+
+  if (playlists.isEmpty) {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No playlists'),
+        content: const Text(
+          'Create a playlist in Library → Playlist first.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+    return;
+  }
+
+  final pal = context.palette;
+  final theme = Theme.of(context);
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: pal.surface,
+    showDragHandle: true,
+    builder: (ctx) {
+      final listHeight = min(
+        MediaQuery.sizeOf(ctx).height * 0.5,
+        120 + playlists.length * 56.0,
+      );
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+              child: Text(
+                'Add to playlist',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: pal.textPrimary,
+                ),
+              ),
+            ),
+            SizedBox(
+              height: listHeight,
+              child: ListView.builder(
+                padding: const EdgeInsets.only(bottom: 16),
+                itemCount: playlists.length,
+                itemBuilder: (context, i) {
+                  final pl = playlists[i];
+                  return ListTile(
+                    leading: Icon(
+                      Icons.queue_music_rounded,
+                      color: pal.primary,
+                    ),
+                    title: Text(
+                      pl.name,
+                      style: TextStyle(color: pal.textPrimary),
+                    ),
+                    subtitle: Text(
+                      '${pl.paths.length} songs',
+                      style: TextStyle(color: pal.textSecondary),
+                    ),
+                    onTap: () async {
+                      final added =
+                          await UserPlaylistsStore.addPathToPlaylist(pl.id, raw);
+                      if (ctx.mounted) Navigator.of(ctx).pop();
+                      if (!context.mounted) return;
+                      ActionPillToast.show(
+                        context,
+                        added
+                            ? 'Added to ${pl.name}'
+                            : 'Already in playlist',
+                        uppercaseLabel: true,
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 Future<void> applyTrackOverflowAction(
   BuildContext context,
   PlayerController player,
@@ -92,13 +203,18 @@ Future<void> applyTrackOverflowAction(
 
     case TrackOverflowAction.addToPlaylist:
       final t = tracks[playlistIndex];
-      final added = await player.addToPlaylistIfAbsent(t);
-      if (!context.mounted) return;
-      ActionPillToast.show(
-        context,
-        added ? 'Added to playlist' : 'Already in playlist',
-        uppercaseLabel: true,
-      );
+      final path = t.filePath;
+      if (path == null || path.isEmpty) {
+        if (context.mounted) {
+          ActionPillToast.show(
+            context,
+            'Need a local file',
+            uppercaseLabel: true,
+          );
+        }
+        return;
+      }
+      await _showUserPlaylistPickerAndAdd(context, path);
 
     case TrackOverflowAction.deleteFromDevice:
       final track = tracks[playlistIndex];

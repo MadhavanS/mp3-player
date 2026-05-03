@@ -479,15 +479,15 @@ class PlayerController extends ChangeNotifier {
 
   void toggleShuffle() {
     if (_playlist.length < 2) return;
-    if (_playbackPathKeysScope != null) {
-      return;
-    }
     if (_shuffle) {
       _index = _shuffleOrder[_shufflePos];
       _shuffle = false;
       _shuffleOrder = [];
       _shufflePos = 0;
     } else {
+      if (_playbackPathKeysScope != null) {
+        _playbackPathKeysScope = null;
+      }
       final cur = _index;
       final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
       order.remove(cur);

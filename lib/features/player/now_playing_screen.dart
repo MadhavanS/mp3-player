@@ -121,6 +121,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       if (!mounted) return;
       ActionPillToast.showUsingRootNavigator(
         player.shuffleEnabled ? 'Shuffle on' : 'Shuffle off',
+        icon: Icons.shuffle_rounded,
         uppercaseLabel: true,
       );
     });
@@ -130,12 +131,20 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     player.cycleRepeatMode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final msg = switch (player.repeatMode) {
+      final mode = player.repeatMode;
+      final msg = switch (mode) {
         PlaylistRepeatMode.off => 'Repeat off',
         PlaylistRepeatMode.all => 'Repeat all',
         PlaylistRepeatMode.one => 'Repeat current',
       };
-      ActionPillToast.showUsingRootNavigator(msg, uppercaseLabel: true);
+      final icon = mode == PlaylistRepeatMode.one
+          ? Icons.repeat_one_rounded
+          : Icons.repeat_rounded;
+      ActionPillToast.showUsingRootNavigator(
+        msg,
+        icon: icon,
+        uppercaseLabel: true,
+      );
     });
   }
 
@@ -169,6 +178,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                       if (!context.mounted) return;
                       ActionPillToast.showUsingRootNavigator(
                         nowFav ? 'Favourited' : 'Removed from favourites',
+                        icon: nowFav
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
                         uppercaseLabel: true,
                       );
                     },
@@ -416,7 +428,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                             Icons.shuffle_rounded,
                                             color: player.shuffleEnabled
                                                 ? pal.primary
-                                                : pal.textSecondary,
+                                                : pal.textSecondary
+                                                    .withValues(alpha: 0.55),
                                           ),
                                           onPressed: player.playlist.length <
                                                   2
@@ -523,7 +536,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                             Icons.shuffle_rounded,
                                             color: player.shuffleEnabled
                                                 ? pal.primary
-                                                : pal.textSecondary,
+                                                : pal.textSecondary
+                                                    .withValues(alpha: 0.55),
                                           ),
                                           onPressed:
                                               player.playlist.length < 2
