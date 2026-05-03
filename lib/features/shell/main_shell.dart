@@ -7,12 +7,15 @@ import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/file_path_mtime_sort.dart';
 import '../../services/mp3_scanner.dart';
+import '../../services/recently_played_store.dart';
 import '../../services/saved_music_folders.dart';
 import '../../services/track_metadata.dart';
 import '../../theme/app_theme.dart';
+import '../library/library_files_page.dart';
 import '../library/library_screen.dart';
 import '../player/mini_player_bar.dart';
 import '../player/now_playing_screen.dart';
+import '../player/track_overflow_actions.dart';
 import '../settings/settings_screen.dart';
 
 enum _ShellPage { library, settings }
@@ -33,9 +36,16 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final GlobalKey<LibraryScreenState> _libraryScreenKey =
+      GlobalKey<LibraryScreenState>();
+  /// When non-null from Files browser, Songs tab restricts to paths in this exact set (from scanMp3Files).
+  final ValueNotifier<Set<String>?> _songsBrowsePathKeysNotifier =
+      ValueNotifier<Set<String>?>(null);
   _ShellPage _page = _ShellPage.library;
   List<String> _folderPaths = [];
   bool _scanning = false;
+  PlayerController? _playerForRecentHistory;
+  String? _dispatchedRecentPath;
 
   @override
   void initState() {
@@ -43,6 +53,35 @@ class _MainShellState extends State<MainShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _restoreFoldersAndScan();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final player = PlayerController.of(context);
+    if (!identical(_playerForRecentHistory, player)) {
+      _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
+      _playerForRecentHistory = player;
+      player.addListener(_recordRecentlyPlayedTrack);
+    }
+  }
+
+  void _recordRecentlyPlayedTrack() {
+    final path = _playerForRecentHistory?.currentTrack?.filePath;
+    if (path == null || path.isEmpty) {
+      _dispatchedRecentPath = null;
+      return;
+    }
+    if (path == _dispatchedRecentPath) return;
+    _dispatchedRecentPath = path;
+    unawaited(RecentlyPlayedStore.recordPlay(path));
+  }
+
+  @override
+  void dispose() {
+    _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
+    _songsBrowsePathKeysNotifier.dispose();
+    super.dispose();
   }
 
   Future<void> _restoreFoldersAndScan() async {
@@ -205,6 +244,42 @@ class _MainShellState extends State<MainShell> {
     _openNowPlaying();
   }
 
+  Future<void> _onLibraryTrackOverflow(
+    BuildContext context,
+    PlayerController player,
+    int playlistIndex,
+    TrackOverflowAction action,
+  ) =>
+      applyTrackOverflowAction(context, player, playlistIndex, action);
+
+  Future<void> _openFilesExplorerScreen() async {
+    if (_folderPaths.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add music folders in Settings first.'),
+        ),
+      );
+      return;
+    }
+    final pickedKeys = await Navigator.of(context).push<Set<String>?>(
+      MaterialPageRoute(
+        builder: (ctx) => LibraryFilesPage(
+          musicRoots: _folderPaths,
+          onOverflow: _onLibraryTrackOverflow,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (pickedKeys != null) {
+      _songsBrowsePathKeysNotifier.value = Set<String>.from(pickedKeys);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _libraryScreenKey.currentState?.switchToSongsTab();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -239,10 +314,23 @@ class _MainShellState extends State<MainShell> {
                   ListTile(
                     leading: const Icon(Icons.library_music_rounded),
                     title: const Text('Library'),
-                    selected: _page == _ShellPage.library,
+                    selected:
+                        _page == _ShellPage.library,
                     onTap: () {
                       Navigator.pop(context);
                       _goLibrary();
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.folder_rounded),
+                    title: const Text('Files'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _goLibrary();
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!mounted) return;
+                        unawaited(_openFilesExplorerScreen());
+                      });
                     },
                   ),
                   ListTile(
@@ -271,7 +359,11 @@ class _MainShellState extends State<MainShell> {
                   Expanded(
                     child: _page == _ShellPage.library
                         ? LibraryScreen(
+                            key: _libraryScreenKey,
                             folderPaths: _folderPaths,
+                            songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
+                            onClearSongsBrowseFilter: () =>
+                                _songsBrowsePathKeysNotifier.value = null,
                             onOpenDrawer: _openDrawer,
                             onRefreshLibrary:
                                 _folderPaths.isEmpty || _scanning
