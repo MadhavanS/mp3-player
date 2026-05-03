@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../models/track_item.dart';
 
-/// Where to show artwork: mini player (circle), library row, now-playing hero.
-enum TrackArtDisplay { mini, list, full }
+/// Where to show artwork: mini player, library row, full hero, compact now-playing.
+enum TrackArtDisplay { mini, list, full, nowPlaying }
 
 /// Embedded ID3 cover when [TrackItem.albumArtBytes] is set; otherwise gradient [TrackItem.artColors].
 class TrackAlbumArt extends StatelessWidget {
@@ -20,12 +20,14 @@ class TrackAlbumArt extends StatelessWidget {
         TrackArtDisplay.mini => 48,
         TrackArtDisplay.list => 56,
         TrackArtDisplay.full => 295,
+        TrackArtDisplay.nowPlaying => 220,
       };
 
   double get _radius => switch (display) {
         TrackArtDisplay.mini => 24,
         TrackArtDisplay.list => 14,
         TrackArtDisplay.full => 34,
+        TrackArtDisplay.nowPlaying => 22,
       };
 
   @override
@@ -69,6 +71,13 @@ class TrackAlbumArt extends StatelessWidget {
               offset: const Offset(0, 18),
             ),
           ],
+        TrackArtDisplay.nowPlaying => [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
         _ => const [],
       };
 
@@ -102,6 +111,18 @@ class TrackAlbumArt extends StatelessWidget {
               color: Colors.black.withOpacity(0.06),
               blurRadius: 12,
               offset: const Offset(0, 6),
+            ),
+          ],
+        TrackArtDisplay.nowPlaying => [
+            BoxShadow(
+              color: track.artColors.last.withOpacity(0.38),
+              blurRadius: 20,
+              offset: const Offset(0, 12),
+            ),
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
             ),
           ],
       },

@@ -42,7 +42,33 @@ class PlayerController extends ChangeNotifier {
   TrackItem? get currentTrack =>
       _playlist.isEmpty ? null : _playlist[currentIndex.clamp(0, _playlist.length - 1)];
 
+  /// Track that will play after the current one ([skipNext] semantics), or `null`
+  /// when nothing follows (end of queue without [PlaylistRepeatMode.all] wrap).
+  TrackItem? get upcomingTrack {
+    if (_playlist.isEmpty) return null;
+    if (_shuffle) {
+      if (_shuffleOrder.isEmpty) return null;
+      if (_shufflePos < _shuffleOrder.length - 1) {
+        return _playlist[_shuffleOrder[_shufflePos + 1]];
+      }
+      if (_repeat == PlaylistRepeatMode.all) {
+        return _playlist[_shuffleOrder.first];
+      }
+      return null;
+    }
+    final n = _playlist.length;
+    final i = _index;
+    if (i < n - 1) {
+      return _playlist[i + 1];
+    }
+    if (_repeat == PlaylistRepeatMode.all) {
+      return _playlist.first;
+    }
+    return null;
+  }
+
   bool get shuffleEnabled => _shuffle;
+
   PlaylistRepeatMode get repeatMode => _repeat;
 
   bool get isPlaying => _player.playing;
