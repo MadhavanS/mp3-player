@@ -34,6 +34,7 @@ TrackItem _trackFromMp3Metadata(TrackItem base, Mp3Metadata mp3) {
     genre: genreStr,
     albumArtBytes: art,
     replaceGenreFromFile: true,
+    replaceAlbumArtFromFile: true,
   );
 }
 
@@ -89,6 +90,7 @@ Future<TrackItem> readAudioMetadata(TrackItem base) async {
       genre: genreStr,
       albumArtBytes: art,
       replaceGenreFromFile: true,
+      replaceAlbumArtFromFile: true,
     );
   } catch (e, st) {
     debugPrint('readAudioMetadata: $e\n$st');
