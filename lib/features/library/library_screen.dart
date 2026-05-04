@@ -377,6 +377,7 @@ class LibraryScreenState extends State<LibraryScreen>
     int startIndex, {
     required int playbackOriginTab,
     Set<String>? pathKeyScope,
+    String? playbackOriginUserPlaylistId,
   }) async {
     if (orderedPaths.isEmpty) return;
     final player = PlayerController.of(context);
@@ -393,6 +394,7 @@ class LibraryScreenState extends State<LibraryScreen>
       tracks,
       startIndex: startIndex.clamp(0, tracks.length - 1),
       playbackOriginTab: playbackOriginTab,
+      playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
     );
   }
 
@@ -425,6 +427,27 @@ class LibraryScreenState extends State<LibraryScreen>
       if (_trackMatchesQuery(tracks[i], q)) out.add(i);
     }
     return out;
+  }
+
+  /// Used after closing Now Playing when playback started from a user playlist.
+  Future<void> openUserPlaylistSheetById(String playlistId) async {
+    if (!mounted) return;
+    final player = PlayerController.of(context);
+    final all = await UserPlaylistsStore.loadAll();
+    UserPlaylistEntry? found;
+    for (final p in all) {
+      if (p.id == playlistId) {
+        found = p;
+        break;
+      }
+    }
+    if (!mounted || found == null) return;
+    await _showUserPlaylistSheet(
+      context,
+      found,
+      player.metadataLibrary,
+      player,
+    );
   }
 
   Future<void> _showCreatePlaylistDialog(BuildContext context) async {
@@ -573,6 +596,7 @@ class LibraryScreenState extends State<LibraryScreen>
                             paths,
                             0,
                             playbackOriginTab: 2,
+                            playbackOriginUserPlaylistId: playlist.id,
                           );
                         },
                         icon: const Icon(Icons.play_arrow_rounded),
@@ -634,6 +658,7 @@ class LibraryScreenState extends State<LibraryScreen>
                                 paths,
                                 i,
                                 playbackOriginTab: 2,
+                                playbackOriginUserPlaylistId: playlist.id,
                               );
                             },
                           ),

@@ -42,6 +42,9 @@ class PlayerController extends ChangeNotifier {
   /// used when closing Now Playing.
   int? _playbackOriginTabIndex;
 
+  /// When [playbackOriginTabIndex] is 2, optional user-saved playlist to reopen.
+  String? _playbackOriginUserPlaylistId;
+
   AudioPlayer get audioPlayer => _player;
 
   List<TrackItem> get libraryCatalog => List<TrackItem>.unmodifiable(_libraryCatalog);
@@ -51,6 +54,9 @@ class PlayerController extends ChangeNotifier {
       _libraryCatalog.isNotEmpty ? _libraryCatalog : _playlist;
 
   int? get playbackOriginTabIndex => _playbackOriginTabIndex;
+
+  /// Set when playback started from Library → Playlist and a user playlist sheet.
+  String? get playbackOriginUserPlaylistId => _playbackOriginUserPlaylistId;
 
   /// Called after a folder scan with the complete track list.
   void setLibraryCatalog(List<TrackItem> tracks) {
@@ -208,10 +214,13 @@ class PlayerController extends ChangeNotifier {
     List<TrackItem> tracks, {
     int startIndex = 0,
     int? playbackOriginTab,
+    String? playbackOriginUserPlaylistId,
   }) async {
     if (playbackOriginTab != null) {
-      _playbackOriginTabIndex =
-          playbackOriginTab.clamp(0, 4);
+      final t = playbackOriginTab.clamp(0, 4);
+      _playbackOriginTabIndex = t;
+      _playbackOriginUserPlaylistId =
+          t == 2 ? playbackOriginUserPlaylistId : null;
     }
     _playlist = List<TrackItem>.from(tracks);
     _resetShuffleState();
@@ -247,11 +256,13 @@ class PlayerController extends ChangeNotifier {
     List<TrackItem> tracks, {
     int startIndex = 0,
     int? playbackOriginTab,
+    String? playbackOriginUserPlaylistId,
   }) async {
     await setPlaylist(
       tracks,
       startIndex: startIndex,
       playbackOriginTab: playbackOriginTab,
+      playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
     );
     await _player.play();
   }

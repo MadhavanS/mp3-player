@@ -256,14 +256,18 @@ class _MainShellState extends State<MainShell> {
                 Navigator.of(context).pop();
                 final tab =
                     player.playbackOriginTabIndex?.clamp(0, 4) ?? 0;
+                final userPlaylistId = player.playbackOriginUserPlaylistId;
                 _goLibrary();
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    unawaited(
-                      _libraryScreenKey.currentState
-                              ?.switchToTabAndScrollToCurrentTrack(tab) ??
-                          Future<void>.value(),
-                    );
+                  WidgetsBinding.instance.addPostFrameCallback((_) async {
+                    if (!mounted) return;
+                    final st = _libraryScreenKey.currentState;
+                    if (st == null) return;
+                    await st.switchToTabAndScrollToCurrentTrack(tab);
+                    if (!mounted) return;
+                    if (tab == 2 && userPlaylistId != null) {
+                      await st.openUserPlaylistSheetById(userPlaylistId);
+                    }
                   });
                 });
               },
