@@ -69,6 +69,16 @@ class LibraryScreenState extends State<LibraryScreen>
 
   static const double _kLibraryListRowStride = 88;
 
+  /// Search text shorter than this (after trim) does not filter library lists.
+  static const int _kLibrarySearchMinChars = 3;
+
+  /// Returns trimmed [raw], or empty when fewer than [_kLibrarySearchMinChars] characters.
+  static String _effectiveLibrarySearchQuery(String raw) {
+    final t = raw.trim();
+    if (t.length < _kLibrarySearchMinChars) return '';
+    return t;
+  }
+
   LibraryTrackSortMode _songSortMode = LibraryTrackSortMode.modifiedNewest;
 
   /// After returning from Files, focus the Songs tab.
@@ -307,7 +317,8 @@ class LibraryScreenState extends State<LibraryScreen>
     if (pathKey.isEmpty) return;
 
     final tracks = player.metadataLibrary;
-    final query = _searchController.text.trim();
+    final searchQuery =
+        _effectiveLibrarySearchQuery(_searchController.text);
     final browsePathKeys = widget.songsBrowsePathKeys.value;
 
     switch (_currentLibraryTabId) {
@@ -315,7 +326,7 @@ class LibraryScreenState extends State<LibraryScreen>
         final (idx, total) = _songsListIndexAndTotalForPathKey(
           tracks,
           browsePathKeys,
-          query,
+          searchQuery,
           pathKey,
         );
         if (idx == null) return;
@@ -331,7 +342,7 @@ class LibraryScreenState extends State<LibraryScreen>
             await RecentlyAddedStore.orderedPathsForLibrary(tracks);
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(ordered, browsePathKeys);
-        paths = _filterPathsBySearch(paths, query, tracks);
+        paths = _filterPathsBySearch(paths, searchQuery, tracks);
         final idx =
             paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
         if (idx < 0) return;
@@ -345,7 +356,7 @@ class LibraryScreenState extends State<LibraryScreen>
       case LibraryTabId.playlist:
         final all = await UserPlaylistsStore.loadAll();
         if (!mounted) return;
-        final filtered = _filterPlaylistsBySearch(all, query);
+        final filtered = _filterPlaylistsBySearch(all, searchQuery);
         final idx = filtered.indexWhere(
           (pl) => _userPlaylistContainsCurrentPath(pl, pathKey),
         );
@@ -371,7 +382,7 @@ class LibraryScreenState extends State<LibraryScreen>
         final favPaths = await FavoriteSongsStore.loadPaths();
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(favPaths, null);
-        paths = _filterPathsBySearch(paths, query, tracks);
+        paths = _filterPathsBySearch(paths, searchQuery, tracks);
         final idx =
             paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
         if (idx < 0) return;
@@ -386,7 +397,7 @@ class LibraryScreenState extends State<LibraryScreen>
         final played = await RecentlyPlayedStore.loadPaths();
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(played, browsePathKeys);
-        paths = _filterPathsBySearch(paths, query, tracks);
+        paths = _filterPathsBySearch(paths, searchQuery, tracks);
         final idx =
             paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
         if (idx < 0) return;
@@ -409,9 +420,11 @@ class LibraryScreenState extends State<LibraryScreen>
         LibraryTabId.songs ||
         LibraryTabId.recentlyAdded ||
         LibraryTabId.playlist =>
-          'Search by title',
-        LibraryTabId.favourites => 'Search favourites',
-        LibraryTabId.recentlyPlayed => 'Search RecentlyPlayed',
+          'Search by title (min. 3 characters)',
+        LibraryTabId.favourites =>
+          'Search favourites (min. 3 characters)',
+        LibraryTabId.recentlyPlayed =>
+          'Search RecentlyPlayed (min. 3 characters)',
       };
 
   List<String> _pathsMatchingBrowse(
@@ -1129,9 +1142,10 @@ class LibraryScreenState extends State<LibraryScreen>
           valueListenable: widget.songsBrowsePathKeys,
           builder: (context, browsePathKeys, _) {
             final tracks = player.metadataLibrary;
-            final query = _searchController.text.trim();
+            final rawSearch = _searchController.text.trim();
+            final searchQuery = _effectiveLibrarySearchQuery(rawSearch);
             final songsTabIndices =
-                _sortedSongsTabIndices(tracks, query, browsePathKeys);
+                _sortedSongsTabIndices(tracks, searchQuery, browsePathKeys);
 
             final pal = context.palette;
             final hint = _searchHintForTab(_currentLibraryTabId);
@@ -1248,6 +1262,7 @@ class LibraryScreenState extends State<LibraryScreen>
                               songsTabIndices,
                               player,
                               browsePathKeys,
+                              searchQuery,
                             ),
                         ],
                       ),
@@ -1271,24 +1286,25 @@ class LibraryScreenState extends State<LibraryScreen>
     List<int> songsTabIndices,
     PlayerController player,
     Set<String>? browsePathKeys,
+    String searchQuery,
   ) {
-    final query = _searchController.text.trim();
     return switch (id) {
       LibraryTabId.songs => _buildTracksTab(
-          theme,
-          context,
-          tracks,
-          songsTabIndices,
-          player,
-          browsePathKeys: browsePathKeys,
-          onClearBrowseFolder: browsePathKeys == null
-              ? null
-              : widget.onClearSongsBrowseFilter,
-        ),
+            theme,
+            context,
+            tracks,
+            songsTabIndices,
+            player,
+            searchQuery,
+            browsePathKeys: browsePathKeys,
+            onClearBrowseFolder: browsePathKeys == null
+                ? null
+                : widget.onClearSongsBrowseFilter,
+          ),
       LibraryTabId.recentlyAdded => _buildRecentlyAddedTab(
           theme,
           pal,
-          query,
+          searchQuery,
           player,
           tracks,
           browsePathKeys,
@@ -1297,14 +1313,14 @@ class LibraryScreenState extends State<LibraryScreen>
           theme,
           context,
           pal,
-          query,
+          searchQuery,
           tracks,
           player,
         ),
       LibraryTabId.favourites => _buildFavoritesTab(
           theme,
           pal,
-          query,
+          searchQuery,
           player,
           tracks,
           null,
@@ -1312,7 +1328,7 @@ class LibraryScreenState extends State<LibraryScreen>
       LibraryTabId.recentlyPlayed => _buildRecentTab(
           theme,
           pal,
-          query,
+          searchQuery,
           player,
           tracks,
           browsePathKeys,
@@ -1938,7 +1954,8 @@ class LibraryScreenState extends State<LibraryScreen>
     BuildContext context,
     List<TrackItem> tracks,
     List<int> filteredIndices,
-    PlayerController player, {
+    PlayerController player,
+    String searchQuery, {
     Set<String>? browsePathKeys,
     VoidCallback? onClearBrowseFolder,
   }) {
@@ -1980,10 +1997,10 @@ class LibraryScreenState extends State<LibraryScreen>
     }
 
     if (filteredIndices.isEmpty) {
-      final q = _searchController.text.trim();
-      final title =
-          hasBrowseFilter && q.isEmpty ? 'No songs in this folder' : 'No matches';
-      final detail = hasBrowseFilter && q.isEmpty
+      final title = hasBrowseFilter && searchQuery.isEmpty
+          ? 'No songs in this folder'
+          : 'No matches';
+      final detail = hasBrowseFilter && searchQuery.isEmpty
           ? 'Browse Files from the menu to pick a track in this folder and subfolders, or show your full library.'
           : 'Nothing in your library has a title matching your search.';
 
@@ -2013,10 +2030,10 @@ class LibraryScreenState extends State<LibraryScreen>
                   color: pal.textSecondary.withValues(alpha: 0.9),
                 ),
               ),
-              if (q.isNotEmpty) ...[
+              if (searchQuery.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
-                  '“$q”',
+                  '"$searchQuery"',
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -2038,6 +2055,13 @@ class LibraryScreenState extends State<LibraryScreen>
       );
     }
 
+    final filteredTracks =
+        filteredIndices.map((idx) => tracks[idx]).toList();
+    final orderedPaths = filteredTracks
+        .map((t) => t.filePath)
+        .whereType<String>()
+        .toList();
+
     return ListView.separated(
       controller: _songsScrollController,
       cacheExtent: 4000,
@@ -2056,8 +2080,6 @@ class LibraryScreenState extends State<LibraryScreen>
         final plIndex = path != null && path.isNotEmpty
             ? _playlistIndexForPath(player, path)
             : -1;
-        final ctxTracks =
-            filteredIndices.map((idx) => tracks[idx]).toList();
         return _TrackTile(
           track: track,
           selected: selected,
@@ -2066,10 +2088,6 @@ class LibraryScreenState extends State<LibraryScreen>
               ? _scrollAnchorSongs
               : null,
           onTap: () {
-            final orderedPaths = filteredIndices
-                .map((idx) => tracks[idx].filePath)
-                .whereType<String>()
-                .toList();
             unawaited(
               _playOrderedPathsFrom(
                 context,
@@ -2090,7 +2108,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 playbackOriginTab: LibraryTabId.songs,
                 outsideQueue: plIndex < 0
                     ? TrackOverflowQueueContext(
-                        tracks: ctxTracks,
+                        tracks: filteredTracks,
                         index: i,
                         playbackOriginTab: LibraryTabId.songs,
                       )
