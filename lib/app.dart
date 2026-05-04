@@ -21,6 +21,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   late final PlayerController _player = PlayerController();
   AppThemeSetting _themeSetting = AppThemeSetting.automatic;
   AppAccentColorOption _accentOption = AppAccentColorOption.blue;
+  Color _customAccentColor = AppAccentColorOption.blue.swatchColor;
   DateTime _themeClock = DateTime.now();
   Timer? _themeTimer;
 
@@ -32,11 +33,12 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
 
   Future<void> _loadTheme() async {
     final s = await ThemeSettingsStore.load();
-    final a = await AccentSettingsStore.load();
+    final accent = await AccentSettingsStore.load();
     if (!mounted) return;
     setState(() {
       _themeSetting = s;
-      _accentOption = a;
+      _accentOption = accent.option;
+      _customAccentColor = accent.customAccent;
       _themeClock = DateTime.now();
     });
     _rescheduleThemeTimer();
@@ -62,8 +64,23 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
 
   Future<void> _setAccentOption(AppAccentColorOption option) async {
     setState(() => _accentOption = option);
-    await AccentSettingsStore.save(option);
+    await AccentSettingsStore.save(
+      option,
+      option == AppAccentColorOption.custom ? _customAccentColor : null,
+    );
   }
+
+  Future<void> _setCustomAccentColor(Color color) async {
+    setState(() {
+      _customAccentColor = color;
+      _accentOption = AppAccentColorOption.custom;
+    });
+    await AccentSettingsStore.save(AppAccentColorOption.custom, color);
+  }
+
+  Color get _resolvedAccent => _accentOption == AppAccentColorOption.custom
+      ? _customAccentColor
+      : _accentOption.swatchColor;
 
   @override
   void dispose() {
@@ -83,13 +100,15 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.themeFor(
           resolved,
-          controlAccent: _accentOption.swatchColor,
+          controlAccent: _resolvedAccent,
         ),
         home: MainShell(
           themeSetting: _themeSetting,
           onThemeSettingChanged: _setThemeSetting,
           accentColorOption: _accentOption,
+          customAccentColor: _customAccentColor,
           onAccentColorOptionChanged: _setAccentOption,
+          onCustomAccentColorChanged: _setCustomAccentColor,
         ),
       ),
     );

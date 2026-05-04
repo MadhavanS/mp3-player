@@ -10,7 +10,8 @@ enum AppAccentColorOption {
   purple,
   pink,
   orange,
-  amber;
+  amber,
+  custom;
 
   String get persistedName => name;
 
@@ -32,6 +33,8 @@ enum AppAccentColorOption {
         return AppAccentColorOption.orange;
       case 'amber':
         return AppAccentColorOption.amber;
+      case 'custom':
+        return AppAccentColorOption.custom;
       default:
         return AppAccentColorOption.blue;
     }
@@ -48,6 +51,7 @@ extension AppAccentColorOptionResolve on AppAccentColorOption {
         AppAccentColorOption.pink => const Color(0xFFEC4899),
         AppAccentColorOption.orange => const Color(0xFFF97316),
         AppAccentColorOption.amber => const Color(0xFFFBBF24),
+        AppAccentColorOption.custom => const Color(0xFF64748B),
       };
 
   String get label => switch (this) {
@@ -59,6 +63,7 @@ extension AppAccentColorOptionResolve on AppAccentColorOption {
         AppAccentColorOption.pink => 'Pink',
         AppAccentColorOption.orange => 'Orange',
         AppAccentColorOption.amber => 'Amber',
+        AppAccentColorOption.custom => 'Custom',
       };
 
   String get subtitle => switch (this) {
@@ -70,5 +75,7 @@ extension AppAccentColorOptionResolve on AppAccentColorOption {
         AppAccentColorOption.pink => 'Magenta accent',
         AppAccentColorOption.orange => 'Warm emphasis',
         AppAccentColorOption.amber => 'Gold-toned accent',
+        AppAccentColorOption.custom =>
+          'Pick any color for buttons, pills, and highlights',
       };
 }

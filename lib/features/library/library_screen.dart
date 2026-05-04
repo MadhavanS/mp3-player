@@ -64,11 +64,15 @@ class LibraryScreenState extends State<LibraryScreen>
 
   void _onTabChanged() {
     if (!mounted) return;
+    if (_tabController.indexIsChanging) return;
     setState(() {
-      if (!_tabController.indexIsChanging && _tabController.index == 4) {
+      if (_tabController.index == 4) {
         _recentListRevision++;
       }
     });
+    if (_tabController.index == 3) {
+      unawaited(FavoriteSongsStore.pruneMissingPaths());
+    }
   }
 
   @override

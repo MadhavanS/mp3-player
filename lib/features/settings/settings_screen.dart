@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:path/path.dart' as p;
 
 import '../../services/storage_access.dart';
@@ -14,7 +15,9 @@ class SettingsScreen extends StatefulWidget {
     required this.themeSetting,
     required this.onThemeSettingChanged,
     required this.accentColorOption,
+    required this.customAccentColor,
     required this.onAccentColorOptionChanged,
+    required this.onCustomAccentColorChanged,
   });
 
   final List<String> folderPaths;
@@ -23,7 +26,9 @@ class SettingsScreen extends StatefulWidget {
   final AppThemeSetting themeSetting;
   final ValueChanged<AppThemeSetting> onThemeSettingChanged;
   final AppAccentColorOption accentColorOption;
+  final Color customAccentColor;
   final ValueChanged<AppAccentColorOption> onAccentColorOptionChanged;
+  final ValueChanged<Color> onCustomAccentColorChanged;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -91,6 +96,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  InputDecoration _appearanceDropdownDecoration(AppPalette pal) {
+    return InputDecoration(
+      filled: true,
+      fillColor: pal.surface.withValues(alpha: 0.35),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    );
+  }
+
+  Future<void> _openCustomAccentDialog() async {
+    if (!mounted || _busy) return;
+    final pal = context.palette;
+    var selected = widget.customAccentColor;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSt) {
+            return AlertDialog(
+              backgroundColor: pal.surface,
+              title: Text(
+                'Custom accent',
+                style: TextStyle(color: pal.textPrimary),
+              ),
+              content: SingleChildScrollView(
+                child: ColorPicker(
+                  pickerColor: selected,
+                  onColorChanged: (c) => setSt(() => selected = c),
+                  enableAlpha: false,
+                  displayThumbColor: true,
+                  paletteType: PaletteType.hsvWithHue,
+                  pickerAreaBorderRadius:
+                      const BorderRadius.all(Radius.circular(12)),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(color: pal.textSecondary),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    widget.onCustomAccentColorChanged(selected);
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -132,203 +198,226 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     children: [
                       Text(
-                        'Theme',
+                        'Appearance',
                         style: theme.textTheme.titleMedium?.copyWith(
                           color: pal.onScaffold,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Text(
-                        'Automatic follows the device clock (light 6:00 a.m.–7:59 p.m., dark otherwise).',
+                        'Theme controls backgrounds; accent controls play buttons, '
+                        'toasts, sliders, and highlights.',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: pal.onScaffold.withValues(alpha: 0.75),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Theme',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: pal.onScaffold.withValues(alpha: 0.92),
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 8),
-                      ...AppThemeSetting.values.map((s) {
-                        final selected = widget.themeSetting == s;
-                        final swatches = s.previewSwatches(DateTime.now());
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Material(
-                            color: pal.surface.withValues(alpha: 0.35),
-                            borderRadius: BorderRadius.circular(14),
-                            clipBehavior: Clip.antiAlias,
-                            child: InkWell(
-                              onTap: _busy
-                                  ? null
-                                  : () => widget.onThemeSettingChanged(s),
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Icon(
-                                        selected
-                                            ? Icons.check_circle_rounded
-                                            : Icons.circle_outlined,
-                                        color: selected
-                                            ? context.controlAccent
-                                            : pal.onScaffold
-                                                .withValues(alpha: 0.45),
-                                        size: 22,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            s.label,
-                                            style: TextStyle(
-                                              color: pal.onScaffold,
-                                              fontWeight: selected
-                                                  ? FontWeight.w600
-                                                  : FontWeight.w500,
-                                              fontSize: 16,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            s.subtitle,
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                              color: pal.onScaffold
-                                                  .withValues(alpha: 0.65),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 10),
-                                          ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                            child: SizedBox(
-                                              height: 10,
-                                              child: Row(
-                                                children: [
-                                                  for (final c in swatches)
-                                                    Expanded(
-                                                      child:
-                                                          DecoratedBox(
-                                                        decoration:
-                                                            BoxDecoration(
-                                                          color: c,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
+                      InputDecorator(
+                        decoration:
+                            _appearanceDropdownDecoration(pal).copyWith(
+                          labelText: 'App theme',
+                          labelStyle: TextStyle(
+                            color: pal.onScaffold.withValues(alpha: 0.72),
+                            fontSize: 13,
                           ),
-                        );
-                      }),
-                      const SizedBox(height: 24),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<AppThemeSetting>(
+                            value: widget.themeSetting,
+                            isExpanded: true,
+                            dropdownColor: pal.surface,
+                            style: TextStyle(
+                              color: pal.textPrimary,
+                              fontSize: 15,
+                            ),
+                            iconEnabledColor:
+                                pal.onScaffold.withValues(alpha: 0.85),
+                            items: [
+                              for (final s in AppThemeSetting.values)
+                                DropdownMenuItem(
+                                  value: s,
+                                  child: Text(s.label),
+                                ),
+                            ],
+                            onChanged: _busy
+                                ? null
+                                : (v) {
+                                    if (v != null) {
+                                      widget.onThemeSettingChanged(v);
+                                    }
+                                  },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.themeSetting.subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: pal.onScaffold.withValues(alpha: 0.65),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
                       Text(
                         'Accent color',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: pal.onScaffold,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: pal.onScaffold.withValues(alpha: 0.92),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Play / pause, notification pills, shuffle and repeat highlights, and key list accents.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: pal.onScaffold.withValues(alpha: 0.75),
+                      const SizedBox(height: 8),
+                      InputDecorator(
+                        decoration:
+                            _appearanceDropdownDecoration(pal).copyWith(
+                          labelText: 'Accent',
+                          labelStyle: TextStyle(
+                            color: pal.onScaffold.withValues(alpha: 0.72),
+                            fontSize: 13,
+                          ),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<AppAccentColorOption>(
+                            value: widget.accentColorOption,
+                            isExpanded: true,
+                            dropdownColor: pal.surface,
+                            style: TextStyle(
+                              color: pal.textPrimary,
+                              fontSize: 15,
+                            ),
+                            iconEnabledColor:
+                                pal.onScaffold.withValues(alpha: 0.85),
+                            selectedItemBuilder: (context) {
+                              return [
+                                for (final o in AppAccentColorOption.values)
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Container(
+                                          width: 18,
+                                          height: 18,
+                                          decoration: BoxDecoration(
+                                            color: o ==
+                                                    AppAccentColorOption.custom
+                                                ? widget.customAccentColor
+                                                : o.swatchColor,
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                            border: Border.all(
+                                              color: pal.onScaffold
+                                                  .withValues(alpha: 0.15),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Flexible(
+                                          child: Text(
+                                            o.label,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              color: pal.textPrimary,
+                                              fontSize: 15,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ];
+                            },
+                            items: [
+                              for (final o in AppAccentColorOption.values)
+                                DropdownMenuItem(
+                                  value: o,
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 18,
+                                        height: 18,
+                                        decoration: BoxDecoration(
+                                          color: o ==
+                                                  AppAccentColorOption.custom
+                                              ? widget.customAccentColor
+                                              : o.swatchColor,
+                                          borderRadius:
+                                              BorderRadius.circular(4),
+                                          border: Border.all(
+                                            color: pal.onScaffold
+                                                .withValues(alpha: 0.15),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          o.label,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                            onChanged: _busy
+                                ? null
+                                : (v) {
+                                    if (v != null) {
+                                      widget.onAccentColorOptionChanged(v);
+                                    }
+                                  },
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      ...AppAccentColorOption.values.map((o) {
-                        final selected = widget.accentColorOption == o;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Material(
-                            color: pal.surface.withValues(alpha: 0.35),
-                            borderRadius: BorderRadius.circular(14),
-                            clipBehavior: Clip.antiAlias,
-                            child: InkWell(
-                              onTap: _busy
-                                  ? null
-                                  : () => widget.onAccentColorOptionChanged(o),
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                    12, 12, 12, 12),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Icon(
-                                        selected
-                                            ? Icons.check_circle_rounded
-                                            : Icons.circle_outlined,
-                                        color: selected
-                                            ? context.controlAccent
-                                            : pal.onScaffold
-                                                .withValues(alpha: 0.45),
-                                        size: 22,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            o.label,
-                                            style: TextStyle(
-                                              color: pal.onScaffold,
-                                              fontWeight: selected
-                                                  ? FontWeight.w600
-                                                  : FontWeight.w500,
-                                              fontSize: 16,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            o.subtitle,
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                              color: pal.onScaffold
-                                                  .withValues(alpha: 0.65),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 10),
-                                          ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                            child: SizedBox(
-                                              height: 10,
-                                              child: DecoratedBox(
-                                                decoration: BoxDecoration(
-                                                  color: o.swatchColor,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.accentColorOption.subtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: pal.onScaffold.withValues(alpha: 0.65),
+                        ),
+                      ),
+                      if (widget.accentColorOption ==
+                          AppAccentColorOption.custom) ...[
+                        const SizedBox(height: 14),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: widget.customAccentColor,
+                                border: Border.all(
+                                  color:
+                                      pal.onScaffold.withValues(alpha: 0.2),
                                 ),
                               ),
                             ),
-                          ),
-                        );
-                      }),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed:
+                                    _busy ? null : _openCustomAccentDialog,
+                                icon: Icon(
+                                  Icons.color_lens_outlined,
+                                  size: 20,
+                                  color: context.controlAccent,
+                                ),
+                                label: const Text('Choose color'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       Divider(color: pal.dividerOnHero),
                       const SizedBox(height: 16),

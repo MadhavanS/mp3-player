@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'local_file_present.dart';
+
 /// Persists absolute file paths marked as favourites (newest first).
 class FavoriteSongsStore {
   FavoriteSongsStore._();
@@ -60,5 +62,16 @@ class FavoriteSongsStore {
     await prefs.setString(_key, jsonEncode(_paths));
     revision.value++;
     return !wasFavorite;
+  }
+
+  /// Removes entries whose files no longer exist on disk (no-op on web).
+  static Future<void> pruneMissingPaths() async {
+    await ensureLoaded();
+    final kept = _paths.where(localFileStillPresent).toList();
+    if (kept.length == _paths.length) return;
+    _paths = kept;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, jsonEncode(_paths));
+    revision.value++;
   }
 }

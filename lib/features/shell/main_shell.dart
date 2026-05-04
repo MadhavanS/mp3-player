@@ -28,13 +28,17 @@ class MainShell extends StatefulWidget {
     required this.themeSetting,
     required this.onThemeSettingChanged,
     required this.accentColorOption,
+    required this.customAccentColor,
     required this.onAccentColorOptionChanged,
+    required this.onCustomAccentColorChanged,
   });
 
   final AppThemeSetting themeSetting;
   final ValueChanged<AppThemeSetting> onThemeSettingChanged;
   final AppAccentColorOption accentColorOption;
+  final Color customAccentColor;
   final ValueChanged<AppAccentColorOption> onAccentColorOptionChanged;
+  final ValueChanged<Color> onCustomAccentColorChanged;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -394,8 +398,11 @@ class _MainShellState extends State<MainShell> {
                             themeSetting: widget.themeSetting,
                             onThemeSettingChanged: widget.onThemeSettingChanged,
                             accentColorOption: widget.accentColorOption,
+                            customAccentColor: widget.customAccentColor,
                             onAccentColorOptionChanged:
                                 widget.onAccentColorOptionChanged,
+                            onCustomAccentColorChanged:
+                                widget.onCustomAccentColorChanged,
                           ),
                   ),
                   if (current != null)
