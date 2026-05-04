@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
+import '../../theme/album_art_title_color.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/track_album_art.dart';
@@ -374,8 +375,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                         child: _NowPlayingAlbumArtCard(
                                           playerChrome: playerChrome,
                                           theme: theme,
-                                          title: t.title,
-                                          artist: t.artist,
+                                          track: t,
                                           artwork: TrackAlbumArt(
                                             track: t,
                                             display: TrackArtDisplay.nowPlaying,
@@ -736,26 +736,74 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 }
 
 /// Frosted glass frame (blur + translucent gradient) around artwork and metadata.
-class _NowPlayingAlbumArtCard extends StatelessWidget {
+class _NowPlayingAlbumArtCard extends StatefulWidget {
   const _NowPlayingAlbumArtCard({
     required this.playerChrome,
     required this.theme,
-    required this.title,
-    required this.artist,
+    required this.track,
     required this.artwork,
   });
 
   final bool playerChrome;
   final ThemeData theme;
-  final String title;
-  final String artist;
+  final TrackItem track;
   final Widget artwork;
 
   @override
+  State<_NowPlayingAlbumArtCard> createState() =>
+      _NowPlayingAlbumArtCardState();
+}
+
+class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
+  late Color _titleColor;
+
+  bool get _darkFrosted => widget.theme.brightness == Brightness.dark;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleColor = provisionalNowPlayingTitleColor(
+      track: widget.track,
+      darkFrostedBackground: _darkFrosted,
+    );
+    _scheduleResolve();
+  }
+
+  @override
+  void didUpdateWidget(covariant _NowPlayingAlbumArtCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.track.filePath != widget.track.filePath ||
+        !identical(oldWidget.track.albumArtBytes, widget.track.albumArtBytes) ||
+        oldWidget.theme.brightness != widget.theme.brightness) {
+      _titleColor = provisionalNowPlayingTitleColor(
+        track: widget.track,
+        darkFrostedBackground: _darkFrosted,
+      );
+      _scheduleResolve();
+    }
+  }
+
+  void _scheduleResolve() {
+    final path = widget.track.filePath;
+    final bytesId = identityHashCode(widget.track.albumArtBytes);
+    resolveNowPlayingTitleColor(
+      track: widget.track,
+      darkFrostedBackground: _darkFrosted,
+    ).then((c) {
+      if (!mounted) return;
+      if (widget.track.filePath != path ||
+          identityHashCode(widget.track.albumArtBytes) != bytesId) {
+        return;
+      }
+      setState(() => _titleColor = c);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final outerR = playerChrome ? 32.0 : 24.0;
-    final isDark = theme.brightness == Brightness.dark;
-    final blurSigma = playerChrome ? 26.0 : 18.0;
+    final outerR = widget.playerChrome ? 32.0 : 24.0;
+    final isDark = widget.theme.brightness == Brightness.dark;
+    final blurSigma = widget.playerChrome ? 26.0 : 18.0;
     final borderColor = isDark
         ? Colors.white.withValues(alpha: 0.22)
         : Colors.black.withValues(alpha: 0.08);
@@ -766,6 +814,15 @@ class _NowPlayingAlbumArtCard extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.06)
         : Colors.white.withValues(alpha: 0.68);
 
+    final theme = widget.theme;
+    final titleStyle = theme.textTheme.titleLarge?.copyWith(
+      height: 1.25,
+      color: _titleColor,
+    );
+    final artistStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: _titleColor.withValues(alpha: isDark ? 0.78 : 0.72),
+    );
+
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 420),
       child: DecoratedBox(
@@ -773,9 +830,10 @@ class _NowPlayingAlbumArtCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(outerR),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: playerChrome ? 0.42 : 0.24),
-              blurRadius: playerChrome ? 28 : 20,
-              offset: Offset(0, playerChrome ? 12 : 8),
+              color: Colors.black.withValues(
+                  alpha: widget.playerChrome ? 0.42 : 0.24),
+              blurRadius: widget.playerChrome ? 28 : 20,
+              offset: Offset(0, widget.playerChrome ? 12 : 8),
             ),
           ],
         ),
@@ -799,22 +857,22 @@ class _NowPlayingAlbumArtCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Center(child: artwork),
+                    Center(child: widget.artwork),
                     const SizedBox(height: 16),
                     Text(
-                      title,
+                      widget.track.title,
                       textAlign: TextAlign.center,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleLarge?.copyWith(height: 1.25),
+                      style: titleStyle,
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      artist,
+                      widget.track.artist,
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium,
+                      style: artistStyle,
                     ),
                   ],
                 ),
