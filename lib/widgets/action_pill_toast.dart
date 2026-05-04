@@ -8,12 +8,16 @@ import '../theme/app_theme.dart';
 /// after modal routes ([showModalBottomSheet], dialogs) dispose their context.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
-/// Short pill toast at the top of the screen ([AppPalette.primary] fill, white label —
-/// same accent as the play button). Replaces overlapping previous pill if invoked again immediately.
+/// Short pill near the bottom of the screen, above bottom chrome (mini player, now playing
+/// footer) — [AppControlAccent] pill fill (same as the play button), white label.
+/// Replaces overlapping previous pill if invoked again immediately.
 abstract final class ActionPillToast {
   ActionPillToast._();
 
   static const _fallbackAccent = Color(0xFF5FE3B3);
+
+  /// Clears typical bottom bars (now playing tools row, collapsed-player strip) plus a gap.
+  static const double _aboveBottomChrome = 88;
 
   static OverlayEntry? _current;
 
@@ -46,7 +50,9 @@ abstract final class ActionPillToast {
 
     final themeData = Theme.of(context);
     final pal = themeData.extension<AppPalette>();
-    final pillBg = pal?.primary ?? _fallbackAccent;
+    final control = themeData.extension<AppControlAccent>();
+    final pillBg =
+        control?.color ?? pal?.primary ?? _fallbackAccent;
     const pillFg = Colors.white;
 
     dismiss();
@@ -54,7 +60,8 @@ abstract final class ActionPillToast {
     late OverlayEntry entry;
     entry = OverlayEntry(
       builder: (ctx) {
-        final top = MediaQuery.paddingOf(ctx).top + 10;
+        final bottom =
+            MediaQuery.viewPaddingOf(ctx).bottom + _aboveBottomChrome;
         final textStyle = themeData.textTheme.labelSmall?.copyWith(
           color: pillFg,
           fontWeight: FontWeight.w800,
@@ -64,9 +71,9 @@ abstract final class ActionPillToast {
 
         return Positioned.fill(
           child: Align(
-            alignment: Alignment.topCenter,
+            alignment: Alignment.bottomCenter,
             child: Padding(
-              padding: EdgeInsets.only(top: top, left: 24, right: 24),
+              padding: EdgeInsets.only(bottom: bottom, left: 24, right: 24),
               child: IgnorePointer(
                 child: Material(
                   color: Colors.transparent,

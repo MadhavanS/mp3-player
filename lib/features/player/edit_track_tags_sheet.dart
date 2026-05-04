@@ -467,13 +467,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                             height: 22,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: context.palette.primary,
+                              color: context.controlAccent,
                             ),
                           )
                         : Icon(
                             Icons.auto_fix_high_outlined,
                             size: 24,
-                            color: context.palette.primary,
+                            color: context.controlAccent,
                           ),
                   ),
                   const SizedBox(width: 4),
@@ -501,7 +501,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                           : Container(
                               width: 120,
                               height: 120,
-                              color: context.palette.primary.withValues(alpha: 0.12),
+                              color: context.controlAccent.withValues(alpha: 0.12),
                               child: Icon(
                                 Icons.album_outlined,
                                 size: 48,

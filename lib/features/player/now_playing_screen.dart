@@ -167,7 +167,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 color: !canFav
                     ? pal.textSecondary.withValues(alpha: 0.35)
                     : isFav
-                        ? pal.primary
+                        ? context.controlAccent
                         : pal.textSecondary.withValues(alpha: 0.55),
               ),
               onPressed: !ready || !canFav
@@ -245,7 +245,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               icon: Icon(
                                 Icons.edit_note_rounded,
                                 color: canEdit
-                                    ? pal.primary
+                                    ? context.controlAccent
                                     : pal.textSecondary
                                         .withValues(alpha: 0.45),
                               ),
@@ -260,7 +260,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               icon: Icon(
                                 Icons.auto_fix_high_outlined,
                                 color: canEdit
-                                    ? pal.primary
+                                    ? context.controlAccent
                                     : pal.textSecondary
                                         .withValues(alpha: 0.45),
                               ),
@@ -273,28 +273,40 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                           ],
                         ),
                       ),
-                      PopupMenuButton<TrackOverflowAction>(
-                        tooltip: 'Track options',
-                        padding: EdgeInsets.zero,
-                        position: PopupMenuPosition.under,
-                        icon: Icon(
-                          Icons.more_vert_rounded,
-                          color: navIconColor,
-                        ),
-                        onSelected: (action) {
-                          unawaited(
-                            applyTrackOverflowAction(
-                              context,
-                              player,
-                              player.currentIndex,
-                              action,
+                      ListenableBuilder(
+                        listenable: FavoriteSongsStore.revision,
+                        builder: (context, _) {
+                          final p = cur.filePath ?? '';
+                          final favOk = trackCanToggleFavorite(cur);
+                          final isFav =
+                              favOk && FavoriteSongsStore.isFavorite(p);
+                          return PopupMenuButton<TrackOverflowAction>(
+                            tooltip: 'Track options',
+                            padding: EdgeInsets.zero,
+                            position: PopupMenuPosition.under,
+                            icon: Icon(
+                              Icons.more_vert_rounded,
+                              color: navIconColor,
+                            ),
+                            onSelected: (action) {
+                              unawaited(
+                                applyTrackOverflowAction(
+                                  context,
+                                  player,
+                                  player.currentIndex,
+                                  action,
+                                ),
+                              );
+                            },
+                            itemBuilder: (context) =>
+                                trackOverflowPopupMenuEntries(
+                              enableDeleteFromDevice:
+                                  trackCanDeleteFromDevice(cur),
+                              enableFavorite: favOk,
+                              isFavorite: isFav,
                             ),
                           );
                         },
-                        itemBuilder: (context) => trackOverflowPopupMenuEntries(
-                          enableDeleteFromDevice:
-                              trackCanDeleteFromDevice(cur),
-                        ),
                       ),
                     ],
                   ),
@@ -438,7 +450,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                           icon: Icon(
                                             Icons.shuffle_rounded,
                                             color: player.shuffleEnabled
-                                                ? pal.primary
+                                                ? context.controlAccent
                                                 : pal.textSecondary
                                                     .withValues(alpha: 0.55),
                                           ),
@@ -470,7 +482,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                               iconSize: 36,
                                               style: IconButton.styleFrom(
                                                 backgroundColor:
-                                                    pal.primary,
+                                                    context.controlAccent,
                                                 foregroundColor:
                                                     Colors.white,
                                                 fixedSize:
@@ -530,7 +542,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                         .withValues(
                                                           alpha: 0.55,
                                                         )
-                                                    : pal.primary,
+                                                    : context.controlAccent,
                                           ),
                                           onPressed: () => _notifyRepeat(player),
                                         ),
@@ -546,7 +558,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                           icon: Icon(
                                             Icons.shuffle_rounded,
                                             color: player.shuffleEnabled
-                                                ? pal.primary
+                                                ? context.controlAccent
                                                 : pal.textSecondary
                                                     .withValues(alpha: 0.55),
                                           ),
@@ -568,7 +580,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                     PlaylistRepeatMode.off
                                                 ? pal.textSecondary
                                                     .withValues(alpha: 0.55)
-                                                : pal.primary,
+                                                : context.controlAccent,
                                           ),
                                           onPressed: () =>
                                               _notifyRepeat(player),
@@ -602,7 +614,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                               iconSize: 40,
                                               style: IconButton.styleFrom(
                                                 backgroundColor:
-                                                    pal.primary,
+                                                    context.controlAccent,
                                                 foregroundColor:
                                                     Colors.white,
                                                 padding:
@@ -811,13 +823,14 @@ class _UpNextGlassTrackCard extends StatelessWidget {
         ? Colors.white.withValues(alpha: 0.045)
         : Colors.white.withValues(alpha: 0.62);
 
+    final accent = context.controlAccent;
     final titleStyle = theme.textTheme.titleSmall?.copyWith(
       fontWeight: FontWeight.w700,
-      color: pal.primary,
+      color: accent,
       fontSize: 15,
     );
     final artistStyle = theme.textTheme.bodySmall?.copyWith(
-      color: pal.primary.withValues(alpha: 0.78),
+      color: accent.withValues(alpha: 0.78),
       fontSize: 13,
     );
 

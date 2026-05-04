@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../services/storage_access.dart';
+import '../../theme/accent_color_option.dart';
 import '../../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -12,6 +13,8 @@ class SettingsScreen extends StatefulWidget {
     required this.onOpenDrawer,
     required this.themeSetting,
     required this.onThemeSettingChanged,
+    required this.accentColorOption,
+    required this.onAccentColorOptionChanged,
   });
 
   final List<String> folderPaths;
@@ -19,6 +22,8 @@ class SettingsScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
   final AppThemeSetting themeSetting;
   final ValueChanged<AppThemeSetting> onThemeSettingChanged;
+  final AppAccentColorOption accentColorOption;
+  final ValueChanged<AppAccentColorOption> onAccentColorOptionChanged;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -166,7 +171,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                             ? Icons.check_circle_rounded
                                             : Icons.circle_outlined,
                                         color: selected
-                                            ? pal.primary
+                                            ? context.controlAccent
                                             : pal.onScaffold
                                                 .withValues(alpha: 0.45),
                                         size: 22,
@@ -216,6 +221,101 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                                       ),
                                                     ),
                                                 ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 24),
+                      Text(
+                        'Accent color',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: pal.onScaffold,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Play / pause, notification pills, shuffle and repeat highlights, and key list accents.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: pal.onScaffold.withValues(alpha: 0.75),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...AppAccentColorOption.values.map((o) {
+                        final selected = widget.accentColorOption == o;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Material(
+                            color: pal.surface.withValues(alpha: 0.35),
+                            borderRadius: BorderRadius.circular(14),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: _busy
+                                  ? null
+                                  : () => widget.onAccentColorOptionChanged(o),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                    12, 12, 12, 12),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Icon(
+                                        selected
+                                            ? Icons.check_circle_rounded
+                                            : Icons.circle_outlined,
+                                        color: selected
+                                            ? context.controlAccent
+                                            : pal.onScaffold
+                                                .withValues(alpha: 0.45),
+                                        size: 22,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            o.label,
+                                            style: TextStyle(
+                                              color: pal.onScaffold,
+                                              fontWeight: selected
+                                                  ? FontWeight.w600
+                                                  : FontWeight.w500,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            o.subtitle,
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                              color: pal.onScaffold
+                                                  .withValues(alpha: 0.65),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            child: SizedBox(
+                                              height: 10,
+                                              child: DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  color: o.swatchColor,
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -298,7 +398,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         label: const Text('Add folder'),
                         style: FilledButton.styleFrom(
                           backgroundColor: pal.surface,
-                          foregroundColor: pal.primary,
+                          foregroundColor: context.controlAccent,
                         ),
                       ),
                       const SizedBox(height: 24),

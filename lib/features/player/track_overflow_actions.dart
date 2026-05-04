@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
+import '../../services/favorite_songs_store.dart';
 import '../../services/track_file_delete.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
@@ -15,6 +16,7 @@ enum TrackOverflowAction {
   playFromHere,
   playOnlyThis,
   addToPlaylist,
+  toggleFavorite,
   deleteFromDevice,
 }
 
@@ -23,8 +25,15 @@ bool trackCanDeleteFromDevice(TrackItem track) =>
     track.filePath != null &&
     track.filePath!.isNotEmpty;
 
+bool trackCanToggleFavorite(TrackItem track) =>
+    !kIsWeb &&
+    track.filePath != null &&
+    track.filePath!.isNotEmpty;
+
 List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
   required bool enableDeleteFromDevice,
+  bool enableFavorite = false,
+  bool isFavorite = false,
 }) {
   return [
     const PopupMenuItem(
@@ -53,6 +62,19 @@ List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
         subtitle: Text('Choose a saved playlist'),
       ),
     ),
+    if (enableFavorite)
+      PopupMenuItem(
+        value: TrackOverflowAction.toggleFavorite,
+        child: ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+          ),
+          title: Text(
+            isFavorite ? 'Remove from favourites' : 'Add to favourites',
+          ),
+        ),
+      ),
     if (enableDeleteFromDevice) ...[
       const PopupMenuDivider(),
       PopupMenuItem(
@@ -74,6 +96,73 @@ List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
       ),
     ],
   ];
+}
+
+/// Filled heart when favourited + track overflow menu (library / files lists).
+class TrackOverflowMenuWithFavourite extends StatelessWidget {
+  const TrackOverflowMenuWithFavourite({
+    super.key,
+    required this.pal,
+    required this.track,
+    required this.onSelected,
+    this.overflowIcon = Icons.more_horiz_rounded,
+    this.iconSize = 24,
+    this.menuIconColor,
+  });
+
+  final AppPalette pal;
+  final TrackItem track;
+  final ValueChanged<TrackOverflowAction> onSelected;
+  final IconData overflowIcon;
+  final double iconSize;
+
+  /// Defaults to [AppPalette.onScaffold] at 80% opacity (library). Files explorer
+  /// passes a muted variant so the heart still uses [BuildContext.controlAccent].
+  final Color? menuIconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: FavoriteSongsStore.revision,
+      builder: (context, _) {
+        final path = track.filePath ?? '';
+        final favOk = trackCanToggleFavorite(track);
+        final isFav = favOk && FavoriteSongsStore.isFavorite(path);
+        final accent = context.controlAccent;
+        final iconFg =
+            menuIconColor ?? pal.onScaffold.withValues(alpha: 0.8);
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (isFav)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  Icons.favorite_rounded,
+                  size: iconSize * 0.85,
+                  color: accent,
+                ),
+              ),
+            PopupMenuButton<TrackOverflowAction>(
+              tooltip: 'Track options',
+              icon: Icon(
+                overflowIcon,
+                color: iconFg,
+                size: iconSize,
+              ),
+              padding: EdgeInsets.zero,
+              onSelected: onSelected,
+              itemBuilder: (ctx) => trackOverflowPopupMenuEntries(
+                enableDeleteFromDevice: trackCanDeleteFromDevice(track),
+                enableFavorite: favOk,
+                isFavorite: isFav,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 Future<void> _showUserPlaylistPickerAndAdd(
@@ -151,7 +240,7 @@ Future<void> _showUserPlaylistPickerAndAdd(
                   return ListTile(
                     leading: Icon(
                       Icons.queue_music_rounded,
-                      color: pal.primary,
+                      color: context.controlAccent,
                     ),
                     title: Text(
                       pl.name,
@@ -215,6 +304,21 @@ Future<void> applyTrackOverflowAction(
         return;
       }
       await _showUserPlaylistPickerAndAdd(context, path);
+
+    case TrackOverflowAction.toggleFavorite:
+      final t = tracks[playlistIndex];
+      final path = t.filePath;
+      if (path == null || path.isEmpty || kIsWeb) return;
+      final nowFav = await FavoriteSongsStore.toggleFavorite(path);
+      if (context.mounted) {
+        ActionPillToast.showUsingRootNavigator(
+          nowFav ? 'Favourited' : 'Removed from favourites',
+          icon: nowFav
+              ? Icons.favorite_rounded
+              : Icons.favorite_border_rounded,
+          uppercaseLabel: true,
+        );
+      }
 
     case TrackOverflowAction.deleteFromDevice:
       final track = tracks[playlistIndex];

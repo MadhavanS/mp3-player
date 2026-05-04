@@ -169,6 +169,27 @@ class AppPalette extends ThemeExtension<AppPalette> {
   }
 }
 
+/// Play/pause, shuffle/repeat highlights, toasts, sliders, and library accents.
+@immutable
+class AppControlAccent extends ThemeExtension<AppControlAccent> {
+  const AppControlAccent({required this.color});
+
+  final Color color;
+
+  @override
+  AppControlAccent copyWith({Color? color}) {
+    return AppControlAccent(color: color ?? this.color);
+  }
+
+  @override
+  AppControlAccent lerp(ThemeExtension<AppControlAccent>? other, double t) {
+    if (other is! AppControlAccent) return this;
+    return AppControlAccent(
+      color: Color.lerp(color, other.color, t)!,
+    );
+  }
+}
+
 /// Carries which [AppThemePalette] backs the current [MaterialApp.theme] so UI
 /// can diverge layouts (Player reference) beyond token colors alone.
 @immutable
@@ -194,6 +215,11 @@ class ActiveAppThemePalette extends ThemeExtension<ActiveAppThemePalette> {
 extension AppThemeContext on BuildContext {
   AppPalette get palette =>
       Theme.of(this).extension<AppPalette>() ?? AppPalette.light;
+
+  /// Play buttons, notification pills, active shuffle/repeat/favourite, key list highlights.
+  Color get controlAccent =>
+      Theme.of(this).extension<AppControlAccent>()?.color ??
+      palette.primary;
 
   /// Prefer this over guessing from colors (matches [ThemeSettingsStore] resolve).
   AppThemePalette get appliedThemePalette =>
@@ -228,7 +254,10 @@ extension AppThemeSettingPreviewStripe on AppThemeSetting {
 }
 
 abstract final class AppTheme {
-  static ThemeData themeFor(AppThemePalette palette) {
+  static ThemeData themeFor(
+    AppThemePalette palette, {
+    required Color controlAccent,
+  }) {
     final ext = AppPalette.forPalette(palette);
     final brightness = switch (palette) {
       AppThemePalette.light => Brightness.light,
@@ -248,6 +277,7 @@ abstract final class AppTheme {
       extensions: [
         ext,
         ActiveAppThemePalette(palette: palette),
+        AppControlAccent(color: controlAccent),
       ],
       colorScheme: ColorScheme.fromSeed(
         seedColor: ext.primary,
@@ -281,10 +311,10 @@ abstract final class AppTheme {
         ),
       ),
       sliderTheme: SliderThemeData(
-        activeTrackColor: ext.primary.withValues(alpha: 0.85),
+        activeTrackColor: controlAccent.withValues(alpha: 0.85),
         inactiveTrackColor: ext.textMuted.withValues(alpha: 0.35),
-        thumbColor: ext.primary,
-        overlayColor: ext.primary.withValues(alpha: 0.12),
+        thumbColor: controlAccent,
+        overlayColor: controlAccent.withValues(alpha: 0.12),
         trackHeight: isPlayer ? 4 : 3,
       ),
       tabBarTheme: TabBarThemeData(

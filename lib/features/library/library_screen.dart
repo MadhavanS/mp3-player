@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' show min;
 
 import 'package:flutter/foundation.dart';
@@ -58,6 +59,7 @@ class LibraryScreenState extends State<LibraryScreen>
     _tabController = TabController(length: 5, vsync: this);
     _searchController.addListener(() => setState(() {}));
     _tabController.addListener(_onTabChanged);
+    unawaited(FavoriteSongsStore.ensureLoaded());
   }
 
   void _onTabChanged() {
@@ -224,7 +226,10 @@ class LibraryScreenState extends State<LibraryScreen>
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: pal.primary, width: 1.5),
+                  borderSide: BorderSide(
+                    color: ctx.controlAccent,
+                    width: 1.5,
+                  ),
                 ),
               ),
               onSubmitted: (v) {
@@ -443,12 +448,13 @@ class LibraryScreenState extends State<LibraryScreen>
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              color: pal.primary.withValues(alpha: 0.18),
+                              color: context.controlAccent
+                                  .withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(
                               Icons.add_rounded,
-                              color: pal.primary,
+                              color: context.controlAccent,
                               size: 28,
                             ),
                           ),
@@ -832,7 +838,7 @@ class LibraryScreenState extends State<LibraryScreen>
             if (snap.connectionState != ConnectionState.done) {
               return Center(
                 child: CircularProgressIndicator(
-                  color: pal.primary,
+                  color: context.controlAccent,
                 ),
               );
             }
@@ -961,20 +967,19 @@ class LibraryScreenState extends State<LibraryScreen>
                                 ),
                               ),
                               if (plIndex >= 0)
-                                PopupMenuButton<TrackOverflowAction>(
-                                  tooltip: 'Track options',
-                                  icon: Icon(
-                                    Icons.more_horiz_rounded,
-                                    color: pal.onScaffold.withValues(alpha: 0.8),
-                                  ),
-                                  padding: EdgeInsets.zero,
+                                TrackOverflowMenuWithFavourite(
+                                  pal: pal,
+                                  track: track,
                                   onSelected: (action) {
-                                    _onTrackOverflow(context, player, plIndex, action);
+                                    unawaited(
+                                      _onTrackOverflow(
+                                        context,
+                                        player,
+                                        plIndex,
+                                        action,
+                                      ),
+                                    );
                                   },
-                                  itemBuilder: (context) => trackOverflowPopupMenuEntries(
-                                    enableDeleteFromDevice:
-                                        trackCanDeleteFromDevice(track),
-                                  ),
                                 ),
                             ],
                           ),
@@ -1040,7 +1045,7 @@ class LibraryScreenState extends State<LibraryScreen>
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
               return Center(
-                child: CircularProgressIndicator(color: pal.primary),
+                child: CircularProgressIndicator(color: context.controlAccent),
               );
             }
 
@@ -1181,22 +1186,19 @@ class LibraryScreenState extends State<LibraryScreen>
                                 ),
                               ),
                               if (plIndex >= 0)
-                                PopupMenuButton<TrackOverflowAction>(
-                                  tooltip: 'Track options',
-                                  icon: Icon(
-                                    Icons.more_horiz_rounded,
-                                    color: pal.onScaffold.withValues(alpha: 0.8),
-                                  ),
-                                  padding: EdgeInsets.zero,
+                                TrackOverflowMenuWithFavourite(
+                                  pal: pal,
+                                  track: track,
                                   onSelected: (action) {
-                                    _onTrackOverflow(
-                                        context, player, plIndex, action);
+                                    unawaited(
+                                      _onTrackOverflow(
+                                        context,
+                                        player,
+                                        plIndex,
+                                        action,
+                                      ),
+                                    );
                                   },
-                                  itemBuilder: (context) =>
-                                      trackOverflowPopupMenuEntries(
-                                    enableDeleteFromDevice:
-                                        trackCanDeleteFromDevice(track),
-                                  ),
                                 ),
                             ],
                           ),
@@ -1228,7 +1230,7 @@ class LibraryScreenState extends State<LibraryScreen>
         if (snap.connectionState != ConnectionState.done) {
           return Center(
             child: CircularProgressIndicator(
-              color: pal.primary,
+              color: context.controlAccent,
             ),
           );
         }
@@ -1363,22 +1365,19 @@ class LibraryScreenState extends State<LibraryScreen>
                             ),
                           ),
                           if (plIndex >= 0)
-                            PopupMenuButton<TrackOverflowAction>(
-                              tooltip: 'Track options',
-                              icon: Icon(
-                                Icons.more_horiz_rounded,
-                                color: pal.onScaffold.withValues(alpha: 0.8),
-                              ),
-                              padding: EdgeInsets.zero,
+                            TrackOverflowMenuWithFavourite(
+                              pal: pal,
+                              track: track,
                               onSelected: (action) {
-                                _onTrackOverflow(
-                                    context, player, plIndex, action);
+                                unawaited(
+                                  _onTrackOverflow(
+                                    context,
+                                    player,
+                                    plIndex,
+                                    action,
+                                  ),
+                                );
                               },
-                              itemBuilder: (context) =>
-                                  trackOverflowPopupMenuEntries(
-                                enableDeleteFromDevice:
-                                    trackCanDeleteFromDevice(track),
-                              ),
                             ),
                         ],
                       ),
@@ -1514,8 +1513,11 @@ class LibraryScreenState extends State<LibraryScreen>
           track: track,
           selected: selected,
           onTap: () => _selectTrack(context, playlistIndex),
-          onOverflowAction: (action) =>
+          onOverflowAction: (action) {
+            unawaited(
               _onTrackOverflow(context, player, playlistIndex, action),
+            );
+          },
         );
       },
     );
@@ -1587,17 +1589,10 @@ class _TrackTile extends StatelessWidget {
                   ],
                 ),
               ),
-              PopupMenuButton<TrackOverflowAction>(
-                tooltip: 'Track options',
-                icon: Icon(
-                  Icons.more_horiz_rounded,
-                  color: pal.onScaffold.withValues(alpha: 0.8),
-                ),
-                padding: EdgeInsets.zero,
+              TrackOverflowMenuWithFavourite(
+                pal: pal,
+                track: track,
                 onSelected: onOverflowAction,
-                itemBuilder: (context) => trackOverflowPopupMenuEntries(
-                  enableDeleteFromDevice: trackCanDeleteFromDevice(track),
-                ),
               ),
             ],
           ),

@@ -116,7 +116,7 @@ class MiniPlayerBar extends StatelessWidget {
                               final playing = controller.isPlaying;
                               return IconButton.filled(
                                 style: IconButton.styleFrom(
-                                  backgroundColor: pal.primary,
+                                  backgroundColor: context.controlAccent,
                                   foregroundColor: Colors.white,
                                 ),
                                 onPressed: () => controller.togglePlayPause(),
@@ -170,7 +170,8 @@ class MiniPlayerBar extends StatelessWidget {
                                   minHeight: 2,
                                   backgroundColor:
                                       pal.textMuted.withValues(alpha: 0.28),
-                                  color: pal.primary.withValues(alpha: 0.72),
+                                  color:
+                                      context.controlAccent.withValues(alpha: 0.72),
                                 ),
                               );
                             },

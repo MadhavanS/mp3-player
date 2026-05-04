@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
+import '../../services/favorite_songs_store.dart';
 import '../../services/folder_browser.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/music_library_path_key.dart';
@@ -47,6 +48,12 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
 
   Future<({List<String> dirs, List<String> mp3Paths})>? _childrenFuture;
   Future<int>? _headerSongsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(FavoriteSongsStore.ensureLoaded());
+  }
 
   @override
   void didUpdateWidget(LibraryFilesExplorer oldWidget) {
@@ -713,27 +720,23 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                     ),
                                   ),
                                   if (idx >= 0)
-                                    PopupMenuButton<TrackOverflowAction>(
-                                      icon: Icon(
-                                        Icons.more_vert_rounded,
-                                        color: pal.onScaffold
-                                            .withValues(alpha: 0.75),
-                                        size: 22,
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      onSelected: (a) =>
+                                    TrackOverflowMenuWithFavourite(
+                                      pal: pal,
+                                      track: t,
+                                      overflowIcon: Icons.more_vert_rounded,
+                                      iconSize: 22,
+                                      menuIconColor: pal.onScaffold
+                                          .withValues(alpha: 0.75),
+                                      onSelected: (a) {
+                                        unawaited(
                                           widget.onOverflow(
-                                        context,
-                                        player,
-                                        idx,
-                                        a,
-                                      ),
-                                      itemBuilder: (ctx) =>
-                                          trackOverflowPopupMenuEntries(
-                                        enableDeleteFromDevice:
-                                            trackCanDeleteFromDevice(
-                                                player.playlist[idx]),
-                                      ),
+                                            context,
+                                            player,
+                                            idx,
+                                            a,
+                                          ),
+                                        );
+                                      },
                                     )
                                   else
                                     Icon(Icons.more_vert_rounded,

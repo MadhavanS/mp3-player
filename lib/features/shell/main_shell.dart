@@ -11,6 +11,7 @@ import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/saved_music_folders.dart';
 import '../../services/track_metadata.dart';
+import '../../theme/accent_color_option.dart';
 import '../../theme/app_theme.dart';
 import '../library/library_files_page.dart';
 import '../library/library_screen.dart';
@@ -26,10 +27,14 @@ class MainShell extends StatefulWidget {
     super.key,
     required this.themeSetting,
     required this.onThemeSettingChanged,
+    required this.accentColorOption,
+    required this.onAccentColorOptionChanged,
   });
 
   final AppThemeSetting themeSetting;
   final ValueChanged<AppThemeSetting> onThemeSettingChanged;
+  final AppAccentColorOption accentColorOption;
+  final ValueChanged<AppAccentColorOption> onAccentColorOptionChanged;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -313,7 +318,7 @@ class _MainShellState extends State<MainShell> {
                     child: Text(
                       'MP3 Player',
                       style: theme.textTheme.titleLarge?.copyWith(
-                        color: pal.primary,
+                        color: context.controlAccent,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -388,6 +393,9 @@ class _MainShellState extends State<MainShell> {
                             onOpenDrawer: _openDrawer,
                             themeSetting: widget.themeSetting,
                             onThemeSettingChanged: widget.onThemeSettingChanged,
+                            accentColorOption: widget.accentColorOption,
+                            onAccentColorOptionChanged:
+                                widget.onAccentColorOptionChanged,
                           ),
                   ),
                   if (current != null)
