@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
+import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
+import '../../services/library_tabs_store.dart';
 import '../../services/library_track_sort.dart';
 import '../../services/music_library_path_key.dart';
 import '../../services/recently_added_store.dart';
@@ -43,9 +45,10 @@ class LibraryScreen extends StatefulWidget {
 }
 
 class LibraryScreenState extends State<LibraryScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
-  late final TabController _tabController;
+  late TabController _tabController;
+  List<LibraryTabId> _visibleTabs = List<LibraryTabId>.from(LibraryTabId.values);
   int _recentListRevision = 0;
 
   final GlobalKey _scrollAnchorSongs = GlobalKey(debugLabel: 'libScrollSongs');
@@ -71,30 +74,35 @@ class LibraryScreenState extends State<LibraryScreen>
   /// After returning from Files, focus the Songs tab.
   void switchToSongsTab() {
     if (!mounted) return;
-    _tabController.index = 0;
+    final ix = _visibleTabs.indexOf(LibraryTabId.songs);
+    if (ix >= 0) _tabController.index = ix;
     setState(() {});
   }
 
   /// Used when closing Now Playing to restore the library section that started playback.
-  void switchToTab(int index) {
+  Future<void> switchToTabAndScrollToCurrentTrack(LibraryTabId tabId) async {
     if (!mounted) return;
-    _tabController.index = index.clamp(0, 4);
+    var ix = _visibleTabs.indexOf(tabId);
+    if (ix < 0) {
+      ix = _visibleTabs.indexOf(LibraryTabId.songs);
+      if (ix < 0) ix = 0;
+    }
+    _tabController.index = ix;
     setState(() {});
-  }
-
-  /// Switches library tab and scrolls so the current track row is at the top of the list.
-  Future<void> switchToTabAndScrollToCurrentTrack(int index) async {
-    if (!mounted) return;
-    _tabController.index = index.clamp(0, 4);
-    setState(() {});
-    // TabBarView + lazy lists need more than one frame before ScrollController attaches
-    // and [maxScrollExtent] is non-zero.
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     await _scrollActiveTabToCurrentTrack();
   }
+
+  LibraryTabId get _currentLibraryTabId =>
+      _visibleTabs[_tabController.index.clamp(0, _visibleTabs.length - 1)];
+
+  bool _isActiveTab(LibraryTabId id) =>
+      _tabController.index >= 0 &&
+      _tabController.index < _visibleTabs.length &&
+      _visibleTabs[_tabController.index] == id;
 
   static bool _isCurrentTrackPath(PlayerController player, String? path) {
     if (path == null || path.isEmpty) return false;
@@ -107,12 +115,49 @@ class LibraryScreenState extends State<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(
+      length: _visibleTabs.length,
+      vsync: this,
+    );
     _searchController.addListener(() => setState(() {}));
     _tabController.addListener(_onTabChanged);
+    LibraryTabsStore.revision.addListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.addListener(_onSongSortStoreRevision);
     unawaited(FavoriteSongsStore.ensureLoaded());
     unawaited(_reloadSongSortMode());
+    unawaited(_syncTabsFromStore());
+  }
+
+  Future<void> _syncTabsFromStore() async {
+    final next = await LibraryTabsStore.loadVisibleOrdered();
+    if (!mounted) return;
+    _replaceVisibleTabs(next.isEmpty ? [LibraryTabId.songs] : next);
+  }
+
+  void _onLibraryTabsRevision() {
+    unawaited(_syncTabsFromStore());
+  }
+
+  void _replaceVisibleTabs(List<LibraryTabId> next) {
+    final use = next.isEmpty ? [LibraryTabId.songs] : next;
+    if (listEquals(_visibleTabs, use)) return;
+    final oldLen = _visibleTabs.length;
+    final oldIx = oldLen == 0 ? 0 : _tabController.index.clamp(0, oldLen - 1);
+    final oldId = _visibleTabs.isEmpty ? LibraryTabId.songs : _visibleTabs[oldIx];
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
+    _visibleTabs = List<LibraryTabId>.from(use);
+    var initialIx = _visibleTabs.indexOf(oldId);
+    if (initialIx < 0) {
+      initialIx = oldIx.clamp(0, _visibleTabs.length - 1);
+    }
+    _tabController = TabController(
+      length: _visibleTabs.length,
+      vsync: this,
+      initialIndex: initialIx.clamp(0, _visibleTabs.length - 1),
+    );
+    _tabController.addListener(_onTabChanged);
+    setState(() {});
   }
 
   Future<void> _reloadSongSortMode() async {
@@ -128,11 +173,11 @@ class LibraryScreenState extends State<LibraryScreen>
     if (!mounted) return;
     if (_tabController.indexIsChanging) return;
     setState(() {
-      if (_tabController.index == 4) {
+      if (_currentLibraryTabId == LibraryTabId.recentlyPlayed) {
         _recentListRevision++;
       }
     });
-    if (_tabController.index == 3) {
+    if (_currentLibraryTabId == LibraryTabId.favourites) {
       unawaited(FavoriteSongsStore.pruneMissingPaths());
     }
   }
@@ -147,6 +192,7 @@ class LibraryScreenState extends State<LibraryScreen>
     _playlistScrollController.dispose();
     _favoritesScrollController.dispose();
     _recentPlayedScrollController.dispose();
+    LibraryTabsStore.revision.removeListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.removeListener(_onSongSortStoreRevision);
     super.dispose();
   }
@@ -260,13 +306,12 @@ class LibraryScreenState extends State<LibraryScreen>
     final pathKey = canonicalMusicLibraryPathKey(cur);
     if (pathKey.isEmpty) return;
 
-    final tab = _tabController.index;
     final tracks = player.metadataLibrary;
     final query = _searchController.text.trim();
     final browsePathKeys = widget.songsBrowsePathKeys.value;
 
-    switch (tab) {
-      case 0:
+    switch (_currentLibraryTabId) {
+      case LibraryTabId.songs:
         final (idx, total) = _songsListIndexAndTotalForPathKey(
           tracks,
           browsePathKeys,
@@ -281,7 +326,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _scrollAnchorSongs,
         );
         return;
-      case 1:
+      case LibraryTabId.recentlyAdded:
         final ordered =
             await RecentlyAddedStore.orderedPathsForLibrary(tracks);
         if (!mounted) return;
@@ -297,7 +342,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _scrollAnchorRecentAdded,
         );
         return;
-      case 2:
+      case LibraryTabId.playlist:
         final all = await UserPlaylistsStore.loadAll();
         if (!mounted) return;
         final filtered = _filterPlaylistsBySearch(all, query);
@@ -322,7 +367,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _scheduleScrollAnchorIntoView(_scrollAnchorPlaylist);
         }
         return;
-      case 3:
+      case LibraryTabId.favourites:
         final favPaths = await FavoriteSongsStore.loadPaths();
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(favPaths, null);
@@ -337,7 +382,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _scrollAnchorFavorites,
         );
         return;
-      case 4:
+      case LibraryTabId.recentlyPlayed:
         final played = await RecentlyPlayedStore.loadPaths();
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(played, browsePathKeys);
@@ -352,8 +397,6 @@ class LibraryScreenState extends State<LibraryScreen>
           _scrollAnchorRecentPlayed,
         );
         return;
-      default:
-        return;
     }
   }
 
@@ -362,10 +405,13 @@ class LibraryScreenState extends State<LibraryScreen>
     return t.title.toLowerCase().contains(q);
   }
 
-  String _searchHintForTab(int i) => switch (i) {
-        0 || 1 || 2 => 'Search by title',
-        3 => 'Search favourites',
-        _ => 'Search recent',
+  String _searchHintForTab(LibraryTabId id) => switch (id) {
+        LibraryTabId.songs ||
+        LibraryTabId.recentlyAdded ||
+        LibraryTabId.playlist =>
+          'Search by title',
+        LibraryTabId.favourites => 'Search favourites',
+        LibraryTabId.recentlyPlayed => 'Search RecentlyPlayed',
       };
 
   List<String> _pathsMatchingBrowse(
@@ -422,7 +468,7 @@ class LibraryScreenState extends State<LibraryScreen>
     BuildContext context,
     List<String> orderedPaths,
     int startIndex, {
-    required int playbackOriginTab,
+    required LibraryTabId playbackOriginTab,
     Set<String>? pathKeyScope,
     String? playbackOriginUserPlaylistId,
   }) async {
@@ -489,6 +535,13 @@ class LibraryScreenState extends State<LibraryScreen>
       }
     }
     if (!mounted || found == null) return;
+    final playlistIx = _visibleTabs.indexOf(LibraryTabId.playlist);
+    if (playlistIx >= 0) {
+      _tabController.index = playlistIx;
+      setState(() {});
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
     await _showUserPlaylistSheet(
       context,
       found,
@@ -655,7 +708,7 @@ class LibraryScreenState extends State<LibraryScreen>
                                     context,
                                     paths,
                                     0,
-                                    playbackOriginTab: 2,
+                                    playbackOriginTab: LibraryTabId.playlist,
                                     playbackOriginUserPlaylistId:
                                         sheetPlaylist.id,
                                   );
@@ -734,12 +787,12 @@ class LibraryScreenState extends State<LibraryScreen>
                                             -1,
                                             TrackOverflowAction
                                                 .removeFromPlaylist,
-                                            playbackOriginTab: 2,
+                                            playbackOriginTab: LibraryTabId.playlist,
                                             outsideQueue:
                                                 TrackOverflowQueueContext(
                                               tracks: ctxTracks,
                                               index: i,
-                                              playbackOriginTab: 2,
+                                              playbackOriginTab: LibraryTabId.playlist,
                                             ),
                                             userPlaylistId: sheetPlaylist.id,
                                           ),
@@ -752,7 +805,7 @@ class LibraryScreenState extends State<LibraryScreen>
                                         context,
                                         paths,
                                         i,
-                                        playbackOriginTab: 2,
+                                        playbackOriginTab: LibraryTabId.playlist,
                                         playbackOriginUserPlaylistId:
                                             sheetPlaylist.id,
                                       );
@@ -901,7 +954,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 else
                   ...() {
                     var anchorIndex = -1;
-                    if (_tabController.index == 2 && curKey.isNotEmpty) {
+                    if (_isActiveTab(LibraryTabId.playlist) && curKey.isNotEmpty) {
                       for (var j = 0; j < filteredPlaylists.length; j++) {
                         if (_userPlaylistContainsCurrentPath(
                             filteredPlaylists[j], curKey)) {
@@ -915,7 +968,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       (i) {
                         final pl = filteredPlaylists[i];
                         final attachScrollKey =
-                            _tabController.index == 2 &&
+                            _isActiveTab(LibraryTabId.playlist) &&
                                 anchorIndex == i;
                     return Column(
                       mainAxisSize: MainAxisSize.min,
@@ -1008,7 +1061,7 @@ class LibraryScreenState extends State<LibraryScreen>
     PlayerController player,
     int playlistIndex,
     TrackOverflowAction action, {
-    int? playbackOriginTab,
+    LibraryTabId? playbackOriginTab,
     TrackOverflowQueueContext? outsideQueue,
     String? userPlaylistId,
   }) async {
@@ -1081,7 +1134,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 _sortedSongsTabIndices(tracks, query, browsePathKeys);
 
             final pal = context.palette;
-            final hint = _searchHintForTab(_tabController.index);
+            final hint = _searchHintForTab(_currentLibraryTabId);
 
             return ColoredBox(
               color: pal.scaffoldBackground,
@@ -1145,6 +1198,7 @@ class LibraryScreenState extends State<LibraryScreen>
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: TabBar(
+                        key: ObjectKey(_tabController),
                         controller: _tabController,
                         isScrollable: true,
                         padding: const EdgeInsets.only(left: 2, right: 8),
@@ -1173,56 +1227,28 @@ class LibraryScreenState extends State<LibraryScreen>
                         splashFactory: NoSplash.splashFactory,
                         overlayColor:
                             WidgetStateProperty.all<Color>(Colors.transparent),
-                        tabs: const [
-                          Tab(text: 'Songs'),
-                          Tab(text: 'Recently added'),
-                          Tab(text: 'Playlist'),
-                          Tab(text: 'Favourites'),
-                          Tab(text: 'Recently played'),
+                        tabs: [
+                          for (final id in _visibleTabs)
+                            Tab(text: id.shortTitle),
                         ],
                       ),
                     ),
                     Expanded(
                       child: TabBarView(
+                        key: ObjectKey(_tabController),
                         controller: _tabController,
                         children: [
-                          _buildTracksTab(
-                            theme,
-                            context,
-                            tracks,
-                            songsTabIndices,
-                            player,
-                            browsePathKeys: browsePathKeys,
-                            onClearBrowseFolder: browsePathKeys == null
-                                ? null
-                                : widget.onClearSongsBrowseFilter,
-                          ),
-                          _buildRecentlyAddedTab(
-                            theme,
-                            pal,
-                            query,
-                            player,
-                            tracks,
-                            browsePathKeys,
-                          ),
-                          _buildPlaylistTab(
-                            theme,
-                            context,
-                            pal,
-                            query,
-                            tracks,
-                            player,
-                          ),
-                          _buildFavoritesTab(
-                            theme,
-                            pal,
-                            query,
-                            player,
-                            tracks,
-                            // Folder browse from Files scopes Songs / queue; favourites stay global.
-                            null,
-                          ),
-                          _buildRecentTab(theme, pal, query, player, tracks, browsePathKeys),
+                          for (final id in _visibleTabs)
+                            _libraryTabPage(
+                              id,
+                              theme,
+                              context,
+                              pal,
+                              tracks,
+                              songsTabIndices,
+                              player,
+                              browsePathKeys,
+                            ),
                         ],
                       ),
                     ),
@@ -1234,6 +1260,64 @@ class LibraryScreenState extends State<LibraryScreen>
         );
       },
     );
+  }
+
+  Widget _libraryTabPage(
+    LibraryTabId id,
+    ThemeData theme,
+    BuildContext context,
+    AppPalette pal,
+    List<TrackItem> tracks,
+    List<int> songsTabIndices,
+    PlayerController player,
+    Set<String>? browsePathKeys,
+  ) {
+    final query = _searchController.text.trim();
+    return switch (id) {
+      LibraryTabId.songs => _buildTracksTab(
+          theme,
+          context,
+          tracks,
+          songsTabIndices,
+          player,
+          browsePathKeys: browsePathKeys,
+          onClearBrowseFolder: browsePathKeys == null
+              ? null
+              : widget.onClearSongsBrowseFilter,
+        ),
+      LibraryTabId.recentlyAdded => _buildRecentlyAddedTab(
+          theme,
+          pal,
+          query,
+          player,
+          tracks,
+          browsePathKeys,
+        ),
+      LibraryTabId.playlist => _buildPlaylistTab(
+          theme,
+          context,
+          pal,
+          query,
+          tracks,
+          player,
+        ),
+      LibraryTabId.favourites => _buildFavoritesTab(
+          theme,
+          pal,
+          query,
+          player,
+          tracks,
+          null,
+        ),
+      LibraryTabId.recentlyPlayed => _buildRecentTab(
+          theme,
+          pal,
+          query,
+          player,
+          tracks,
+          browsePathKeys,
+        ),
+    };
   }
 
   Widget _buildFavoritesTab(
@@ -1325,7 +1409,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 final plIndex = _playlistIndexForPath(player, path);
                 final selected = _isCurrentTrackPath(player, path);
                 final attachScrollKey =
-                    selected && _tabController.index == 3;
+                    selected && _isActiveTab(LibraryTabId.favourites);
                 return Material(
                   key: attachScrollKey ? _scrollAnchorFavorites : null,
                   color: selected
@@ -1336,7 +1420,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       context,
                       paths,
                       i,
-                      playbackOriginTab: 3,
+                      playbackOriginTab: LibraryTabId.favourites,
                     ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -1401,12 +1485,12 @@ class LibraryScreenState extends State<LibraryScreen>
                                       player,
                                       plIndex >= 0 ? plIndex : -1,
                                       action,
-                                      playbackOriginTab: 3,
+                                      playbackOriginTab: LibraryTabId.favourites,
                                       outsideQueue: plIndex < 0
                                           ? TrackOverflowQueueContext(
                                               tracks: ctxTracks,
                                               index: i,
-                                              playbackOriginTab: 3,
+                                              playbackOriginTab: LibraryTabId.favourites,
                                             )
                                           : null,
                                     ),
@@ -1504,7 +1588,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Recently added lists tracks added after your library was first scanned, or copied into your Settings folders later. Refresh rescans folders.',
+                        'RecentlyAdded lists tracks added after your library was first scanned, or copied into your Settings folders later. Refresh rescans folders.',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: pal.textSecondary.withValues(alpha: 0.9),
@@ -1520,8 +1604,8 @@ class LibraryScreenState extends State<LibraryScreen>
               final hasBrowse = browsePathKeys != null;
               final q = rawQuery.trim();
               final message = hasBrowse && q.isEmpty
-                  ? 'No recently added songs in this folder.'
-                  : 'No recently added songs match your search.';
+                  ? 'No RecentlyAdded songs in this folder.'
+                  : 'No RecentlyAdded songs match your search.';
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(28),
@@ -1552,7 +1636,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 final plIndex = _playlistIndexForPath(player, path);
                 final selected = _isCurrentTrackPath(player, path);
                 final attachScrollKey =
-                    selected && _tabController.index == 1;
+                    selected && _isActiveTab(LibraryTabId.recentlyAdded);
                 return Material(
                   key: attachScrollKey ? _scrollAnchorRecentAdded : null,
                   color: selected
@@ -1563,7 +1647,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       context,
                       paths,
                       i,
-                      playbackOriginTab: 1,
+                      playbackOriginTab: LibraryTabId.recentlyAdded,
                     ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
@@ -1633,12 +1717,12 @@ class LibraryScreenState extends State<LibraryScreen>
                                       player,
                                       plIndex >= 0 ? plIndex : -1,
                                       action,
-                                      playbackOriginTab: 1,
+                                      playbackOriginTab: LibraryTabId.recentlyAdded,
                                       outsideQueue: plIndex < 0
                                           ? TrackOverflowQueueContext(
                                               tracks: ctxTracks,
                                               index: i,
-                                              playbackOriginTab: 1,
+                                              playbackOriginTab: LibraryTabId.recentlyAdded,
                                             )
                                           : null,
                                     ),
@@ -1718,8 +1802,8 @@ class LibraryScreenState extends State<LibraryScreen>
           final hasBrowse = browsePathKeys != null;
           final q = rawQuery.trim();
           final message = hasBrowse && q.isEmpty
-              ? 'No recent songs in this folder.'
-              : 'No recent songs match your search.';
+              ? 'No RecentlyPlayed songs in this folder.'
+              : 'No RecentlyPlayed songs match your search.';
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(28),
@@ -1749,7 +1833,7 @@ class LibraryScreenState extends State<LibraryScreen>
             final plIndex = _playlistIndexForPath(player, path);
             final selected = _isCurrentTrackPath(player, path);
             final attachScrollKey =
-                selected && _tabController.index == 4;
+                selected && _isActiveTab(LibraryTabId.recentlyPlayed);
             return Material(
               key: attachScrollKey ? _scrollAnchorRecentPlayed : null,
               color: selected
@@ -1760,7 +1844,7 @@ class LibraryScreenState extends State<LibraryScreen>
                   context,
                   paths,
                   i,
-                  playbackOriginTab: 4,
+                  playbackOriginTab: LibraryTabId.recentlyPlayed,
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -1826,12 +1910,12 @@ class LibraryScreenState extends State<LibraryScreen>
                               player,
                               plIndex >= 0 ? plIndex : -1,
                               action,
-                              playbackOriginTab: 4,
+                              playbackOriginTab: LibraryTabId.recentlyPlayed,
                               outsideQueue: plIndex < 0
                                   ? TrackOverflowQueueContext(
                                       tracks: ctxTracks,
                                       index: i,
-                                      playbackOriginTab: 4,
+                                      playbackOriginTab: LibraryTabId.recentlyPlayed,
                                     )
                                   : null,
                             ),
@@ -1978,7 +2062,7 @@ class LibraryScreenState extends State<LibraryScreen>
           track: track,
           selected: selected,
           showPlayingIcon: selected,
-          rowKey: selected && _tabController.index == 0
+          rowKey: selected && _isActiveTab(LibraryTabId.songs)
               ? _scrollAnchorSongs
               : null,
           onTap: () {
@@ -1991,7 +2075,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 context,
                 orderedPaths,
                 i,
-                playbackOriginTab: 0,
+                playbackOriginTab: LibraryTabId.songs,
                 pathKeyScope: browsePathKeys,
               ),
             );
@@ -2003,12 +2087,12 @@ class LibraryScreenState extends State<LibraryScreen>
                 player,
                 plIndex >= 0 ? plIndex : -1,
                 action,
-                playbackOriginTab: 0,
+                playbackOriginTab: LibraryTabId.songs,
                 outsideQueue: plIndex < 0
                     ? TrackOverflowQueueContext(
                         tracks: ctxTracks,
                         index: i,
-                        playbackOriginTab: 0,
+                        playbackOriginTab: LibraryTabId.songs,
                       )
                     : null,
               ),

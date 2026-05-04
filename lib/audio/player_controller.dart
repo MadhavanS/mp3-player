@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 
+import '../models/library_tab_id.dart';
 import '../models/track_item.dart';
 import '../services/music_library_path_key.dart';
 
@@ -38,11 +39,10 @@ class PlayerController extends ChangeNotifier {
   /// replaced by Favourites / a user playlist / etc.
   List<TrackItem> _libraryCatalog = [];
 
-  /// Library tab (0=Songs…4=Recently played) where the current queue was started;
-  /// used when closing Now Playing.
-  int? _playbackOriginTabIndex;
+  /// Library tab where the current queue was started; used when closing Now Playing.
+  LibraryTabId? _playbackOriginTab;
 
-  /// When [playbackOriginTabIndex] is 2, optional user-saved playlist to reopen.
+  /// When origin is [LibraryTabId.playlist], optional user-saved playlist to reopen.
   String? _playbackOriginUserPlaylistId;
 
   AudioPlayer get audioPlayer => _player;
@@ -53,7 +53,7 @@ class PlayerController extends ChangeNotifier {
   List<TrackItem> get metadataLibrary =>
       _libraryCatalog.isNotEmpty ? _libraryCatalog : _playlist;
 
-  int? get playbackOriginTabIndex => _playbackOriginTabIndex;
+  LibraryTabId? get playbackOriginTab => _playbackOriginTab;
 
   /// Set when playback started from Library → Playlist and a user playlist sheet.
   String? get playbackOriginUserPlaylistId => _playbackOriginUserPlaylistId;
@@ -213,14 +213,15 @@ class PlayerController extends ChangeNotifier {
   Future<void> setPlaylist(
     List<TrackItem> tracks, {
     int startIndex = 0,
-    int? playbackOriginTab,
+    LibraryTabId? playbackOriginTab,
     String? playbackOriginUserPlaylistId,
   }) async {
     if (playbackOriginTab != null) {
-      final t = playbackOriginTab.clamp(0, 4);
-      _playbackOriginTabIndex = t;
+      _playbackOriginTab = playbackOriginTab;
       _playbackOriginUserPlaylistId =
-          t == 2 ? playbackOriginUserPlaylistId : null;
+          playbackOriginTab == LibraryTabId.playlist
+              ? playbackOriginUserPlaylistId
+              : null;
     }
     _playlist = List<TrackItem>.from(tracks);
     _resetShuffleState();
@@ -255,7 +256,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> setPlaylistAndPlay(
     List<TrackItem> tracks, {
     int startIndex = 0,
-    int? playbackOriginTab,
+    LibraryTabId? playbackOriginTab,
     String? playbackOriginUserPlaylistId,
   }) async {
     await setPlaylist(
@@ -415,6 +416,12 @@ class PlayerController extends ChangeNotifier {
     }
     _isLoadingSource = true;
     try {
+      // Fully stop before swapping sources so the previous MediaCodec session can
+      // tear down before ExoPlayer allocates another decoder — avoids many
+      // Android log warnings ("Handler ... dead thread") on rapid track changes.
+      try {
+        await _player.stop();
+      } catch (_) {}
       await _player.setFilePath(path);
     } catch (e, st) {
       debugPrint('Playback load error: $e\n$st');

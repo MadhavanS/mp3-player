@@ -9,7 +9,7 @@ import 'music_library_path_key.dart';
 /// Records when a file path was first seen as **new** after a library baseline.
 ///
 /// The first full scan after an empty map establishes a baseline (`0` = already in
-/// library, hidden from Recently added). Paths that appear in later scans get a real
+/// library, hidden from RecentlyAdded). Paths that appear in later scans get a real
 /// timestamp and show up here — settings-folder scans only ([mergeScanPaths]).
 class RecentlyAddedStore {
   RecentlyAddedStore._();
@@ -37,7 +37,7 @@ class RecentlyAddedStore {
   /// Call after collecting scan results from Settings music folders.
   ///
   /// New paths since the last baseline scan get [firstSeenMs] = now.
-  /// The first non-empty scan seeds every path with `0` (not shown as recently added).
+  /// The first non-empty scan seeds every path with `0` (not shown as RecentlyAdded).
   /// Removed paths drop out of the map.
   static Future<void> mergeScanPaths(Iterable<String> paths) async {
     final prefs = await SharedPreferences.getInstance();

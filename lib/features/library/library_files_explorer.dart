@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
+import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/folder_browser.dart';
@@ -33,7 +34,7 @@ class LibraryFilesExplorer extends StatefulWidget {
     PlayerController player,
     int playlistIndex,
     TrackOverflowAction action, {
-    int? playbackOriginTab,
+    LibraryTabId? playbackOriginTab,
     TrackOverflowQueueContext? outsideQueue,
   }) onOverflow;
 
@@ -408,7 +409,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
       if (cb != null) await cb(null);
       await player.setPlaylistAndPlay(
         [TrackItem.fromFilePath(filePath)],
-        playbackOriginTab: 0,
+        playbackOriginTab: LibraryTabId.songs,
       );
       return;
     }
@@ -431,7 +432,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     await player.setPlaylistAndPlay(
       tracks,
       startIndex: startIndex >= 0 ? startIndex : 0,
-      playbackOriginTab: 0,
+      playbackOriginTab: LibraryTabId.songs,
     );
   }
 
@@ -794,12 +795,12 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                           player,
                                           idx >= 0 ? idx : -1,
                                           a,
-                                          playbackOriginTab: 0,
+                                          playbackOriginTab: LibraryTabId.songs,
                                           outsideQueue: idx < 0
                                               ? TrackOverflowQueueContext(
                                                   tracks: mp3QueueTracks,
                                                   index: rowIx,
-                                                  playbackOriginTab: 0,
+                                                  playbackOriginTab: LibraryTabId.songs,
                                                 )
                                               : null,
                                         ),

@@ -16,7 +16,8 @@ class MiniPlayerBar extends StatelessWidget {
   final PlayerController controller;
   final VoidCallback onTap;
 
-  static const double _radius = 28;
+  /// Frosted player chrome top corners (mini bar and full-screen Now Playing).
+  static const double topSheetRadius = 28;
 
   @override
   Widget build(BuildContext context) {
@@ -31,11 +32,15 @@ class MiniPlayerBar extends StatelessWidget {
     final borderColor = isDark
         ? Colors.white.withValues(alpha: 0.22)
         : Colors.black.withValues(alpha: 0.08);
-    final glassTop =
-        isDark ? Colors.white.withValues(alpha: 0.13) : Colors.white.withValues(alpha: 0.82);
-    final glassBottom =
-        isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white.withValues(alpha: 0.68);
-    final borderRadius = const BorderRadius.vertical(top: Radius.circular(_radius));
+    final glassTop = isDark
+        ? Colors.white.withValues(alpha: 0.13)
+        : Colors.white.withValues(alpha: 0.82);
+    final glassBottom = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.white.withValues(alpha: 0.68);
+    final borderRadius = const BorderRadius.vertical(
+      top: Radius.circular(topSheetRadius),
+    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -133,13 +138,13 @@ class MiniPlayerBar extends StatelessWidget {
                             builder: (context, _) {
                               final canNext = controller.canSkipNext;
                               return IconButton(
-                                tooltip:
-                                    canNext ? 'Next track' : 'End of playlist',
+                                tooltip: canNext
+                                    ? 'Next track'
+                                    : 'End of playlist',
                                 icon: const Icon(Icons.skip_next_rounded),
                                 color: canNext
                                     ? pal.textPrimary
-                                    : pal.textSecondary
-                                        .withValues(alpha: 0.38),
+                                    : pal.textSecondary.withValues(alpha: 0.38),
                                 onPressed: canNext
                                     ? () => controller.skipNext()
                                     : null,
@@ -150,7 +155,11 @@ class MiniPlayerBar extends StatelessWidget {
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                      padding: const EdgeInsets.only(
+                        left: 16,
+                        right: 16,
+                        bottom: 8,
+                      ),
                       child: StreamBuilder<Duration>(
                         stream: controller.audioPlayer.positionStream,
                         builder: (context, posSnap) {
@@ -168,10 +177,12 @@ class MiniPlayerBar extends StatelessWidget {
                                 child: LinearProgressIndicator(
                                   value: p,
                                   minHeight: 2,
-                                  backgroundColor:
-                                      pal.textMuted.withValues(alpha: 0.28),
-                                  color:
-                                      context.controlAccent.withValues(alpha: 0.72),
+                                  backgroundColor: pal.textMuted.withValues(
+                                    alpha: 0.28,
+                                  ),
+                                  color: context.controlAccent.withValues(
+                                    alpha: 0.72,
+                                  ),
                                 ),
                               );
                             },

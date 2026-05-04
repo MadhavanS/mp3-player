@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
+import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/file_path_mtime_sort.dart';
 import '../../services/mp3_scanner.dart';
@@ -132,7 +133,7 @@ class _MainShellState extends State<MainShell> {
     if (paths.isEmpty) {
       await RecentlyAddedStore.mergeScanPaths([]);
       player.setLibraryCatalog([]);
-      await player.setPlaylist([], startIndex: 0, playbackOriginTab: 0);
+      await player.setPlaylist([], startIndex: 0, playbackOriginTab: LibraryTabId.songs);
       return;
     }
 
@@ -155,7 +156,7 @@ class _MainShellState extends State<MainShell> {
         ),
       );
       player.setLibraryCatalog([]);
-      await player.setPlaylist([], startIndex: 0, playbackOriginTab: 0);
+      await player.setPlaylist([], startIndex: 0, playbackOriginTab: LibraryTabId.songs);
       return;
     }
 
@@ -170,7 +171,7 @@ class _MainShellState extends State<MainShell> {
     await player.setPlaylist(
       tracks,
       startIndex: resolvedStart,
-      playbackOriginTab: 0,
+      playbackOriginTab: LibraryTabId.songs,
     );
 
     if (preservePlaybackAfterRescan && pathToPreserve != null && tracks.isNotEmpty) {
@@ -254,8 +255,8 @@ class _MainShellState extends State<MainShell> {
             child: NowPlayingScreen(
               onCollapse: () {
                 Navigator.of(context).pop();
-                final tab =
-                    player.playbackOriginTabIndex?.clamp(0, 4) ?? 0;
+                final tabId =
+                    player.playbackOriginTab ?? LibraryTabId.songs;
                 final userPlaylistId = player.playbackOriginUserPlaylistId;
                 _goLibrary();
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -263,9 +264,10 @@ class _MainShellState extends State<MainShell> {
                     if (!mounted) return;
                     final st = _libraryScreenKey.currentState;
                     if (st == null) return;
-                    await st.switchToTabAndScrollToCurrentTrack(tab);
+                    await st.switchToTabAndScrollToCurrentTrack(tabId);
                     if (!mounted) return;
-                    if (tab == 2 && userPlaylistId != null) {
+                    if (tabId == LibraryTabId.playlist &&
+                        userPlaylistId != null) {
                       await st.openUserPlaylistSheetById(userPlaylistId);
                     }
                   });
@@ -288,7 +290,7 @@ class _MainShellState extends State<MainShell> {
     PlayerController player,
     int playlistIndex,
     TrackOverflowAction action, {
-    int? playbackOriginTab,
+    LibraryTabId? playbackOriginTab,
     TrackOverflowQueueContext? outsideQueue,
   }) =>
       applyTrackOverflowAction(

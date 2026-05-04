@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
+import '../../models/library_tab_id.dart';
 import '../../theme/app_theme.dart';
 import '../player/track_overflow_actions.dart';
 import 'library_files_explorer.dart';
@@ -20,7 +21,7 @@ class LibraryFilesPage extends StatefulWidget {
     PlayerController player,
     int playlistIndex,
     TrackOverflowAction action, {
-    int? playbackOriginTab,
+    LibraryTabId? playbackOriginTab,
     TrackOverflowQueueContext? outsideQueue,
   }) onOverflow;
 

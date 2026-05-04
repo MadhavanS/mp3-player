@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
+import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/music_library_path_key.dart';
@@ -317,7 +318,7 @@ class TrackOverflowQueueContext {
 
   final List<TrackItem> tracks;
   final int index;
-  final int playbackOriginTab;
+  final LibraryTabId playbackOriginTab;
 }
 
 Future<void> applyTrackOverflowAction(
@@ -325,7 +326,7 @@ Future<void> applyTrackOverflowAction(
   PlayerController player,
   int playlistIndex,
   TrackOverflowAction action, {
-  int? playbackOriginTab,
+  LibraryTabId? playbackOriginTab,
   TrackOverflowQueueContext? outsideQueue,
   String? userPlaylistId,
 }) async {
@@ -345,13 +346,13 @@ Future<void> applyTrackOverflowAction(
     case TrackOverflowAction.playFromHere:
       await player.setPlaylistAndPlay(
         tracks.sublist(ix),
-        playbackOriginTab: tab,
+        playbackOriginTab: tab ?? LibraryTabId.songs,
       );
 
     case TrackOverflowAction.playOnlyThis:
       await player.setPlaylistAndPlay(
         [tracks[ix]],
-        playbackOriginTab: tab,
+        playbackOriginTab: tab ?? LibraryTabId.songs,
       );
 
     case TrackOverflowAction.addToPlaylist:
