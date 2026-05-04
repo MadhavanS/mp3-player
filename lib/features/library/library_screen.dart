@@ -1867,6 +1867,7 @@ class LibraryScreenState extends State<LibraryScreen>
         return _TrackTile(
           track: track,
           selected: selected,
+          showPlayingIcon: selected,
           rowKey: selected && _tabController.index == 0
               ? _scrollAnchorSongs
               : null,
@@ -1913,6 +1914,7 @@ class _TrackTile extends StatelessWidget {
   const _TrackTile({
     required this.track,
     required this.selected,
+    this.showPlayingIcon = false,
     this.rowKey,
     required this.onTap,
     required this.onOverflowAction,
@@ -1920,6 +1922,8 @@ class _TrackTile extends StatelessWidget {
 
   final TrackItem track;
   final bool selected;
+  /// When true (Songs tab), shows a play icon next to the title for the now-playing row.
+  final bool showPlayingIcon;
   final Key? rowKey;
   final VoidCallback onTap;
   final void Function(TrackOverflowAction action) onOverflowAction;
@@ -1955,14 +1959,29 @@ class _TrackTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      track.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: pal.onScaffold,
-                        fontSize: 15,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        if (showPlayingIcon) ...[
+                          Icon(
+                            Icons.play_arrow_rounded,
+                            size: 22,
+                            color: context.controlAccent,
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Expanded(
+                          child: Text(
+                            track.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: pal.onScaffold,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
