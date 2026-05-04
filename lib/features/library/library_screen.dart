@@ -46,6 +46,17 @@ class LibraryScreenState extends State<LibraryScreen>
   late final TabController _tabController;
   int _recentListRevision = 0;
 
+  final GlobalKey _scrollCurrentTrackKey =
+      GlobalKey(debugLabel: 'libraryScrollCurrentTrack');
+
+  final ScrollController _songsScrollController = ScrollController();
+  final ScrollController _recentAddedScrollController = ScrollController();
+  final ScrollController _playlistScrollController = ScrollController();
+  final ScrollController _favoritesScrollController = ScrollController();
+  final ScrollController _recentPlayedScrollController = ScrollController();
+
+  static const double _kLibraryListRowStride = 88;
+
   /// After returning from Files, focus the Songs tab.
   void switchToSongsTab() {
     if (!mounted) return;
@@ -58,6 +69,16 @@ class LibraryScreenState extends State<LibraryScreen>
     if (!mounted) return;
     _tabController.index = index.clamp(0, 4);
     setState(() {});
+  }
+
+  /// Switches library tab and scrolls so the current track row is at the top of the list.
+  Future<void> switchToTabAndScrollToCurrentTrack(int index) async {
+    if (!mounted) return;
+    _tabController.index = index.clamp(0, 4);
+    setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await _scrollActiveTabToCurrentTrack();
   }
 
   static bool _isCurrentTrackPath(PlayerController player, String? path) {
@@ -95,7 +116,163 @@ class LibraryScreenState extends State<LibraryScreen>
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _searchController.dispose();
+    _songsScrollController.dispose();
+    _recentAddedScrollController.dispose();
+    _playlistScrollController.dispose();
+    _favoritesScrollController.dispose();
+    _recentPlayedScrollController.dispose();
     super.dispose();
+  }
+
+  bool _userPlaylistContainsCurrentPath(UserPlaylistEntry pl, String pathKey) {
+    for (final p in pl.paths) {
+      if (canonicalMusicLibraryPathKey(p) == pathKey) return true;
+    }
+    return false;
+  }
+
+  int? _indexInSongsListForPathKey(
+    PlayerController player,
+    List<TrackItem> tracks,
+    Set<String>? browsePathKeys,
+    String query,
+    String pathKey,
+  ) {
+    final baseFilteredIndices = tracks.isEmpty
+        ? <int>[]
+        : _filteredPlaylistIndices(tracks, query);
+    final songsTabIndices = _playlistIndicesInPathKeySet(
+      baseFilteredIndices,
+      tracks,
+      browsePathKeys,
+    );
+    for (var i = 0; i < songsTabIndices.length; i++) {
+      final fp = tracks[songsTabIndices[i]].filePath;
+      if (fp != null && canonicalMusicLibraryPathKey(fp) == pathKey) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _coaxLazyListThenEnsureVisible(
+    ScrollController controller,
+    int index,
+  ) async {
+    if (!mounted) return;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      if (!controller.hasClients) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        continue;
+      }
+      final max = controller.position.maxScrollExtent;
+      final target = (index * _kLibraryListRowStride).clamp(0.0, max);
+      controller.jumpTo(target.toDouble());
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      final ctx = _scrollCurrentTrackKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0,
+          duration: Duration.zero,
+          curve: Curves.linear,
+        );
+        return;
+      }
+    }
+  }
+
+  Future<void> _scrollActiveTabToCurrentTrack() async {
+    if (!mounted) return;
+    final player = PlayerController.of(context);
+    final cur = player.currentTrack?.filePath;
+    if (cur == null || cur.isEmpty) return;
+    final pathKey = canonicalMusicLibraryPathKey(cur);
+    if (pathKey.isEmpty) return;
+
+    final tab = _tabController.index;
+    final tracks = player.metadataLibrary;
+    final query = _searchController.text.trim();
+    final browsePathKeys = widget.songsBrowsePathKeys.value;
+
+    switch (tab) {
+      case 0:
+        final idx = _indexInSongsListForPathKey(
+          player,
+          tracks,
+          browsePathKeys,
+          query,
+          pathKey,
+        );
+        if (idx == null) return;
+        await _coaxLazyListThenEnsureVisible(_songsScrollController, idx);
+        return;
+      case 1:
+        final ordered =
+            await RecentlyAddedStore.orderedPathsForLibrary(tracks);
+        if (!mounted) return;
+        var paths = _pathsMatchingBrowse(ordered, browsePathKeys);
+        paths = _filterPathsBySearch(paths, query, tracks);
+        final idx =
+            paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
+        if (idx < 0) return;
+        await _coaxLazyListThenEnsureVisible(_recentAddedScrollController, idx);
+        return;
+      case 2:
+        final all = await UserPlaylistsStore.loadAll();
+        if (!mounted) return;
+        final filtered = _filterPlaylistsBySearch(all, query);
+        final idx = filtered.indexWhere(
+          (pl) => _userPlaylistContainsCurrentPath(pl, pathKey),
+        );
+        if (idx < 0) return;
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        var ctx = _scrollCurrentTrackKey.currentContext;
+        if (ctx == null) {
+          if (_playlistScrollController.hasClients) {
+            final max = _playlistScrollController.position.maxScrollExtent;
+            _playlistScrollController
+                .jumpTo((120.0 + idx * 80).clamp(0.0, max));
+            await WidgetsBinding.instance.endOfFrame;
+            if (!mounted) return;
+            ctx = _scrollCurrentTrackKey.currentContext;
+          }
+        }
+        if (ctx != null && ctx.mounted) {
+          Scrollable.ensureVisible(
+            ctx,
+            alignment: 0,
+            duration: Duration.zero,
+            curve: Curves.linear,
+          );
+        }
+        return;
+      case 3:
+        final favPaths = await FavoriteSongsStore.loadPaths();
+        if (!mounted) return;
+        var paths = _pathsMatchingBrowse(favPaths, browsePathKeys);
+        paths = _filterPathsBySearch(paths, query, tracks);
+        final idx =
+            paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
+        if (idx < 0) return;
+        await _coaxLazyListThenEnsureVisible(_favoritesScrollController, idx);
+        return;
+      case 4:
+        final played = await RecentlyPlayedStore.loadPaths();
+        if (!mounted) return;
+        var paths = _pathsMatchingBrowse(played, browsePathKeys);
+        paths = _filterPathsBySearch(paths, query, tracks);
+        final idx =
+            paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
+        if (idx < 0) return;
+        await _coaxLazyListThenEnsureVisible(_recentPlayedScrollController, idx);
+        return;
+      default:
+        return;
+    }
   }
 
   static bool _trackMatchesQuery(TrackItem t, String q) {
@@ -456,7 +633,13 @@ class LibraryScreenState extends State<LibraryScreen>
             final filteredPlaylists =
                 _filterPlaylistsBySearch(allPlaylists, query);
 
+            final curPath = player.currentTrack?.filePath;
+            final curKey = (curPath != null && curPath.isNotEmpty)
+                ? canonicalMusicLibraryPathKey(curPath)
+                : '';
+
             return ListView(
+              controller: _playlistScrollController,
               padding: const EdgeInsets.only(bottom: 24),
               children: [
                 Material(
@@ -558,6 +741,9 @@ class LibraryScreenState extends State<LibraryScreen>
                 else
                   ...List.generate(filteredPlaylists.length, (i) {
                     final pl = filteredPlaylists[i];
+                    final attachScrollKey = _tabController.index == 2 &&
+                        curKey.isNotEmpty &&
+                        _userPlaylistContainsCurrentPath(pl, curKey);
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -568,6 +754,7 @@ class LibraryScreenState extends State<LibraryScreen>
                             indent: 56,
                           ),
                         Material(
+                          key: attachScrollKey ? _scrollCurrentTrackKey : null,
                           color: Colors.transparent,
                           child: InkWell(
                             onTap: () {
@@ -936,6 +1123,7 @@ class LibraryScreenState extends State<LibraryScreen>
               builder: (context, _) {
                 final library = player.metadataLibrary;
                 return ListView.separated(
+                  controller: _favoritesScrollController,
                   padding: const EdgeInsets.only(bottom: 8),
                   itemCount: paths.length,
                   separatorBuilder: (_, __) => Divider(
@@ -948,7 +1136,10 @@ class LibraryScreenState extends State<LibraryScreen>
                     final track = _trackForPath(path, library);
                     final plIndex = _playlistIndexForPath(player, path);
                     final selected = _isCurrentTrackPath(player, path);
+                    final attachScrollKey =
+                        selected && _tabController.index == 3;
                     return Material(
+                      key: attachScrollKey ? _scrollCurrentTrackKey : null,
                       color: selected
                           ? pal.onScaffold.withValues(alpha: 0.08)
                           : Colors.transparent,
@@ -1164,6 +1355,7 @@ class LibraryScreenState extends State<LibraryScreen>
               builder: (context, _) {
                 final library = player.metadataLibrary;
                 return ListView.separated(
+                  controller: _recentAddedScrollController,
                   padding: const EdgeInsets.only(bottom: 8),
                   itemCount: paths.length,
                   separatorBuilder: (_, __) => Divider(
@@ -1176,7 +1368,10 @@ class LibraryScreenState extends State<LibraryScreen>
                     final track = _trackForPath(path, library);
                     final plIndex = _playlistIndexForPath(player, path);
                     final selected = _isCurrentTrackPath(player, path);
+                    final attachScrollKey =
+                        selected && _tabController.index == 1;
                     return Material(
+                      key: attachScrollKey ? _scrollCurrentTrackKey : null,
                       color: selected
                           ? pal.onScaffold.withValues(alpha: 0.08)
                           : Colors.transparent,
@@ -1362,6 +1557,7 @@ class LibraryScreenState extends State<LibraryScreen>
           builder: (context, _) {
             final library = player.metadataLibrary;
             return ListView.separated(
+              controller: _recentPlayedScrollController,
               padding: const EdgeInsets.only(bottom: 8),
               itemCount: paths.length,
               separatorBuilder: (_, __) => Divider(
@@ -1374,7 +1570,10 @@ class LibraryScreenState extends State<LibraryScreen>
                 final track = _trackForPath(path, library);
                 final plIndex = _playlistIndexForPath(player, path);
                 final selected = _isCurrentTrackPath(player, path);
+                final attachScrollKey =
+                    selected && _tabController.index == 4;
                 return Material(
+                  key: attachScrollKey ? _scrollCurrentTrackKey : null,
                   color: selected
                       ? pal.onScaffold.withValues(alpha: 0.08)
                       : Colors.transparent,
@@ -1580,6 +1779,7 @@ class LibraryScreenState extends State<LibraryScreen>
     }
 
     return ListView.separated(
+      controller: _songsScrollController,
       padding: const EdgeInsets.only(bottom: 8),
       itemCount: filteredIndices.length,
       separatorBuilder: (_, __) => Divider(
@@ -1600,6 +1800,9 @@ class LibraryScreenState extends State<LibraryScreen>
         return _TrackTile(
           track: track,
           selected: selected,
+          rowKey: selected && _tabController.index == 0
+              ? _scrollCurrentTrackKey
+              : null,
           onTap: () {
             final orderedPaths = filteredIndices
                 .map((idx) => tracks[idx].filePath)
@@ -1643,12 +1846,14 @@ class _TrackTile extends StatelessWidget {
   const _TrackTile({
     required this.track,
     required this.selected,
+    this.rowKey,
     required this.onTap,
     required this.onOverflowAction,
   });
 
   final TrackItem track;
   final bool selected;
+  final Key? rowKey;
   final VoidCallback onTap;
   final void Function(TrackOverflowAction action) onOverflowAction;
 
@@ -1658,6 +1863,7 @@ class _TrackTile extends StatelessWidget {
     final pal = context.palette;
 
     return Material(
+      key: rowKey,
       color: selected ? pal.onScaffold.withValues(alpha: 0.08) : Colors.transparent,
       child: InkWell(
         onTap: onTap,
