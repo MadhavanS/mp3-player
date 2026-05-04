@@ -46,8 +46,15 @@ class LibraryScreenState extends State<LibraryScreen>
   late final TabController _tabController;
   int _recentListRevision = 0;
 
-  final GlobalKey _scrollCurrentTrackKey =
-      GlobalKey(debugLabel: 'libraryScrollCurrentTrack');
+  final GlobalKey _scrollAnchorSongs = GlobalKey(debugLabel: 'libScrollSongs');
+  final GlobalKey _scrollAnchorRecentAdded =
+      GlobalKey(debugLabel: 'libScrollRecentAdded');
+  final GlobalKey _scrollAnchorPlaylist =
+      GlobalKey(debugLabel: 'libScrollPlaylist');
+  final GlobalKey _scrollAnchorFavorites =
+      GlobalKey(debugLabel: 'libScrollFavorites');
+  final GlobalKey _scrollAnchorRecentPlayed =
+      GlobalKey(debugLabel: 'libScrollRecentPlayed');
 
   final ScrollController _songsScrollController = ScrollController();
   final ScrollController _recentAddedScrollController = ScrollController();
@@ -159,6 +166,21 @@ class LibraryScreenState extends State<LibraryScreen>
     return (null, songsTabIndices.length);
   }
 
+  void _scheduleScrollAnchorIntoView(GlobalKey anchorKey) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = anchorKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0,
+          duration: Duration.zero,
+          curve: Curves.linear,
+        );
+      }
+    });
+  }
+
   /// Lazy [ListView] may not build the target row until scroll offset is near it.
   /// Uses proportional and fixed strides so the anchor [GlobalKey] mounts, then
   /// snaps the row to the top of the viewport.
@@ -166,6 +188,7 @@ class LibraryScreenState extends State<LibraryScreen>
     ScrollController controller,
     int index,
     int totalItems,
+    GlobalKey anchorKey,
   ) async {
     if (!mounted) return;
     final clampedIndex = index.clamp(0, totalItems > 0 ? totalItems - 1 : 0);
@@ -174,14 +197,9 @@ class LibraryScreenState extends State<LibraryScreen>
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
 
-      final mountedCtx = _scrollCurrentTrackKey.currentContext;
+      final mountedCtx = anchorKey.currentContext;
       if (mountedCtx != null && mountedCtx.mounted) {
-        Scrollable.ensureVisible(
-          mountedCtx,
-          alignment: 0,
-          duration: Duration.zero,
-          curve: Curves.linear,
-        );
+        _scheduleScrollAnchorIntoView(anchorKey);
         return;
       }
 
@@ -230,7 +248,12 @@ class LibraryScreenState extends State<LibraryScreen>
           pathKey,
         );
         if (idx == null) return;
-        await _coaxLazyListThenEnsureVisible(_songsScrollController, idx, total);
+        await _coaxLazyListThenEnsureVisible(
+          _songsScrollController,
+          idx,
+          total,
+          _scrollAnchorSongs,
+        );
         return;
       case 1:
         final ordered =
@@ -245,6 +268,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _recentAddedScrollController,
           idx,
           paths.length,
+          _scrollAnchorRecentAdded,
         );
         return;
       case 2:
@@ -257,7 +281,7 @@ class LibraryScreenState extends State<LibraryScreen>
         if (idx < 0) return;
         await WidgetsBinding.instance.endOfFrame;
         if (!mounted) return;
-        var ctx = _scrollCurrentTrackKey.currentContext;
+        var ctx = _scrollAnchorPlaylist.currentContext;
         if (ctx == null) {
           if (_playlistScrollController.hasClients) {
             final max = _playlistScrollController.position.maxScrollExtent;
@@ -265,16 +289,11 @@ class LibraryScreenState extends State<LibraryScreen>
                 .jumpTo((120.0 + idx * 80).clamp(0.0, max));
             await WidgetsBinding.instance.endOfFrame;
             if (!mounted) return;
-            ctx = _scrollCurrentTrackKey.currentContext;
+            ctx = _scrollAnchorPlaylist.currentContext;
           }
         }
         if (ctx != null && ctx.mounted) {
-          Scrollable.ensureVisible(
-            ctx,
-            alignment: 0,
-            duration: Duration.zero,
-            curve: Curves.linear,
-          );
+          _scheduleScrollAnchorIntoView(_scrollAnchorPlaylist);
         }
         return;
       case 3:
@@ -289,6 +308,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _favoritesScrollController,
           idx,
           paths.length,
+          _scrollAnchorFavorites,
         );
         return;
       case 4:
@@ -303,6 +323,7 @@ class LibraryScreenState extends State<LibraryScreen>
           _recentPlayedScrollController,
           idx,
           paths.length,
+          _scrollAnchorRecentPlayed,
         );
         return;
       default:
@@ -814,7 +835,7 @@ class LibraryScreenState extends State<LibraryScreen>
                             indent: 56,
                           ),
                         Material(
-                          key: attachScrollKey ? _scrollCurrentTrackKey : null,
+                          key: attachScrollKey ? _scrollAnchorPlaylist : null,
                           color: Colors.transparent,
                           child: InkWell(
                             onTap: () {
@@ -1178,38 +1199,35 @@ class LibraryScreenState extends State<LibraryScreen>
               );
             }
 
-            return ListenableBuilder(
-              listenable: player,
-              builder: (context, _) {
-                final library = player.metadataLibrary;
-                return ListView.separated(
-                  controller: _favoritesScrollController,
-                  padding: const EdgeInsets.only(bottom: 8),
-                  itemCount: paths.length,
-                  separatorBuilder: (_, __) => Divider(
-                    height: 1,
-                    color: pal.dividerOnHero,
-                    indent: 88,
-                  ),
-                  itemBuilder: (context, i) {
-                    final path = paths[i];
-                    final track = _trackForPath(path, library);
-                    final plIndex = _playlistIndexForPath(player, path);
-                    final selected = _isCurrentTrackPath(player, path);
-                    final attachScrollKey =
-                        selected && _tabController.index == 3;
-                    return Material(
-                      key: attachScrollKey ? _scrollCurrentTrackKey : null,
-                      color: selected
-                          ? pal.onScaffold.withValues(alpha: 0.08)
-                          : Colors.transparent,
-                      child: InkWell(
-                        onTap: () => _playOrderedPathsFrom(
-                          context,
-                          paths,
-                          i,
-                          playbackOriginTab: 3,
-                        ),
+            final library = player.metadataLibrary;
+            return ListView.separated(
+              controller: _favoritesScrollController,
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: paths.length,
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                color: pal.dividerOnHero,
+                indent: 88,
+              ),
+              itemBuilder: (context, i) {
+                final path = paths[i];
+                final track = _trackForPath(path, library);
+                final plIndex = _playlistIndexForPath(player, path);
+                final selected = _isCurrentTrackPath(player, path);
+                final attachScrollKey =
+                    selected && _tabController.index == 3;
+                return Material(
+                  key: attachScrollKey ? _scrollAnchorFavorites : null,
+                  color: selected
+                      ? pal.onScaffold.withValues(alpha: 0.08)
+                      : Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _playOrderedPathsFrom(
+                      context,
+                      paths,
+                      i,
+                      playbackOriginTab: 3,
+                    ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -1292,8 +1310,6 @@ class LibraryScreenState extends State<LibraryScreen>
                     );
                   },
                 );
-              },
-            );
           },
         );
       },
@@ -1410,44 +1426,41 @@ class LibraryScreenState extends State<LibraryScreen>
               );
             }
 
-            return ListenableBuilder(
-              listenable: player,
-              builder: (context, _) {
-                final library = player.metadataLibrary;
-                return ListView.separated(
-                  controller: _recentAddedScrollController,
-                  padding: const EdgeInsets.only(bottom: 8),
-                  itemCount: paths.length,
-                  separatorBuilder: (_, __) => Divider(
-                    height: 1,
-                    color: pal.dividerOnHero,
-                    indent: 88,
-                  ),
-                  itemBuilder: (context, i) {
-                    final path = paths[i];
-                    final track = _trackForPath(path, library);
-                    final plIndex = _playlistIndexForPath(player, path);
-                    final selected = _isCurrentTrackPath(player, path);
-                    final attachScrollKey =
-                        selected && _tabController.index == 1;
-                    return Material(
-                      key: attachScrollKey ? _scrollCurrentTrackKey : null,
-                      color: selected
-                          ? pal.onScaffold.withValues(alpha: 0.08)
-                          : Colors.transparent,
-                      child: InkWell(
-                        onTap: () => _playOrderedPathsFrom(
-                          context,
-                          paths,
-                          i,
-                          playbackOriginTab: 1,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          child: Row(
+            final library = player.metadataLibrary;
+            return ListView.separated(
+              controller: _recentAddedScrollController,
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: paths.length,
+              separatorBuilder: (_, __) => Divider(
+                height: 1,
+                color: pal.dividerOnHero,
+                indent: 88,
+              ),
+              itemBuilder: (context, i) {
+                final path = paths[i];
+                final track = _trackForPath(path, library);
+                final plIndex = _playlistIndexForPath(player, path);
+                final selected = _isCurrentTrackPath(player, path);
+                final attachScrollKey =
+                    selected && _tabController.index == 1;
+                return Material(
+                  key: attachScrollKey ? _scrollAnchorRecentAdded : null,
+                  color: selected
+                      ? pal.onScaffold.withValues(alpha: 0.08)
+                      : Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _playOrderedPathsFrom(
+                      context,
+                      paths,
+                      i,
+                      playbackOriginTab: 1,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               TrackAlbumArt(
@@ -1529,8 +1542,6 @@ class LibraryScreenState extends State<LibraryScreen>
                     );
                   },
                 );
-              },
-            );
           },
         );
       },
@@ -1612,120 +1623,115 @@ class LibraryScreenState extends State<LibraryScreen>
           );
         }
 
-        return ListenableBuilder(
-          listenable: player,
-          builder: (context, _) {
-            final library = player.metadataLibrary;
-            return ListView.separated(
-              controller: _recentPlayedScrollController,
-              padding: const EdgeInsets.only(bottom: 8),
-              itemCount: paths.length,
-              separatorBuilder: (_, __) => Divider(
-                height: 1,
-                color: pal.dividerOnHero,
-                indent: 88,
-              ),
-              itemBuilder: (context, i) {
-                final path = paths[i];
-                final track = _trackForPath(path, library);
-                final plIndex = _playlistIndexForPath(player, path);
-                final selected = _isCurrentTrackPath(player, path);
-                final attachScrollKey =
-                    selected && _tabController.index == 4;
-                return Material(
-                  key: attachScrollKey ? _scrollCurrentTrackKey : null,
-                  color: selected
-                      ? pal.onScaffold.withValues(alpha: 0.08)
-                      : Colors.transparent,
-                  child: InkWell(
-                    onTap: () => _playOrderedPathsFrom(
-                      context,
-                      paths,
-                      i,
-                      playbackOriginTab: 4,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          TrackAlbumArt(
-                            track: track,
-                            display: TrackArtDisplay.list,
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  track.genres.isEmpty
-                                      ? track.metaLine
-                                      : '${track.metaLine} · ${track.genres}',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: pal.textMuted.withValues(alpha: 0.9),
-                                    fontSize: 10,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  track.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    color: pal.onScaffold,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  track.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    color:
-                                        pal.textSecondary.withValues(alpha: 0.95),
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          TrackOverflowMenuWithFavourite(
-                            pal: pal,
-                            track: track,
-                            onSelected: (action) {
-                              final ctxTracks = paths
-                                  .map((p) =>
-                                      _trackForPath(p, library))
-                                  .toList();
-                              unawaited(
-                                _onTrackOverflow(
-                                  context,
-                                  player,
-                                  plIndex >= 0 ? plIndex : -1,
-                                  action,
-                                  playbackOriginTab: 4,
-                                  outsideQueue: plIndex < 0
-                                      ? TrackOverflowQueueContext(
-                                          tracks: ctxTracks,
-                                          index: i,
-                                          playbackOriginTab: 4,
-                                        )
-                                      : null,
-                                ),
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
+        final library = player.metadataLibrary;
+        return ListView.separated(
+          controller: _recentPlayedScrollController,
+          padding: const EdgeInsets.only(bottom: 8),
+          itemCount: paths.length,
+          separatorBuilder: (_, __) => Divider(
+            height: 1,
+            color: pal.dividerOnHero,
+            indent: 88,
+          ),
+          itemBuilder: (context, i) {
+            final path = paths[i];
+            final track = _trackForPath(path, library);
+            final plIndex = _playlistIndexForPath(player, path);
+            final selected = _isCurrentTrackPath(player, path);
+            final attachScrollKey =
+                selected && _tabController.index == 4;
+            return Material(
+              key: attachScrollKey ? _scrollAnchorRecentPlayed : null,
+              color: selected
+                  ? pal.onScaffold.withValues(alpha: 0.08)
+                  : Colors.transparent,
+              child: InkWell(
+                onTap: () => _playOrderedPathsFrom(
+                  context,
+                  paths,
+                  i,
+                  playbackOriginTab: 4,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
                   ),
-                );
-              },
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      TrackAlbumArt(
+                        track: track,
+                        display: TrackArtDisplay.list,
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              track.genres.isEmpty
+                                  ? track.metaLine
+                                  : '${track.metaLine} · ${track.genres}',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: pal.textMuted.withValues(alpha: 0.9),
+                                fontSize: 10,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              track.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: pal.onScaffold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              track.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color:
+                                    pal.textSecondary.withValues(alpha: 0.95),
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TrackOverflowMenuWithFavourite(
+                        pal: pal,
+                        track: track,
+                        onSelected: (action) {
+                          final ctxTracks = paths
+                              .map((p) =>
+                                  _trackForPath(p, library))
+                              .toList();
+                          unawaited(
+                            _onTrackOverflow(
+                              context,
+                              player,
+                              plIndex >= 0 ? plIndex : -1,
+                              action,
+                              playbackOriginTab: 4,
+                              outsideQueue: plIndex < 0
+                                  ? TrackOverflowQueueContext(
+                                      tracks: ctxTracks,
+                                      index: i,
+                                      playbackOriginTab: 4,
+                                    )
+                                  : null,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             );
           },
         );
@@ -1862,7 +1868,7 @@ class LibraryScreenState extends State<LibraryScreen>
           track: track,
           selected: selected,
           rowKey: selected && _tabController.index == 0
-              ? _scrollCurrentTrackKey
+              ? _scrollAnchorSongs
               : null,
           onTap: () {
             final orderedPaths = filteredIndices
