@@ -76,6 +76,10 @@ class LibraryScreenState extends State<LibraryScreen>
     if (!mounted) return;
     _tabController.index = index.clamp(0, 4);
     setState(() {});
+    // TabBarView + lazy lists need more than one frame before ScrollController attaches
+    // and [maxScrollExtent] is non-zero.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     await _scrollActiveTabToCurrentTrack();
@@ -131,8 +135,8 @@ class LibraryScreenState extends State<LibraryScreen>
     return false;
   }
 
-  int? _indexInSongsListForPathKey(
-    PlayerController player,
+  /// Visible row index in Songs list (after search + folder filter) and row count.
+  (int? index, int total) _songsListIndexAndTotalForPathKey(
     List<TrackItem> tracks,
     Set<String>? browsePathKeys,
     String query,
@@ -149,38 +153,58 @@ class LibraryScreenState extends State<LibraryScreen>
     for (var i = 0; i < songsTabIndices.length; i++) {
       final fp = tracks[songsTabIndices[i]].filePath;
       if (fp != null && canonicalMusicLibraryPathKey(fp) == pathKey) {
-        return i;
+        return (i, songsTabIndices.length);
       }
     }
-    return null;
+    return (null, songsTabIndices.length);
   }
 
+  /// Lazy [ListView] may not build the target row until scroll offset is near it.
+  /// Uses proportional and fixed strides so the anchor [GlobalKey] mounts, then
+  /// snaps the row to the top of the viewport.
   Future<void> _coaxLazyListThenEnsureVisible(
     ScrollController controller,
     int index,
+    int totalItems,
   ) async {
     if (!mounted) return;
-    for (var attempt = 0; attempt < 8; attempt++) {
-      if (!controller.hasClients) {
-        await WidgetsBinding.instance.endOfFrame;
-        if (!mounted) return;
-        continue;
-      }
-      final max = controller.position.maxScrollExtent;
-      final target = (index * _kLibraryListRowStride).clamp(0.0, max);
-      controller.jumpTo(target.toDouble());
+    final clampedIndex = index.clamp(0, totalItems > 0 ? totalItems - 1 : 0);
+
+    for (var attempt = 0; attempt < 45; attempt++) {
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
-      final ctx = _scrollCurrentTrackKey.currentContext;
-      if (ctx != null && ctx.mounted) {
+
+      final mountedCtx = _scrollCurrentTrackKey.currentContext;
+      if (mountedCtx != null && mountedCtx.mounted) {
         Scrollable.ensureVisible(
-          ctx,
+          mountedCtx,
           alignment: 0,
           duration: Duration.zero,
           curve: Curves.linear,
         );
         return;
       }
+
+      if (!controller.hasClients) continue;
+
+      final pos = controller.position;
+      final maxExtent = pos.maxScrollExtent;
+      double target;
+      if (maxExtent <= 0) {
+        target = 0;
+      } else {
+        final scale =
+            totalItems <= 1 ? 0.0 : (clampedIndex / (totalItems - 1));
+        final proportional = scale * maxExtent;
+        final linear =
+            (index * _kLibraryListRowStride).clamp(0.0, maxExtent);
+        target = switch (attempt % 3) {
+          0 => proportional.clamp(0.0, maxExtent),
+          1 => linear,
+          _ => (proportional * 0.55 + linear * 0.45).clamp(0.0, maxExtent),
+        };
+      }
+      controller.jumpTo(target);
     }
   }
 
@@ -199,15 +223,14 @@ class LibraryScreenState extends State<LibraryScreen>
 
     switch (tab) {
       case 0:
-        final idx = _indexInSongsListForPathKey(
-          player,
+        final (idx, total) = _songsListIndexAndTotalForPathKey(
           tracks,
           browsePathKeys,
           query,
           pathKey,
         );
         if (idx == null) return;
-        await _coaxLazyListThenEnsureVisible(_songsScrollController, idx);
+        await _coaxLazyListThenEnsureVisible(_songsScrollController, idx, total);
         return;
       case 1:
         final ordered =
@@ -218,7 +241,11 @@ class LibraryScreenState extends State<LibraryScreen>
         final idx =
             paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
         if (idx < 0) return;
-        await _coaxLazyListThenEnsureVisible(_recentAddedScrollController, idx);
+        await _coaxLazyListThenEnsureVisible(
+          _recentAddedScrollController,
+          idx,
+          paths.length,
+        );
         return;
       case 2:
         final all = await UserPlaylistsStore.loadAll();
@@ -258,7 +285,11 @@ class LibraryScreenState extends State<LibraryScreen>
         final idx =
             paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
         if (idx < 0) return;
-        await _coaxLazyListThenEnsureVisible(_favoritesScrollController, idx);
+        await _coaxLazyListThenEnsureVisible(
+          _favoritesScrollController,
+          idx,
+          paths.length,
+        );
         return;
       case 4:
         final played = await RecentlyPlayedStore.loadPaths();
@@ -268,7 +299,11 @@ class LibraryScreenState extends State<LibraryScreen>
         final idx =
             paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
         if (idx < 0) return;
-        await _coaxLazyListThenEnsureVisible(_recentPlayedScrollController, idx);
+        await _coaxLazyListThenEnsureVisible(
+          _recentPlayedScrollController,
+          idx,
+          paths.length,
+        );
         return;
       default:
         return;
@@ -1780,6 +1815,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
     return ListView.separated(
       controller: _songsScrollController,
+      cacheExtent: 4000,
       padding: const EdgeInsets.only(bottom: 8),
       itemCount: filteredIndices.length,
       separatorBuilder: (_, __) => Divider(

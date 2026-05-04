@@ -258,11 +258,13 @@ class _MainShellState extends State<MainShell> {
                     player.playbackOriginTabIndex?.clamp(0, 4) ?? 0;
                 _goLibrary();
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  unawaited(
-                    _libraryScreenKey.currentState
-                            ?.switchToTabAndScrollToCurrentTrack(tab) ??
-                        Future<void>.value(),
-                  );
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    unawaited(
+                      _libraryScreenKey.currentState
+                              ?.switchToTabAndScrollToCurrentTrack(tab) ??
+                          Future<void>.value(),
+                    );
+                  });
                 });
               },
             ),
