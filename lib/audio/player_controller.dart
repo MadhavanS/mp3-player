@@ -295,6 +295,33 @@ class PlayerController extends ChangeNotifier {
     return true;
   }
 
+  /// Resolves [filePath] to a library row when possible (same rules as Library sheets).
+  TrackItem trackForLibraryPath(String filePath) {
+    final raw = filePath.trim();
+    if (raw.isEmpty) return TrackItem.fromFilePath(filePath);
+    final key = canonicalMusicLibraryPathKey(raw);
+    if (key.isNotEmpty) {
+      for (final t in _libraryCatalog) {
+        final fp = t.filePath;
+        if (fp == null || fp.isEmpty) continue;
+        if (canonicalMusicLibraryPathKey(fp) == key) return t;
+      }
+    }
+    return TrackItem.fromFilePath(raw);
+  }
+
+  /// After [UserPlaylistsStore.addPathToPlaylist], call when the storage add
+  /// succeeded so the Now Playing queue matches the saved playlist when playback
+  /// was started from that playlist (`playbackOriginUserPlaylistId`).
+  Future<void> syncAddedSongToActiveUserPlaylistQueue(
+    String userPlaylistId,
+    String filePath,
+  ) async {
+    if (_playbackOriginUserPlaylistId != userPlaylistId) return;
+    final track = trackForLibraryPath(filePath);
+    await addToPlaylistIfAbsent(track);
+  }
+
   void updateTrackByPath(String path, TrackItem updated) {
     final i = _playlist.indexWhere((t) => t.filePath == path);
     if (i >= 0) _playlist[i] = updated;
@@ -348,7 +375,11 @@ class PlayerController extends ChangeNotifier {
     }
 
     notifyListeners();
-    await _loadCurrent();
+    // Only reload the audio source when the removed row was the current track.
+    // Otherwise [setFilePath] restarts the same file from 0:00.
+    if (isCurrent) {
+      await _loadCurrent();
+    }
   }
 
   Future<void> jumpToIndex(int i, {bool autoPlay = true}) async {

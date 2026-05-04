@@ -7,15 +7,18 @@ import 'package:path/path.dart' as p;
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
+import '../../services/music_library_path_key.dart';
 import '../../services/track_file_delete.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
+import '../../widgets/create_playlist_name_dialog.dart';
 
 enum TrackOverflowAction {
   playFromHere,
   playOnlyThis,
   addToPlaylist,
+  removeFromPlaylist,
   toggleFavorite,
   deleteFromDevice,
 }
@@ -184,27 +187,29 @@ Future<void> _showUserPlaylistPickerAndAdd(
   final playlists = await UserPlaylistsStore.loadAll();
   if (!context.mounted) return;
 
-  if (playlists.isEmpty) {
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('No playlists'),
-        content: const Text(
-          'Create a playlist in Library → Playlist first.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-    return;
-  }
-
   final pal = context.palette;
   final theme = Theme.of(context);
+
+  Future<void> createNewAndAdd(BuildContext sheetContext) async {
+    final name = await showCreatePlaylistNameDialog(context);
+    if (!sheetContext.mounted) return;
+    if (name == null || name.trim().isEmpty) return;
+    final trimmed = name.trim();
+    final id = await UserPlaylistsStore.createPlaylist(trimmed);
+    if (id == null) return;
+    final added = await UserPlaylistsStore.addPathToPlaylist(id, raw);
+    if (added && context.mounted) {
+      await PlayerController.of(context)
+          .syncAddedSongToActiveUserPlaylistQueue(id, raw);
+    }
+    if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+    if (!context.mounted) return;
+    ActionPillToast.show(
+      context,
+      added ? 'Added to $trimmed' : 'Already exists in this playlist',
+      uppercaseLabel: true,
+    );
+  }
 
   await showModalBottomSheet<void>(
     context: context,
@@ -212,61 +217,88 @@ Future<void> _showUserPlaylistPickerAndAdd(
     backgroundColor: pal.surface,
     showDragHandle: true,
     builder: (ctx) {
-      final listHeight = min(
-        MediaQuery.sizeOf(ctx).height * 0.5,
-        120 + playlists.length * 56.0,
-      );
       return SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-              child: Text(
-                'Add to playlist',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: pal.textPrimary,
+              padding: const EdgeInsets.fromLTRB(20, 4, 8, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Add to playlist',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        color: pal.textPrimary,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => createNewAndAdd(ctx),
+                    child: const Text('Create new'),
+                  ),
+                ],
+              ),
+            ),
+            if (playlists.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: Text(
+                  'No playlists yet. Tap Create new to make one and add this song.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: pal.textSecondary,
+                  ),
+                ),
+              )
+            else
+              SizedBox(
+                height: min(
+                  MediaQuery.sizeOf(ctx).height * 0.5,
+                  120 + playlists.length * 56.0,
+                ),
+                child: ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  itemCount: playlists.length,
+                  itemBuilder: (context, i) {
+                    final pl = playlists[i];
+                    return ListTile(
+                      leading: Icon(
+                        Icons.queue_music_rounded,
+                        color: context.controlAccent,
+                      ),
+                      title: Text(
+                        pl.name,
+                        style: TextStyle(color: pal.textPrimary),
+                      ),
+                      subtitle: Text(
+                        '${pl.paths.length} songs',
+                        style: TextStyle(color: pal.textSecondary),
+                      ),
+                      onTap: () async {
+                        final added =
+                            await UserPlaylistsStore.addPathToPlaylist(
+                                pl.id, raw);
+                        if (added && context.mounted) {
+                          await PlayerController.of(context)
+                              .syncAddedSongToActiveUserPlaylistQueue(
+                                  pl.id, raw);
+                        }
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                        if (!context.mounted) return;
+                        ActionPillToast.show(
+                          context,
+                          added
+                              ? 'Added to ${pl.name}'
+                              : 'Already exists in ${pl.name}',
+                          uppercaseLabel: true,
+                        );
+                      },
+                    );
+                  },
                 ),
               ),
-            ),
-            SizedBox(
-              height: listHeight,
-              child: ListView.builder(
-                padding: const EdgeInsets.only(bottom: 16),
-                itemCount: playlists.length,
-                itemBuilder: (context, i) {
-                  final pl = playlists[i];
-                  return ListTile(
-                    leading: Icon(
-                      Icons.queue_music_rounded,
-                      color: context.controlAccent,
-                    ),
-                    title: Text(
-                      pl.name,
-                      style: TextStyle(color: pal.textPrimary),
-                    ),
-                    subtitle: Text(
-                      '${pl.paths.length} songs',
-                      style: TextStyle(color: pal.textSecondary),
-                    ),
-                    onTap: () async {
-                      final added =
-                          await UserPlaylistsStore.addPathToPlaylist(pl.id, raw);
-                      if (ctx.mounted) Navigator.of(ctx).pop();
-                      if (!context.mounted) return;
-                      ActionPillToast.show(
-                        context,
-                        added
-                            ? 'Added to ${pl.name}'
-                            : 'Already in playlist',
-                        uppercaseLabel: true,
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
           ],
         ),
       );
@@ -295,6 +327,7 @@ Future<void> applyTrackOverflowAction(
   TrackOverflowAction action, {
   int? playbackOriginTab,
   TrackOverflowQueueContext? outsideQueue,
+  String? userPlaylistId,
 }) async {
   var tracks = player.playlist;
   var ix = playlistIndex;
@@ -335,6 +368,39 @@ Future<void> applyTrackOverflowAction(
         return;
       }
       await _showUserPlaylistPickerAndAdd(context, path);
+
+    case TrackOverflowAction.removeFromPlaylist:
+      final pid = userPlaylistId;
+      final p = tracks[ix].filePath;
+      if (pid == null || p == null || p.isEmpty) return;
+      await UserPlaylistsStore.removePathFromPlaylist(pid, p);
+      if (context.mounted) {
+        ActionPillToast.show(
+          context,
+          'Removed from playlist',
+          uppercaseLabel: true,
+        );
+      }
+      if (player.playbackOriginUserPlaylistId == pid) {
+        final rk = canonicalMusicLibraryPathKey(p);
+        var queueIx = -1;
+        for (var j = 0; j < player.playlist.length; j++) {
+          final fp = player.playlist[j].filePath;
+          if (fp == null || fp.isEmpty) continue;
+          if (rk.isNotEmpty) {
+            if (canonicalMusicLibraryPathKey(fp) == rk) {
+              queueIx = j;
+              break;
+            }
+          } else if (fp == p) {
+            queueIx = j;
+            break;
+          }
+        }
+        if (queueIx >= 0) {
+          await player.removePlaylistEntryAt(queueIx);
+        }
+      }
 
     case TrackOverflowAction.toggleFavorite:
       final t = tracks[ix];

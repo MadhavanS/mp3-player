@@ -63,13 +63,14 @@ class UserPlaylistsStore {
     revision.value++;
   }
 
-  static Future<void> createPlaylist(String name) async {
+  static Future<String?> createPlaylist(String name) async {
     final n = name.trim();
-    if (n.isEmpty) return;
+    if (n.isEmpty) return null;
     final list = await loadAll();
     final id = 'pl_${DateTime.now().millisecondsSinceEpoch}';
     list.insert(0, UserPlaylistEntry(id: id, name: n, paths: []));
     await _save(list);
+    return id;
   }
 
   static Future<void> deletePlaylist(String id) async {
@@ -100,6 +101,44 @@ class UserPlaylistsStore {
       id: pl.id,
       name: pl.name,
       paths: [...pl.paths, raw],
+    );
+    await _save(list);
+    return true;
+  }
+
+  /// Removes [path] from the playlist (canonical path comparison). Returns whether a row was removed.
+  static Future<bool> removePathFromPlaylist(
+    String playlistId,
+    String path,
+  ) async {
+    final raw = path.trim();
+    if (raw.isEmpty) return false;
+    final list = await loadAll();
+    final idx = list.indexWhere((e) => e.id == playlistId);
+    if (idx < 0) return false;
+    final pl = list[idx];
+    final removeKey = canonicalMusicLibraryPathKey(raw);
+    final newPaths = <String>[];
+    var removed = false;
+    for (final existing in pl.paths) {
+      if (!removed) {
+        if (removeKey.isNotEmpty) {
+          if (canonicalMusicLibraryPathKey(existing) == removeKey) {
+            removed = true;
+            continue;
+          }
+        } else if (existing == raw) {
+          removed = true;
+          continue;
+        }
+      }
+      newPaths.add(existing);
+    }
+    if (!removed) return false;
+    list[idx] = UserPlaylistEntry(
+      id: pl.id,
+      name: pl.name,
+      paths: newPaths,
     );
     await _save(list);
     return true;

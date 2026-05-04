@@ -14,6 +14,7 @@ import '../../services/recently_played_store.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/track_album_art.dart';
+import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
 
 /// Key for the library search field (widget tests).
@@ -472,68 +473,9 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _showCreatePlaylistDialog(BuildContext context) async {
-    final pal = context.palette;
-    final theme = Theme.of(context);
-    final controller = TextEditingController();
-    try {
-      final name = await showDialog<String>(
-        context: context,
-        builder: (ctx) {
-          return AlertDialog(
-            backgroundColor: pal.surface,
-            title: Text(
-              'Create playlist',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: pal.textPrimary,
-              ),
-            ),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                hintText: 'Playlist name',
-                hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                  color: pal.textMuted,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: pal.dividerOnHero),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(
-                    color: ctx.controlAccent,
-                    width: 1.5,
-                  ),
-                ),
-              ),
-              onSubmitted: (v) {
-                final t = v.trim();
-                if (t.isNotEmpty) Navigator.of(ctx).pop(t);
-              },
-            ),
-            actions: [
-              OutlinedButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  final t = controller.text.trim();
-                  if (t.isNotEmpty) Navigator.of(ctx).pop(t);
-                },
-                child: const Text('OK'),
-              ),
-            ],
-          );
-        },
-      );
-      if (!context.mounted || name == null || name.trim().isEmpty) return;
-      await UserPlaylistsStore.createPlaylist(name.trim());
-    } finally {
-      controller.dispose();
-    }
+    final name = await showCreatePlaylistNameDialog(context);
+    if (!context.mounted || name == null || name.trim().isEmpty) return;
+    await UserPlaylistsStore.createPlaylist(name.trim());
   }
 
   List<UserPlaylistEntry> _filterPlaylistsBySearch(
@@ -553,7 +495,6 @@ class LibraryScreenState extends State<LibraryScreen>
   ) async {
     final pal = context.palette;
     final theme = Theme.of(context);
-    final paths = List<String>.from(playlist.paths);
 
     await showModalBottomSheet<void>(
       context: context,
@@ -561,136 +502,249 @@ class LibraryScreenState extends State<LibraryScreen>
       backgroundColor: pal.surface,
       showDragHandle: true,
       builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.viewInsetsOf(ctx).bottom,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          playlist.name,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            color: pal.textPrimary,
+        return ValueListenableBuilder<int>(
+          valueListenable: UserPlaylistsStore.revision,
+          builder: (context, _, __) {
+            return FutureBuilder<List<UserPlaylistEntry>>(
+              future: UserPlaylistsStore.loadAll(),
+              builder: (context, snap) {
+                final all = snap.data;
+                UserPlaylistEntry? resolved;
+                if (all != null) {
+                  for (final e in all) {
+                    if (e.id == playlist.id) {
+                      resolved = e;
+                      break;
+                    }
+                  }
+                }
+                if (snap.connectionState == ConnectionState.done &&
+                    all != null &&
+                    resolved == null) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                  });
+                  return const SizedBox.shrink();
+                }
+                final sheetPlaylist = resolved ?? playlist;
+                final paths = sheetPlaylist.paths;
+
+                return SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.viewInsetsOf(ctx).bottom,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  sheetPlaylist.name,
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    color: pal.textPrimary,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Delete playlist',
+                                icon: Icon(Icons.delete_outline_rounded,
+                                    color: pal.textSecondary),
+                                onPressed: () async {
+                                  final confirmed = await showDialog<bool>(
+                                    context: ctx,
+                                    builder: (dialogCtx) {
+                                      final scheme =
+                                          Theme.of(dialogCtx).colorScheme;
+                                      return AlertDialog(
+                                        backgroundColor: pal.surface,
+                                        title: Text(
+                                          'Delete playlist?',
+                                          style: theme.textTheme.titleLarge
+                                              ?.copyWith(
+                                            color: pal.textPrimary,
+                                          ),
+                                        ),
+                                        content: Text(
+                                          'Remove “${sheetPlaylist.name}” '
+                                          'from your playlists? '
+                                          'Your music files stay on the device.',
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                            color: pal.textSecondary,
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.of(
+                                                    dialogCtx)
+                                                .pop(false),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          FilledButton(
+                                            onPressed: () => Navigator.of(
+                                                    dialogCtx)
+                                                .pop(true),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: scheme.error,
+                                              foregroundColor: scheme.onError,
+                                            ),
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  );
+                                  if (confirmed != true) return;
+                                  await UserPlaylistsStore.deletePlaylist(
+                                      sheetPlaylist.id);
+                                },
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: 'Delete playlist',
-                        icon: Icon(Icons.delete_outline_rounded,
-                            color: pal.textSecondary),
-                        onPressed: () async {
-                          await UserPlaylistsStore.deletePlaylist(playlist.id);
-                          if (ctx.mounted) Navigator.of(ctx).pop();
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                if (paths.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
-                    child: Text(
-                      'This playlist is empty.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: pal.textSecondary,
-                      ),
-                    ),
-                  )
-                else ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.tonalIcon(
-                        onPressed: () {
-                          Navigator.of(ctx).pop();
-                          _playOrderedPathsFrom(
-                            context,
-                            paths,
-                            0,
-                            playbackOriginTab: 2,
-                            playbackOriginUserPlaylistId: playlist.id,
-                          );
-                        },
-                        icon: const Icon(Icons.play_arrow_rounded),
-                        label: const Text('Play all'),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    height: min(
-                      MediaQuery.sizeOf(ctx).height * 0.55,
-                      24 + paths.length * 76.0,
-                    ),
-                    child: ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-                      itemCount: paths.length,
-                      separatorBuilder: (_, __) => Divider(
-                        height: 1,
-                        color: pal.dividerOnHero,
-                        indent: 88,
-                      ),
-                      itemBuilder: (context, i) {
-                        final path = paths[i];
-                        final track = _trackForPath(path, library);
-                        final selected = _isCurrentTrackPath(player, path);
-                        return Material(
-                          color: selected
-                              ? pal.onScaffold.withValues(alpha: 0.06)
-                              : Colors.transparent,
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            leading: TrackAlbumArt(
-                              track: track,
-                              display: TrackArtDisplay.list,
-                            ),
-                            title: Text(
-                              track.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: pal.textPrimary,
-                                fontSize: 15,
-                              ),
-                            ),
-                            subtitle: Text(
-                              track.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall?.copyWith(
+                        if (paths.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(24, 12, 24, 28),
+                            child: Text(
+                              'This playlist is empty.',
+                              style: theme.textTheme.bodyMedium?.copyWith(
                                 color: pal.textSecondary,
                               ),
                             ),
-                            onTap: () {
-                              Navigator.of(ctx).pop();
-                              _playOrderedPathsFrom(
-                                context,
-                                paths,
-                                i,
-                                playbackOriginTab: 2,
-                                playbackOriginUserPlaylistId: playlist.id,
-                              );
-                            },
+                          )
+                        else ...[
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: FilledButton.tonalIcon(
+                                onPressed: () {
+                                  Navigator.of(ctx).pop();
+                                  _playOrderedPathsFrom(
+                                    context,
+                                    paths,
+                                    0,
+                                    playbackOriginTab: 2,
+                                    playbackOriginUserPlaylistId:
+                                        sheetPlaylist.id,
+                                  );
+                                },
+                                icon: const Icon(Icons.play_arrow_rounded),
+                                label: const Text('Play all'),
+                              ),
+                            ),
                           ),
-                        );
-                      },
+                          SizedBox(
+                            height: min(
+                              MediaQuery.sizeOf(ctx).height * 0.55,
+                              24 + paths.length * 76.0,
+                            ),
+                            child: ListView.separated(
+                              padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+                              itemCount: paths.length,
+                              separatorBuilder: (_, __) => Divider(
+                                height: 1,
+                                color: pal.dividerOnHero,
+                                indent: 88,
+                              ),
+                              itemBuilder: (context, i) {
+                                final path = paths[i];
+                                final track =
+                                    _trackForPath(path, library);
+                                final selected =
+                                    _isCurrentTrackPath(player, path);
+                                return Material(
+                                  color: selected
+                                      ? pal.onScaffold.withValues(alpha: 0.06)
+                                      : Colors.transparent,
+                                  child: ListTile(
+                                    contentPadding:
+                                        const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 4,
+                                    ),
+                                    leading: TrackAlbumArt(
+                                      track: track,
+                                      display: TrackArtDisplay.list,
+                                    ),
+                                    title: Text(
+                                      track.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style:
+                                          theme.textTheme.titleMedium?.copyWith(
+                                        color: pal.textPrimary,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    subtitle: Text(
+                                      track.artist,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: pal.textSecondary,
+                                      ),
+                                    ),
+                                    trailing: IconButton(
+                                      tooltip: 'Remove from playlist',
+                                      icon: Icon(
+                                        Icons.playlist_remove_rounded,
+                                        color: pal.textSecondary,
+                                      ),
+                                      onPressed: () {
+                                        final ctxTracks = paths
+                                            .map((p) =>
+                                                _trackForPath(p, library))
+                                            .toList();
+                                        unawaited(
+                                          _onTrackOverflow(
+                                            context,
+                                            player,
+                                            -1,
+                                            TrackOverflowAction
+                                                .removeFromPlaylist,
+                                            playbackOriginTab: 2,
+                                            outsideQueue:
+                                                TrackOverflowQueueContext(
+                                              tracks: ctxTracks,
+                                              index: i,
+                                              playbackOriginTab: 2,
+                                            ),
+                                            userPlaylistId: sheetPlaylist.id,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    onTap: () {
+                                      Navigator.of(ctx).pop();
+                                      _playOrderedPathsFrom(
+                                        context,
+                                        paths,
+                                        i,
+                                        playbackOriginTab: 2,
+                                        playbackOriginUserPlaylistId:
+                                            sheetPlaylist.id,
+                                      );
+                                    },
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                ],
-              ],
-            ),
-          ),
+                );
+              },
+            );
+          },
         );
       },
     );
@@ -820,11 +874,24 @@ class LibraryScreenState extends State<LibraryScreen>
                     ),
                   )
                 else
-                  ...List.generate(filteredPlaylists.length, (i) {
-                    final pl = filteredPlaylists[i];
-                    final attachScrollKey = _tabController.index == 2 &&
-                        curKey.isNotEmpty &&
-                        _userPlaylistContainsCurrentPath(pl, curKey);
+                  ...() {
+                    var anchorIndex = -1;
+                    if (_tabController.index == 2 && curKey.isNotEmpty) {
+                      for (var j = 0; j < filteredPlaylists.length; j++) {
+                        if (_userPlaylistContainsCurrentPath(
+                            filteredPlaylists[j], curKey)) {
+                          anchorIndex = j;
+                          break;
+                        }
+                      }
+                    }
+                    return List.generate(
+                      filteredPlaylists.length,
+                      (i) {
+                        final pl = filteredPlaylists[i];
+                        final attachScrollKey =
+                            _tabController.index == 2 &&
+                                anchorIndex == i;
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -900,7 +967,9 @@ class LibraryScreenState extends State<LibraryScreen>
                         ),
                       ],
                     );
-                  }),
+                      },
+                    );
+                  }(),
               ],
             );
           },
@@ -916,6 +985,7 @@ class LibraryScreenState extends State<LibraryScreen>
     TrackOverflowAction action, {
     int? playbackOriginTab,
     TrackOverflowQueueContext? outsideQueue,
+    String? userPlaylistId,
   }) async {
     await applyTrackOverflowAction(
       context,
@@ -924,6 +994,7 @@ class LibraryScreenState extends State<LibraryScreen>
       action,
       playbackOriginTab: playbackOriginTab,
       outsideQueue: outsideQueue,
+      userPlaylistId: userPlaylistId,
     );
   }
 
