@@ -131,7 +131,8 @@ class _MainShellState extends State<MainShell> {
 
     if (paths.isEmpty) {
       await RecentlyAddedStore.mergeScanPaths([]);
-      await player.setPlaylist([], startIndex: 0);
+      player.setLibraryCatalog([]);
+      await player.setPlaylist([], startIndex: 0, playbackOriginTab: 0);
       return;
     }
 
@@ -153,18 +154,24 @@ class _MainShellState extends State<MainShell> {
           content: Text('No .mp3 files found in the saved folders.'),
         ),
       );
-      await player.setPlaylist([], startIndex: 0);
+      player.setLibraryCatalog([]);
+      await player.setPlaylist([], startIndex: 0, playbackOriginTab: 0);
       return;
     }
 
     final tracks = files.map(TrackItem.fromFilePath).toList();
+    player.setLibraryCatalog(tracks);
     var resolvedStart = startIndex.clamp(0, tracks.length - 1);
     if (pathToPreserve != null) {
       final idx = tracks.indexWhere((t) => t.filePath == pathToPreserve);
       if (idx >= 0) resolvedStart = idx;
     }
 
-    await player.setPlaylist(tracks, startIndex: resolvedStart);
+    await player.setPlaylist(
+      tracks,
+      startIndex: resolvedStart,
+      playbackOriginTab: 0,
+    );
 
     if (preservePlaybackAfterRescan && pathToPreserve != null && tracks.isNotEmpty) {
       final atPath = tracks[resolvedStart].filePath;
@@ -245,7 +252,15 @@ class _MainShellState extends State<MainShell> {
           return FadeTransition(
             opacity: animation,
             child: NowPlayingScreen(
-              onCollapse: () => Navigator.of(context).pop(),
+              onCollapse: () {
+                Navigator.of(context).pop();
+                final tab =
+                    player.playbackOriginTabIndex?.clamp(0, 4) ?? 0;
+                _goLibrary();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _libraryScreenKey.currentState?.switchToTab(tab);
+                });
+              },
             ),
           );
         },
@@ -262,9 +277,18 @@ class _MainShellState extends State<MainShell> {
     BuildContext context,
     PlayerController player,
     int playlistIndex,
-    TrackOverflowAction action,
-  ) =>
-      applyTrackOverflowAction(context, player, playlistIndex, action);
+    TrackOverflowAction action, {
+    int? playbackOriginTab,
+    TrackOverflowQueueContext? outsideQueue,
+  }) =>
+      applyTrackOverflowAction(
+        context,
+        player,
+        playlistIndex,
+        action,
+        playbackOriginTab: playbackOriginTab,
+        outsideQueue: outsideQueue,
+      );
 
   Future<void> _openFilesExplorerScreen() async {
     if (_folderPaths.isEmpty) {

@@ -19,8 +19,10 @@ class LibraryFilesPage extends StatefulWidget {
     BuildContext context,
     PlayerController player,
     int playlistIndex,
-    TrackOverflowAction action,
-  ) onOverflow;
+    TrackOverflowAction action, {
+    int? playbackOriginTab,
+    TrackOverflowQueueContext? outsideQueue,
+  }) onOverflow;
 
   @override
   State<LibraryFilesPage> createState() => _LibraryFilesPageState();

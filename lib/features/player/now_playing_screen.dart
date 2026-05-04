@@ -295,6 +295,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                   player,
                                   player.currentIndex,
                                   action,
+                                  playbackOriginTab:
+                                      player.playbackOriginTabIndex,
                                 ),
                               );
                             },

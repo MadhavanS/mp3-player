@@ -31,8 +31,10 @@ class LibraryFilesExplorer extends StatefulWidget {
     BuildContext context,
     PlayerController player,
     int playlistIndex,
-    TrackOverflowAction action,
-  ) onOverflow;
+    TrackOverflowAction action, {
+    int? playbackOriginTab,
+    TrackOverflowQueueContext? outsideQueue,
+  }) onOverflow;
 
   /// After playback starts: on IO, [explicitTrackPathKeys] is the scanned set of `.mp3`
   /// under the open folder (recursive). On web pass `null` — Library keeps full list.
@@ -342,8 +344,9 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   }
 
   TrackItem _displayTrack(PlayerController player, String filePath) {
-    final i = player.playlist.indexWhere((t) => t.filePath == filePath);
-    if (i >= 0) return player.playlist[i];
+    final lib = player.metadataLibrary;
+    final i = lib.indexWhere((t) => t.filePath == filePath);
+    if (i >= 0) return lib[i];
     return TrackItem.fromFilePath(filePath);
   }
 
@@ -352,33 +355,38 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     if (folderScope == null) return;
 
     final player = PlayerController.of(context);
-    final idx = player.playlist.indexWhere((t) => t.filePath == filePath);
-
-    /// Pop with path keys **before** starting playback so [MainShell] and
-    /// [LibraryScreen] update `_songsBrowsePathKeysNotifier` before
-    /// [PlayerController.jumpToIndex] notifies listeners — otherwise player
-    /// rebuilds Shell/Library while browse keys are still null and the Songs
-    /// tab sticks on the full list until the next Files trip.
     final cb = widget.onSongChosenFromExplorer;
-    if (cb != null) {
-      if (kIsWeb) {
-        player.setPlaybackPathKeyScope(null);
-        await cb(null);
-      } else {
-        final scanned = await scanMp3Files(folderScope, recursive: true);
-        final keys = <String>{
-          for (final path in scanned) canonicalMusicLibraryPathKey(path),
-        }..removeWhere((k) => k.isEmpty);
-        player.setPlaybackPathKeyScope(keys);
-        await cb(keys);
-      }
+
+    if (kIsWeb) {
+      player.setPlaybackPathKeyScope(null);
+      if (cb != null) await cb(null);
+      await player.setPlaylistAndPlay(
+        [TrackItem.fromFilePath(filePath)],
+        playbackOriginTab: 0,
+      );
+      return;
     }
 
-    if (idx >= 0) {
-      await player.jumpToIndex(idx);
-    } else {
-      await player.setPlaylistAndPlay([TrackItem.fromFilePath(filePath)]);
-    }
+    final scanned = await scanMp3Files(folderScope, recursive: true);
+    final keys = <String>{
+      for (final path in scanned) canonicalMusicLibraryPathKey(path),
+    }..removeWhere((k) => k.isEmpty);
+    player.setPlaybackPathKeyScope(keys);
+    if (cb != null) await cb(keys);
+
+    final library = player.metadataLibrary;
+    final tracks = scanned
+        .map((path) {
+          final j = library.indexWhere((t) => t.filePath == path);
+          return j >= 0 ? library[j] : TrackItem.fromFilePath(path);
+        })
+        .toList();
+    final startIndex = tracks.indexWhere((t) => t.filePath == filePath);
+    await player.setPlaylistAndPlay(
+      tracks,
+      startIndex: startIndex >= 0 ? startIndex : 0,
+      playbackOriginTab: 0,
+    );
   }
 
   String _durationSuffix(PlayerController player, String filePath) {
@@ -612,6 +620,8 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                       ),
                     );
                   }
+                  final mp3QueueTracks =
+                      mp3sFiltered.map((p) => _displayTrack(player, p)).toList();
                   return ListView(
                     padding: const EdgeInsets.only(bottom: 20),
                     children: [
@@ -667,12 +677,17 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                           ),
                         ),
                       ),
-                      ...mp3sFiltered.map((fp) {
+                      ...mp3sFiltered.asMap().entries.map((e) {
+                        final rowIx = e.key;
+                        final fp = e.value;
                         final idx = player.playlist
                             .indexWhere((t) => t.filePath == fp);
                         final t = _displayTrack(player, fp);
-                        final sel =
-                            idx >= 0 && idx == player.currentIndex;
+                        final cur = player.currentTrack?.filePath;
+                        final sel = cur != null &&
+                            fp.isNotEmpty &&
+                            canonicalMusicLibraryPathKey(cur) ==
+                                canonicalMusicLibraryPathKey(fp);
                         return Material(
                           color: sel
                               ? pal.onScaffold.withValues(alpha: 0.06)
@@ -719,30 +734,32 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                       ],
                                     ),
                                   ),
-                                  if (idx >= 0)
-                                    TrackOverflowMenuWithFavourite(
-                                      pal: pal,
-                                      track: t,
-                                      overflowIcon: Icons.more_vert_rounded,
-                                      iconSize: 22,
-                                      menuIconColor: pal.onScaffold
-                                          .withValues(alpha: 0.75),
-                                      onSelected: (a) {
-                                        unawaited(
-                                          widget.onOverflow(
-                                            context,
-                                            player,
-                                            idx,
-                                            a,
-                                          ),
-                                        );
-                                      },
-                                    )
-                                  else
-                                    Icon(Icons.more_vert_rounded,
-                                        color: pal.textMuted
-                                            .withValues(alpha: 0.35),
-                                        size: 22),
+                                  TrackOverflowMenuWithFavourite(
+                                    pal: pal,
+                                    track: t,
+                                    overflowIcon: Icons.more_vert_rounded,
+                                    iconSize: 22,
+                                    menuIconColor: pal.onScaffold
+                                        .withValues(alpha: 0.75),
+                                    onSelected: (a) {
+                                      unawaited(
+                                        widget.onOverflow(
+                                          context,
+                                          player,
+                                          idx >= 0 ? idx : -1,
+                                          a,
+                                          playbackOriginTab: 0,
+                                          outsideQueue: idx < 0
+                                              ? TrackOverflowQueueContext(
+                                                  tracks: mp3QueueTracks,
+                                                  index: rowIx,
+                                                  playbackOriginTab: 0,
+                                                )
+                                              : null,
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ],
                               ),
                             ),

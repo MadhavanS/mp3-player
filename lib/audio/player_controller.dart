@@ -34,7 +34,36 @@ class PlayerController extends ChangeNotifier {
   /// only among tracks whose path key is in this set (same as Songs tab folder filter).
   Set<String>? _playbackPathKeysScope;
 
+  /// Last full-library scan (Songs tab + metadata); not cleared when the queue is
+  /// replaced by Favourites / a user playlist / etc.
+  List<TrackItem> _libraryCatalog = [];
+
+  /// Library tab (0=Songs…4=Recently played) where the current queue was started;
+  /// used when closing Now Playing.
+  int? _playbackOriginTabIndex;
+
   AudioPlayer get audioPlayer => _player;
+
+  List<TrackItem> get libraryCatalog => List<TrackItem>.unmodifiable(_libraryCatalog);
+
+  /// Use for tag resolution in Library: full scan when available, else active queue.
+  List<TrackItem> get metadataLibrary =>
+      _libraryCatalog.isNotEmpty ? _libraryCatalog : _playlist;
+
+  int? get playbackOriginTabIndex => _playbackOriginTabIndex;
+
+  /// Called after a folder scan with the complete track list.
+  void setLibraryCatalog(List<TrackItem> tracks) {
+    _libraryCatalog = List<TrackItem>.from(tracks);
+    notifyListeners();
+  }
+
+  void removeFromLibraryCatalogByPath(String path) {
+    if (path.isEmpty) return;
+    final before = _libraryCatalog.length;
+    _libraryCatalog.removeWhere((t) => t.filePath == path);
+    if (_libraryCatalog.length != before) notifyListeners();
+  }
 
   List<TrackItem> get playlist => _playlist;
 
@@ -175,7 +204,15 @@ class PlayerController extends ChangeNotifier {
     _shufflePos = 0;
   }
 
-  Future<void> setPlaylist(List<TrackItem> tracks, {int startIndex = 0}) async {
+  Future<void> setPlaylist(
+    List<TrackItem> tracks, {
+    int startIndex = 0,
+    int? playbackOriginTab,
+  }) async {
+    if (playbackOriginTab != null) {
+      _playbackOriginTabIndex =
+          playbackOriginTab.clamp(0, 4);
+    }
     _playlist = List<TrackItem>.from(tracks);
     _resetShuffleState();
     _index = _playlist.isEmpty ? 0 : startIndex.clamp(0, _playlist.length - 1);
@@ -206,8 +243,16 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Replaces the queue with [tracks] and starts playback at [startIndex].
-  Future<void> setPlaylistAndPlay(List<TrackItem> tracks, {int startIndex = 0}) async {
-    await setPlaylist(tracks, startIndex: startIndex);
+  Future<void> setPlaylistAndPlay(
+    List<TrackItem> tracks, {
+    int startIndex = 0,
+    int? playbackOriginTab,
+  }) async {
+    await setPlaylist(
+      tracks,
+      startIndex: startIndex,
+      playbackOriginTab: playbackOriginTab,
+    );
     await _player.play();
   }
 
@@ -241,18 +286,21 @@ class PlayerController extends ChangeNotifier {
 
   void updateTrackByPath(String path, TrackItem updated) {
     final i = _playlist.indexWhere((t) => t.filePath == path);
-    if (i < 0) return;
-    _playlist[i] = updated;
-    notifyListeners();
+    if (i >= 0) _playlist[i] = updated;
+    final c = _libraryCatalog.indexWhere((t) => t.filePath == path);
+    if (c >= 0) _libraryCatalog[c] = updated;
+    if (i >= 0 || c >= 0) notifyListeners();
   }
 
   /// Replace the playlist entry for [oldPath] with [updated] (new path + tags).
   /// Reloads the audio source when the renamed file is currently playing.
   void replaceTrackPath(String oldPath, TrackItem updated) {
     final i = _playlist.indexWhere((t) => t.filePath == oldPath);
-    if (i < 0) return;
+    if (i >= 0) _playlist[i] = updated;
+    final c = _libraryCatalog.indexWhere((t) => t.filePath == oldPath);
+    if (c >= 0) _libraryCatalog[c] = updated;
+    if (i < 0 && c < 0) return;
     final currentPath = currentTrack?.filePath;
-    _playlist[i] = updated;
     notifyListeners();
     if (currentPath == oldPath) {
       unawaited(_loadCurrent());

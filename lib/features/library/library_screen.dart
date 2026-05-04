@@ -53,6 +53,21 @@ class LibraryScreenState extends State<LibraryScreen>
     setState(() {});
   }
 
+  /// Used when closing Now Playing to restore the library section that started playback.
+  void switchToTab(int index) {
+    if (!mounted) return;
+    _tabController.index = index.clamp(0, 4);
+    setState(() {});
+  }
+
+  static bool _isCurrentTrackPath(PlayerController player, String? path) {
+    if (path == null || path.isEmpty) return false;
+    final cur = player.currentTrack?.filePath;
+    if (cur == null || cur.isEmpty) return false;
+    return canonicalMusicLibraryPathKey(path) ==
+        canonicalMusicLibraryPathKey(cur);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -147,18 +162,25 @@ class LibraryScreenState extends State<LibraryScreen>
   Future<void> _playOrderedPathsFrom(
     BuildContext context,
     List<String> orderedPaths,
-    int startIndex,
-  ) async {
+    int startIndex, {
+    required int playbackOriginTab,
+    Set<String>? pathKeyScope,
+  }) async {
     if (orderedPaths.isEmpty) return;
     final player = PlayerController.of(context);
-    final library = player.playlist;
+    final library = player.metadataLibrary;
     final tracks = orderedPaths
         .map((path) => _trackForPath(path, library))
         .toList();
-    player.setPlaybackPathKeyScope(null);
+    if (pathKeyScope != null) {
+      player.setPlaybackPathKeyScope(pathKeyScope);
+    } else {
+      player.setPlaybackPathKeyScope(null);
+    }
     await player.setPlaylistAndPlay(
       tracks,
       startIndex: startIndex.clamp(0, tracks.length - 1),
+      playbackOriginTab: playbackOriginTab,
     );
   }
 
@@ -191,12 +213,6 @@ class LibraryScreenState extends State<LibraryScreen>
       if (_trackMatchesQuery(tracks[i], q)) out.add(i);
     }
     return out;
-  }
-
-  Future<void> _selectTrack(BuildContext context, int playlistIndex) async {
-    final player = PlayerController.of(context);
-    if (playlistIndex < 0 || playlistIndex >= player.playlist.length) return;
-    await player.jumpToIndex(playlistIndex);
   }
 
   Future<void> _showCreatePlaylistDialog(BuildContext context) async {
@@ -340,7 +356,12 @@ class LibraryScreenState extends State<LibraryScreen>
                       child: FilledButton.tonalIcon(
                         onPressed: () {
                           Navigator.of(ctx).pop();
-                          _playOrderedPathsFrom(context, paths, 0);
+                          _playOrderedPathsFrom(
+                            context,
+                            paths,
+                            0,
+                            playbackOriginTab: 2,
+                          );
                         },
                         icon: const Icon(Icons.play_arrow_rounded),
                         label: const Text('Play all'),
@@ -363,9 +384,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       itemBuilder: (context, i) {
                         final path = paths[i];
                         final track = _trackForPath(path, library);
-                        final plIndex = _playlistIndexForPath(player, path);
-                        final selected =
-                            plIndex >= 0 && plIndex == player.currentIndex;
+                        final selected = _isCurrentTrackPath(player, path);
                         return Material(
                           color: selected
                               ? pal.onScaffold.withValues(alpha: 0.06)
@@ -398,7 +417,12 @@ class LibraryScreenState extends State<LibraryScreen>
                             ),
                             onTap: () {
                               Navigator.of(ctx).pop();
-                              _playOrderedPathsFrom(context, paths, i);
+                              _playOrderedPathsFrom(
+                                context,
+                                paths,
+                                i,
+                                playbackOriginTab: 2,
+                              );
                             },
                           ),
                         );
@@ -621,9 +645,18 @@ class LibraryScreenState extends State<LibraryScreen>
     BuildContext context,
     PlayerController player,
     int playlistIndex,
-    TrackOverflowAction action,
-  ) async {
-    await applyTrackOverflowAction(context, player, playlistIndex, action);
+    TrackOverflowAction action, {
+    int? playbackOriginTab,
+    TrackOverflowQueueContext? outsideQueue,
+  }) async {
+    await applyTrackOverflowAction(
+      context,
+      player,
+      playlistIndex,
+      action,
+      playbackOriginTab: playbackOriginTab,
+      outsideQueue: outsideQueue,
+    );
   }
 
   InputDecoration _searchDecoration(
@@ -678,7 +711,7 @@ class LibraryScreenState extends State<LibraryScreen>
         return ValueListenableBuilder<Set<String>?>(
           valueListenable: widget.songsBrowsePathKeys,
           builder: (context, browsePathKeys, _) {
-            final tracks = player.playlist;
+            final tracks = player.metadataLibrary;
             final query = _searchController.text.trim();
             final baseFilteredIndices = tracks.isEmpty
                 ? <int>[]
@@ -901,7 +934,7 @@ class LibraryScreenState extends State<LibraryScreen>
             return ListenableBuilder(
               listenable: player,
               builder: (context, _) {
-                final library = player.playlist;
+                final library = player.metadataLibrary;
                 return ListView.separated(
                   padding: const EdgeInsets.only(bottom: 8),
                   itemCount: paths.length,
@@ -914,13 +947,18 @@ class LibraryScreenState extends State<LibraryScreen>
                     final path = paths[i];
                     final track = _trackForPath(path, library);
                     final plIndex = _playlistIndexForPath(player, path);
-                    final selected = plIndex >= 0 && plIndex == player.currentIndex;
+                    final selected = _isCurrentTrackPath(player, path);
                     return Material(
                       color: selected
                           ? pal.onScaffold.withValues(alpha: 0.08)
                           : Colors.transparent,
                       child: InkWell(
-                        onTap: () => _playOrderedPathsFrom(context, paths, i),
+                        onTap: () => _playOrderedPathsFrom(
+                          context,
+                          paths,
+                          i,
+                          playbackOriginTab: 3,
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -970,21 +1008,32 @@ class LibraryScreenState extends State<LibraryScreen>
                                   ],
                                 ),
                               ),
-                              if (plIndex >= 0)
-                                TrackOverflowMenuWithFavourite(
-                                  pal: pal,
-                                  track: track,
-                                  onSelected: (action) {
-                                    unawaited(
-                                      _onTrackOverflow(
-                                        context,
-                                        player,
-                                        plIndex,
-                                        action,
-                                      ),
-                                    );
-                                  },
-                                ),
+                              TrackOverflowMenuWithFavourite(
+                                pal: pal,
+                                track: track,
+                                onSelected: (action) {
+                                  final ctxTracks = paths
+                                      .map((p) =>
+                                          _trackForPath(p, library))
+                                      .toList();
+                                  unawaited(
+                                    _onTrackOverflow(
+                                      context,
+                                      player,
+                                      plIndex >= 0 ? plIndex : -1,
+                                      action,
+                                      playbackOriginTab: 3,
+                                      outsideQueue: plIndex < 0
+                                          ? TrackOverflowQueueContext(
+                                              tracks: ctxTracks,
+                                              index: i,
+                                              playbackOriginTab: 3,
+                                            )
+                                          : null,
+                                    ),
+                                  );
+                                },
+                              ),
                             ],
                           ),
                         ),
@@ -1113,7 +1162,7 @@ class LibraryScreenState extends State<LibraryScreen>
             return ListenableBuilder(
               listenable: player,
               builder: (context, _) {
-                final library = player.playlist;
+                final library = player.metadataLibrary;
                 return ListView.separated(
                   padding: const EdgeInsets.only(bottom: 8),
                   itemCount: paths.length,
@@ -1126,15 +1175,18 @@ class LibraryScreenState extends State<LibraryScreen>
                     final path = paths[i];
                     final track = _trackForPath(path, library);
                     final plIndex = _playlistIndexForPath(player, path);
-                    final selected =
-                        plIndex >= 0 && plIndex == player.currentIndex;
+                    final selected = _isCurrentTrackPath(player, path);
                     return Material(
                       color: selected
                           ? pal.onScaffold.withValues(alpha: 0.08)
                           : Colors.transparent,
                       child: InkWell(
-                        onTap: () =>
-                            _playOrderedPathsFrom(context, paths, i),
+                        onTap: () => _playOrderedPathsFrom(
+                          context,
+                          paths,
+                          i,
+                          playbackOriginTab: 1,
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 16,
@@ -1189,21 +1241,32 @@ class LibraryScreenState extends State<LibraryScreen>
                                   ],
                                 ),
                               ),
-                              if (plIndex >= 0)
-                                TrackOverflowMenuWithFavourite(
-                                  pal: pal,
-                                  track: track,
-                                  onSelected: (action) {
-                                    unawaited(
-                                      _onTrackOverflow(
-                                        context,
-                                        player,
-                                        plIndex,
-                                        action,
-                                      ),
-                                    );
-                                  },
-                                ),
+                              TrackOverflowMenuWithFavourite(
+                                pal: pal,
+                                track: track,
+                                onSelected: (action) {
+                                  final ctxTracks = paths
+                                      .map((p) =>
+                                          _trackForPath(p, library))
+                                      .toList();
+                                  unawaited(
+                                    _onTrackOverflow(
+                                      context,
+                                      player,
+                                      plIndex >= 0 ? plIndex : -1,
+                                      action,
+                                      playbackOriginTab: 1,
+                                      outsideQueue: plIndex < 0
+                                          ? TrackOverflowQueueContext(
+                                              tracks: ctxTracks,
+                                              index: i,
+                                              playbackOriginTab: 1,
+                                            )
+                                          : null,
+                                    ),
+                                  );
+                                },
+                              ),
                             ],
                           ),
                         ),
@@ -1297,7 +1360,7 @@ class LibraryScreenState extends State<LibraryScreen>
         return ListenableBuilder(
           listenable: player,
           builder: (context, _) {
-            final library = player.playlist;
+            final library = player.metadataLibrary;
             return ListView.separated(
               padding: const EdgeInsets.only(bottom: 8),
               itemCount: paths.length,
@@ -1310,14 +1373,18 @@ class LibraryScreenState extends State<LibraryScreen>
                 final path = paths[i];
                 final track = _trackForPath(path, library);
                 final plIndex = _playlistIndexForPath(player, path);
-                final selected =
-                    plIndex >= 0 && plIndex == player.currentIndex;
+                final selected = _isCurrentTrackPath(player, path);
                 return Material(
                   color: selected
                       ? pal.onScaffold.withValues(alpha: 0.08)
                       : Colors.transparent,
                   child: InkWell(
-                    onTap: () => _playOrderedPathsFrom(context, paths, i),
+                    onTap: () => _playOrderedPathsFrom(
+                      context,
+                      paths,
+                      i,
+                      playbackOriginTab: 4,
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -1368,21 +1435,32 @@ class LibraryScreenState extends State<LibraryScreen>
                               ],
                             ),
                           ),
-                          if (plIndex >= 0)
-                            TrackOverflowMenuWithFavourite(
-                              pal: pal,
-                              track: track,
-                              onSelected: (action) {
-                                unawaited(
-                                  _onTrackOverflow(
-                                    context,
-                                    player,
-                                    plIndex,
-                                    action,
-                                  ),
-                                );
-                              },
-                            ),
+                          TrackOverflowMenuWithFavourite(
+                            pal: pal,
+                            track: track,
+                            onSelected: (action) {
+                              final ctxTracks = paths
+                                  .map((p) =>
+                                      _trackForPath(p, library))
+                                  .toList();
+                              unawaited(
+                                _onTrackOverflow(
+                                  context,
+                                  player,
+                                  plIndex >= 0 ? plIndex : -1,
+                                  action,
+                                  playbackOriginTab: 4,
+                                  outsideQueue: plIndex < 0
+                                      ? TrackOverflowQueueContext(
+                                          tracks: ctxTracks,
+                                          index: i,
+                                          playbackOriginTab: 4,
+                                        )
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
                         ],
                       ),
                     ),
@@ -1510,16 +1588,49 @@ class LibraryScreenState extends State<LibraryScreen>
         indent: 88,
       ),
       itemBuilder: (context, i) {
-        final playlistIndex = filteredIndices[i];
-        final track = tracks[playlistIndex];
-        final selected = playlistIndex == player.currentIndex;
+        final catalogIndex = filteredIndices[i];
+        final track = tracks[catalogIndex];
+        final path = track.filePath;
+        final selected = _isCurrentTrackPath(player, path);
+        final plIndex = path != null && path.isNotEmpty
+            ? _playlistIndexForPath(player, path)
+            : -1;
+        final ctxTracks =
+            filteredIndices.map((idx) => tracks[idx]).toList();
         return _TrackTile(
           track: track,
           selected: selected,
-          onTap: () => _selectTrack(context, playlistIndex),
+          onTap: () {
+            final orderedPaths = filteredIndices
+                .map((idx) => tracks[idx].filePath)
+                .whereType<String>()
+                .toList();
+            unawaited(
+              _playOrderedPathsFrom(
+                context,
+                orderedPaths,
+                i,
+                playbackOriginTab: 0,
+                pathKeyScope: browsePathKeys,
+              ),
+            );
+          },
           onOverflowAction: (action) {
             unawaited(
-              _onTrackOverflow(context, player, playlistIndex, action),
+              _onTrackOverflow(
+                context,
+                player,
+                plIndex >= 0 ? plIndex : -1,
+                action,
+                playbackOriginTab: 0,
+                outsideQueue: plIndex < 0
+                    ? TrackOverflowQueueContext(
+                        tracks: ctxTracks,
+                        index: i,
+                        playbackOriginTab: 0,
+                      )
+                    : null,
+              ),
             );
           },
         );

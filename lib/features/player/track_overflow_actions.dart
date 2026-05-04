@@ -274,24 +274,55 @@ Future<void> _showUserPlaylistPickerAndAdd(
   );
 }
 
+/// When the row isn’t in [PlayerController.playlist] (e.g. queue is Favourites),
+/// play actions use this list + index ([playbackOriginTab] for NP dismiss).
+class TrackOverflowQueueContext {
+  const TrackOverflowQueueContext({
+    required this.tracks,
+    required this.index,
+    required this.playbackOriginTab,
+  });
+
+  final List<TrackItem> tracks;
+  final int index;
+  final int playbackOriginTab;
+}
+
 Future<void> applyTrackOverflowAction(
   BuildContext context,
   PlayerController player,
   int playlistIndex,
-  TrackOverflowAction action,
-) async {
-  final tracks = player.playlist;
-  if (playlistIndex < 0 || playlistIndex >= tracks.length) return;
+  TrackOverflowAction action, {
+  int? playbackOriginTab,
+  TrackOverflowQueueContext? outsideQueue,
+}) async {
+  var tracks = player.playlist;
+  var ix = playlistIndex;
+  if (ix < 0 || ix >= tracks.length) {
+    final o = outsideQueue;
+    if (o == null) return;
+    tracks = o.tracks;
+    ix = o.index;
+    if (ix < 0 || ix >= tracks.length) return;
+  }
+
+  final tab = playbackOriginTab ?? outsideQueue?.playbackOriginTab;
 
   switch (action) {
     case TrackOverflowAction.playFromHere:
-      await player.setPlaylistAndPlay(tracks.sublist(playlistIndex));
+      await player.setPlaylistAndPlay(
+        tracks.sublist(ix),
+        playbackOriginTab: tab,
+      );
 
     case TrackOverflowAction.playOnlyThis:
-      await player.setPlaylistAndPlay([tracks[playlistIndex]]);
+      await player.setPlaylistAndPlay(
+        [tracks[ix]],
+        playbackOriginTab: tab,
+      );
 
     case TrackOverflowAction.addToPlaylist:
-      final t = tracks[playlistIndex];
+      final t = tracks[ix];
       final path = t.filePath;
       if (path == null || path.isEmpty) {
         if (context.mounted) {
@@ -306,7 +337,7 @@ Future<void> applyTrackOverflowAction(
       await _showUserPlaylistPickerAndAdd(context, path);
 
     case TrackOverflowAction.toggleFavorite:
-      final t = tracks[playlistIndex];
+      final t = tracks[ix];
       final path = t.filePath;
       if (path == null || path.isEmpty || kIsWeb) return;
       final nowFav = await FavoriteSongsStore.toggleFavorite(path);
@@ -321,7 +352,7 @@ Future<void> applyTrackOverflowAction(
       }
 
     case TrackOverflowAction.deleteFromDevice:
-      final track = tracks[playlistIndex];
+      final track = tracks[ix];
       final path = track.filePath;
       if (path == null || path.isEmpty) return;
 
@@ -357,9 +388,7 @@ Future<void> applyTrackOverflowAction(
       if (confirmed != true || !context.mounted) return;
 
       final wasPlaying = player.isPlaying;
-      final targetsCurrent =
-          playlistIndex == player.currentIndex &&
-          player.currentTrack?.filePath == path;
+      final targetsCurrent = player.currentTrack?.filePath == path;
 
       if (targetsCurrent) {
         await player.stopForExternalFileEdit();
@@ -382,7 +411,11 @@ Future<void> applyTrackOverflowAction(
         return;
       }
 
-      await player.removePlaylistEntryAt(playlistIndex);
+      player.removeFromLibraryCatalogByPath(path);
+      final queueIx = player.playlist.indexWhere((t) => t.filePath == path);
+      if (queueIx >= 0) {
+        await player.removePlaylistEntryAt(queueIx);
+      }
 
       if (context.mounted) {
         ActionPillToast.show(
