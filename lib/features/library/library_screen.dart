@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
+import '../../services/library_track_sort.dart';
 import '../../services/music_library_path_key.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
@@ -65,6 +66,8 @@ class LibraryScreenState extends State<LibraryScreen>
 
   static const double _kLibraryListRowStride = 88;
 
+  LibraryTrackSortMode _songSortMode = LibraryTrackSortMode.modifiedNewest;
+
   /// After returning from Files, focus the Songs tab.
   void switchToSongsTab() {
     if (!mounted) return;
@@ -107,7 +110,18 @@ class LibraryScreenState extends State<LibraryScreen>
     _tabController = TabController(length: 5, vsync: this);
     _searchController.addListener(() => setState(() {}));
     _tabController.addListener(_onTabChanged);
+    LibraryTrackSortStore.revision.addListener(_onSongSortStoreRevision);
     unawaited(FavoriteSongsStore.ensureLoaded());
+    unawaited(_reloadSongSortMode());
+  }
+
+  Future<void> _reloadSongSortMode() async {
+    final m = await LibraryTrackSortStore.load();
+    if (mounted) setState(() => _songSortMode = m);
+  }
+
+  void _onSongSortStoreRevision() {
+    unawaited(_reloadSongSortMode());
   }
 
   void _onTabChanged() {
@@ -133,7 +147,24 @@ class LibraryScreenState extends State<LibraryScreen>
     _playlistScrollController.dispose();
     _favoritesScrollController.dispose();
     _recentPlayedScrollController.dispose();
+    LibraryTrackSortStore.revision.removeListener(_onSongSortStoreRevision);
     super.dispose();
+  }
+
+  List<int> _sortedSongsTabIndices(
+    List<TrackItem> tracks,
+    String query,
+    Set<String>? browsePathKeys,
+  ) {
+    final baseFilteredIndices = tracks.isEmpty
+        ? <int>[]
+        : _filteredPlaylistIndices(tracks, query);
+    final scoped = _playlistIndicesInPathKeySet(
+      baseFilteredIndices,
+      tracks,
+      browsePathKeys,
+    );
+    return sortFilteredTrackIndices(scoped, tracks, _songSortMode);
   }
 
   bool _userPlaylistContainsCurrentPath(UserPlaylistEntry pl, String pathKey) {
@@ -150,14 +181,8 @@ class LibraryScreenState extends State<LibraryScreen>
     String query,
     String pathKey,
   ) {
-    final baseFilteredIndices = tracks.isEmpty
-        ? <int>[]
-        : _filteredPlaylistIndices(tracks, query);
-    final songsTabIndices = _playlistIndicesInPathKeySet(
-      baseFilteredIndices,
-      tracks,
-      browsePathKeys,
-    );
+    final songsTabIndices =
+        _sortedSongsTabIndices(tracks, query, browsePathKeys);
     for (var i = 0; i < songsTabIndices.length; i++) {
       final fp = tracks[songsTabIndices[i]].filePath;
       if (fp != null && canonicalMusicLibraryPathKey(fp) == pathKey) {
@@ -300,7 +325,7 @@ class LibraryScreenState extends State<LibraryScreen>
       case 3:
         final favPaths = await FavoriteSongsStore.loadPaths();
         if (!mounted) return;
-        var paths = _pathsMatchingBrowse(favPaths, browsePathKeys);
+        var paths = _pathsMatchingBrowse(favPaths, null);
         paths = _filterPathsBySearch(paths, query, tracks);
         final idx =
             paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
@@ -1052,14 +1077,8 @@ class LibraryScreenState extends State<LibraryScreen>
           builder: (context, browsePathKeys, _) {
             final tracks = player.metadataLibrary;
             final query = _searchController.text.trim();
-            final baseFilteredIndices = tracks.isEmpty
-                ? <int>[]
-                : _filteredPlaylistIndices(tracks, query);
-            final songsTabIndices = _playlistIndicesInPathKeySet(
-              baseFilteredIndices,
-              tracks,
-              browsePathKeys,
-            );
+            final songsTabIndices =
+                _sortedSongsTabIndices(tracks, query, browsePathKeys);
 
             final pal = context.palette;
             final hint = _searchHintForTab(_tabController.index);
@@ -1100,6 +1119,25 @@ class LibraryScreenState extends State<LibraryScreen>
                             color: pal.onScaffold,
                             tooltip: 'Refresh library',
                             onPressed: widget.onRefreshLibrary,
+                          ),
+                          PopupMenuButton<LibraryTrackSortMode>(
+                            tooltip: 'Sort songs',
+                            icon: Icon(
+                              Icons.sort_rounded,
+                              color: pal.onScaffold,
+                            ),
+                            padding: EdgeInsets.zero,
+                            onSelected: (mode) async {
+                              await LibraryTrackSortStore.save(mode);
+                            },
+                            itemBuilder: (context) => [
+                              for (final mode in LibraryTrackSortMode.values)
+                                CheckedPopupMenuItem<LibraryTrackSortMode>(
+                                  value: mode,
+                                  checked: mode == _songSortMode,
+                                  child: Text(mode.menuLabel),
+                                ),
+                            ],
                           ),
                         ],
                       ),
@@ -1181,7 +1219,8 @@ class LibraryScreenState extends State<LibraryScreen>
                             query,
                             player,
                             tracks,
-                            browsePathKeys,
+                            // Folder browse from Files scopes Songs / queue; favourites stay global.
+                            null,
                           ),
                           _buildRecentTab(theme, pal, query, player, tracks, browsePathKeys),
                         ],
@@ -1458,14 +1497,14 @@ class LibraryScreenState extends State<LibraryScreen>
                       ),
                       const SizedBox(height: 14),
                       Text(
-                        'Nothing to show yet',
+                        'Nothing new yet',
                         style: theme.textTheme.titleMedium?.copyWith(
                           color: pal.onScaffold,
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Tap refresh in the library header after adding music so new tracks are recorded.',
+                        'Recently added lists tracks added after your library was first scanned, or copied into your Settings folders later. Refresh rescans folders.',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: pal.textSecondary.withValues(alpha: 0.9),

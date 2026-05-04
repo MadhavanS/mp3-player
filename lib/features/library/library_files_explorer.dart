@@ -8,6 +8,7 @@ import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/folder_browser.dart';
+import '../../services/library_track_sort.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/music_library_path_key.dart';
 import '../../theme/app_theme.dart';
@@ -51,10 +52,42 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   Future<({List<String> dirs, List<String> mp3Paths})>? _childrenFuture;
   Future<int>? _headerSongsFuture;
 
+  LibraryTrackSortMode _sortMode = LibraryTrackSortMode.modifiedNewest;
+
   @override
   void initState() {
     super.initState();
+    LibraryTrackSortStore.revision.addListener(_onSortStoreRevision);
     unawaited(FavoriteSongsStore.ensureLoaded());
+    unawaited(_bootstrapSortMode());
+  }
+
+  Future<void> _bootstrapSortMode() async {
+    final m = await LibraryTrackSortStore.load();
+    if (!mounted) return;
+    setState(() {
+      _sortMode = m;
+      _reloadCurrentFutures();
+    });
+  }
+
+  void _onSortStoreRevision() {
+    unawaited(_bootstrapSortMode());
+  }
+
+  Future<({List<String> dirs, List<String> mp3Paths})> _fetchSortedListing(
+    String dir,
+  ) async {
+    final listing = await listFolderChildrenSorted(dir);
+    final mp3 =
+        await sortMp3PathsForFilesExplorer(listing.mp3Paths, _sortMode);
+    return (dirs: listing.dirs, mp3Paths: mp3);
+  }
+
+  @override
+  void dispose() {
+    LibraryTrackSortStore.revision.removeListener(_onSortStoreRevision);
+    super.dispose();
   }
 
   @override
@@ -80,12 +113,32 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   void _reloadCurrentFutures() {
     final d = _currentDir;
     if (d != null) {
-      _childrenFuture = listFolderChildrenSorted(d);
+      _childrenFuture = _fetchSortedListing(d);
       _headerSongsFuture = totalMp3CountUnderFolder(d);
     } else {
       _childrenFuture = null;
       _headerSongsFuture = null;
     }
+  }
+
+  Widget _sortMenuButton(AppPalette pal) {
+    return PopupMenuButton<LibraryTrackSortMode>(
+      tooltip: 'Sort songs',
+      icon: Icon(
+        Icons.sort_rounded,
+        color: pal.onScaffold.withValues(alpha: 0.85),
+      ),
+      padding: EdgeInsets.zero,
+      onSelected: (m) async => LibraryTrackSortStore.save(m),
+      itemBuilder: (context) => [
+        for (final mode in LibraryTrackSortMode.values)
+          CheckedPopupMenuItem<LibraryTrackSortMode>(
+            value: mode,
+            checked: mode == _sortMode,
+            child: Text(mode.menuLabel),
+          ),
+      ],
+    );
   }
 
   void _pushDir(String absolutePath) {
@@ -164,7 +217,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     required VoidCallback? onBack,
     required Widget subtitleWidget,
     required VoidCallback? onHomeRoots,
-    required List<PopupMenuEntry<void>>? menuItems,
+    Widget? trailingActions,
   }) {
     final showTitle = title != null && title.isNotEmpty;
     return Padding(
@@ -211,14 +264,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                   ),
                   onPressed: onHomeRoots,
                 ),
-              if (menuItems != null && menuItems.isNotEmpty)
-                PopupMenuButton<void>(
-                  icon: Icon(
-                    Icons.more_vert_rounded,
-                    color: pal.onScaffold.withValues(alpha: 0.85),
-                  ),
-                  itemBuilder: (_) => menuItems,
-                ),
+              if (trailingActions != null) trailingActions,
             ],
           ),
         ],
@@ -486,7 +532,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
             onBack: null,
             subtitleWidget: headerSubtitle,
             onHomeRoots: null,
-            menuItems: null,
+            trailingActions: _sortMenuButton(pal),
           ),
           Expanded(
             child: ListView.separated(
@@ -549,7 +595,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     }
 
     final dir = _currentDir!;
-    _childrenFuture ??= listFolderChildrenSorted(dir);
+    _childrenFuture ??= _fetchSortedListing(dir);
     _headerSongsFuture ??= totalMp3CountUnderFolder(dir);
 
     return FutureBuilder<({List<String> dirs, List<String> mp3Paths})>(
@@ -601,7 +647,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
               onBack: _goBack,
               subtitleWidget: headerSubtitle,
               onHomeRoots: resetToRoots,
-              menuItems: null,
+              trailingActions: _sortMenuButton(pal),
             ),
             _breadcrumb(theme, pal),
             Expanded(

@@ -358,7 +358,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                     ),
                     slivers: [
                       SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(24, 4, 24, 0),
+                        padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
                         sliver: SliverToBoxAdapter(
                           child: ListenableBuilder(
                             listenable: player,
@@ -368,6 +368,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                 return const SizedBox.shrink();
                               }
                               return Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
                                   Center(
                                     child: _NowPlayingAlbumArtCard(
@@ -763,7 +764,7 @@ class _NowPlayingAlbumArtCard extends StatelessWidget {
                 ),
               ),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+                padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,

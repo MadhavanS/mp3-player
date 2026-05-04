@@ -6,11 +6,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/track_item.dart';
 import 'music_library_path_key.dart';
 
-/// Records when a file path was first seen after a library scan (canonical keys).
+/// Records when a file path was first seen as **new** after a library baseline.
+///
+/// The first full scan after an empty map establishes a baseline (`0` = already in
+/// library, hidden from Recently added). Paths that appear in later scans get a real
+/// timestamp and show up here — settings-folder scans only ([mergeScanPaths]).
 class RecentlyAddedStore {
   RecentlyAddedStore._();
 
-  static const _prefsKey = 'recently_added_first_seen_v1';
+  static const _prefsKey = 'recently_added_first_seen_v2';
 
   static final ValueNotifier<int> revision = ValueNotifier(0);
 
@@ -30,24 +34,48 @@ class RecentlyAddedStore {
     }
   }
 
-  /// Call after collecting scan results: new paths get [firstSeenMs], removed paths drop out.
+  /// Call after collecting scan results from Settings music folders.
+  ///
+  /// New paths since the last baseline scan get [firstSeenMs] = now.
+  /// The first non-empty scan seeds every path with `0` (not shown as recently added).
+  /// Removed paths drop out of the map.
   static Future<void> mergeScanPaths(Iterable<String> paths) async {
     final prefs = await SharedPreferences.getInstance();
     var m = await _loadMap();
-    final now = DateTime.now().millisecondsSinceEpoch;
     final incomingKeys = <String>{};
     for (final path in paths) {
       final k = canonicalMusicLibraryPathKey(path);
       if (k.isEmpty) continue;
       incomingKeys.add(k);
-      m.putIfAbsent(k, () => now);
     }
     m.removeWhere((k, _) => !incomingKeys.contains(k));
+
+    if (incomingKeys.isEmpty) {
+      await prefs.setString(_prefsKey, jsonEncode(m));
+      revision.value++;
+      return;
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final brandNew =
+        incomingKeys.where((k) => !m.containsKey(k)).toList();
+
+    if (m.isEmpty) {
+      // First catalog snapshot: baseline everything as existing library (not "new").
+      for (final k in incomingKeys) {
+        m[k] = 0;
+      }
+    } else {
+      for (final k in brandNew) {
+        m[k] = now;
+      }
+    }
+
     await prefs.setString(_prefsKey, jsonEncode(m));
     revision.value++;
   }
 
-  /// Library paths that have a first-seen time, ordered newest-first.
+  /// Paths first seen after baseline, ordered newest-first (by first-seen time).
   static Future<List<String>> orderedPathsForLibrary(List<TrackItem> tracks) async {
     final m = await _loadMap();
     final rows = <({String path, int ts})>[];
@@ -56,7 +84,7 @@ class RecentlyAddedStore {
       if (fp == null || fp.isEmpty) continue;
       final k = canonicalMusicLibraryPathKey(fp);
       final ts = m[k];
-      if (ts != null) rows.add((path: fp, ts: ts));
+      if (ts != null && ts > 0) rows.add((path: fp, ts: ts));
     }
     rows.sort((a, b) => b.ts.compareTo(a.ts));
     return rows.map((r) => r.path).toList();
