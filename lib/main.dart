@@ -13,6 +13,7 @@ Future<void> main() async {
       androidNotificationChannelName: 'Now playing',
       androidNotificationChannelDescription:
           'Playback controls while the app is in the background.',
+      androidNotificationIcon: 'drawable/ic_stat_music',
       androidNotificationOngoing: true,
       androidStopForegroundOnPause: true,
       preloadArtwork: true,

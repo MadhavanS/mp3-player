@@ -7,6 +7,8 @@ import 'package:just_audio_background/just_audio_background.dart';
 import '../models/library_tab_id.dart';
 import '../models/track_item.dart';
 import '../services/music_library_path_key.dart';
+import '../services/track_metadata.dart';
+import 'notification_art_uri.dart';
 
 enum PlaylistRepeatMode { off, all, one }
 
@@ -429,14 +431,24 @@ class PlayerController extends ChangeNotifier {
         await _player.stop();
       } catch (_) {}
       final track = currentTrack!;
+      if (track.albumArtBytes == null || track.albumArtBytes!.isEmpty) {
+        final enriched = await readAudioMetadata(track);
+        if (enriched.albumArtBytes != null &&
+            enriched.albumArtBytes!.isNotEmpty) {
+          updateTrackByPath(path, enriched);
+        }
+      }
+      final trackForMedia = currentTrack!;
+      final artUri = await uriForNotificationAlbumArt(trackForMedia);
       await _player.setAudioSource(
         AudioSource.uri(
           Uri.file(path),
           tag: MediaItem(
             id: path,
-            title: track.title,
-            artist: track.artist,
-            album: track.metaLine,
+            title: trackForMedia.title,
+            artist: trackForMedia.artist,
+            album: trackForMedia.metaLine,
+            artUri: artUri,
           ),
         ),
       );

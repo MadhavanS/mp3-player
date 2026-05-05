@@ -6,6 +6,47 @@ import '../../audio/player_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/track_album_art.dart';
 
+/// Rounded capsule thumb for the seek slider.
+final class _MiniPlayerThumbShape extends SliderComponentShape {
+  const _MiniPlayerThumbShape({required this.color});
+
+  final Color color;
+
+  static const double width = 12;
+  static const double height = 6;
+
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) =>
+      const Size(width, height);
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final rect = Rect.fromCenter(
+      center: center,
+      width: width,
+      height: height,
+    );
+    final rrect = RRect.fromRectXY(rect, 3, 3);
+    context.canvas.drawRRect(
+      rrect,
+      Paint()..color = color,
+    );
+  }
+}
+
 class MiniPlayerBar extends StatelessWidget {
   const MiniPlayerBar({
     super.key,
@@ -16,7 +57,7 @@ class MiniPlayerBar extends StatelessWidget {
   final PlayerController controller;
   final VoidCallback onTap;
 
-  /// Frosted player chrome top corners (mini bar and full-screen Now Playing).
+  /// Frosted chrome top corners (mini bar aligns with Now Playing sheet).
   static const double topSheetRadius = 28;
 
   @override
@@ -24,6 +65,7 @@ class MiniPlayerBar extends StatelessWidget {
     final theme = Theme.of(context);
     final pal = context.palette;
     final playerChrome = context.usesPlayerChrome;
+    final accent = context.controlAccent;
     final track = controller.currentTrack;
     if (track == null) return const SizedBox.shrink();
 
@@ -41,6 +83,10 @@ class MiniPlayerBar extends StatelessWidget {
     final borderRadius = const BorderRadius.vertical(
       top: Radius.circular(topSheetRadius),
     );
+    final iconColor = pal.textPrimary;
+    final mutedIcon = pal.textSecondary.withValues(alpha: 0.38);
+    final thumbColor =
+        isDark ? Colors.white : pal.textPrimary.withValues(alpha: 0.92);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -73,14 +119,19 @@ class MiniPlayerBar extends StatelessWidget {
             ),
             child: Material(
               color: Colors.transparent,
-              child: InkWell(
-                onTap: onTap,
-                borderRadius: borderRadius,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    onTap: onTap,
+                    borderRadius: borderRadius.copyWith(
+                      bottomLeft: Radius.zero,
+                      bottomRight: Radius.zero,
+                    ),
+                    splashColor: pal.primary.withValues(alpha: 0.08),
+                    highlightColor: pal.primary.withValues(alpha: 0.05),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
                       child: Row(
                         children: [
                           ListenableBuilder(
@@ -89,6 +140,7 @@ class MiniPlayerBar extends StatelessWidget {
                               return TrackAlbumArt(
                                 track: controller.currentTrack!,
                                 display: TrackArtDisplay.mini,
+                                showShadow: true,
                               );
                             },
                           ),
@@ -103,7 +155,9 @@ class MiniPlayerBar extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: theme.textTheme.titleMedium?.copyWith(
-                                    fontSize: 15,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: -0.25,
                                     color: pal.textPrimary,
                                   ),
                                 );
@@ -111,24 +165,41 @@ class MiniPlayerBar extends StatelessWidget {
                             ),
                           ),
                           IconButton(
-                            icon: const Icon(Icons.skip_previous_rounded),
-                            color: pal.textPrimary,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                            padding: EdgeInsets.zero,
+                            icon: Icon(
+                              Icons.skip_previous_rounded,
+                              color: iconColor,
+                              size: 30,
+                            ),
                             onPressed: () => controller.skipPrevious(),
                           ),
                           ListenableBuilder(
                             listenable: controller,
                             builder: (context, _) {
                               final playing = controller.isPlaying;
-                              return IconButton.filled(
-                                style: IconButton.styleFrom(
-                                  backgroundColor: context.controlAccent,
-                                  foregroundColor: Colors.white,
-                                ),
-                                onPressed: () => controller.togglePlayPause(),
-                                icon: Icon(
-                                  playing
-                                      ? Icons.pause_rounded
-                                      : Icons.play_arrow_rounded,
+                              return SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Material(
+                                  color: accent,
+                                  shape: const CircleBorder(),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: InkWell(
+                                    onTap: () =>
+                                        controller.togglePlayPause(),
+                                    customBorder: const CircleBorder(),
+                                    child: Icon(
+                                      playing
+                                          ? Icons.pause_rounded
+                                          : Icons.play_arrow_rounded,
+                                      color: Colors.white,
+                                      size: 30,
+                                    ),
+                                  ),
                                 ),
                               );
                             },
@@ -138,13 +209,20 @@ class MiniPlayerBar extends StatelessWidget {
                             builder: (context, _) {
                               final canNext = controller.canSkipNext;
                               return IconButton(
+                                constraints: const BoxConstraints(
+                                  minWidth: 40,
+                                  minHeight: 40,
+                                ),
+                                padding: EdgeInsets.zero,
                                 tooltip: canNext
                                     ? 'Next track'
                                     : 'End of playlist',
-                                icon: const Icon(Icons.skip_next_rounded),
-                                color: canNext
-                                    ? pal.textPrimary
-                                    : pal.textSecondary.withValues(alpha: 0.38),
+                                icon: Icon(
+                                  Icons.skip_next_rounded,
+                                  color:
+                                      canNext ? iconColor : mutedIcon,
+                                  size: 30,
+                                ),
                                 onPressed: canNext
                                     ? () => controller.skipNext()
                                     : null,
@@ -154,44 +232,64 @@ class MiniPlayerBar extends StatelessWidget {
                         ],
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        left: 16,
-                        right: 16,
-                        bottom: 8,
-                      ),
-                      child: StreamBuilder<Duration>(
-                        stream: controller.audioPlayer.positionStream,
-                        builder: (context, posSnap) {
-                          return StreamBuilder<Duration?>(
-                            stream: controller.audioPlayer.durationStream,
-                            builder: (context, durSnap) {
-                              final dur = durSnap.data ?? controller.duration;
-                              final pos = posSnap.data ?? controller.position;
-                              final total = dur?.inMilliseconds ?? 0;
-                              final p = total > 0
-                                  ? (pos.inMilliseconds / total).clamp(0.0, 1.0)
-                                  : 0.0;
-                              return ClipRRect(
-                                borderRadius: BorderRadius.circular(2),
-                                child: LinearProgressIndicator(
-                                  value: p,
-                                  minHeight: 2,
-                                  backgroundColor: pal.textMuted.withValues(
-                                    alpha: 0.28,
-                                  ),
-                                  color: context.controlAccent.withValues(
-                                    alpha: 0.72,
-                                  ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                    child: StreamBuilder<Duration>(
+                      stream: controller.audioPlayer.positionStream,
+                      builder: (context, posSnap) {
+                        return StreamBuilder<Duration?>(
+                          stream: controller.audioPlayer.durationStream,
+                          builder: (context, durSnap) {
+                            final dur = durSnap.data ?? controller.duration;
+                            final pos = posSnap.data ?? controller.position;
+                            final total = dur?.inMilliseconds ?? 0;
+                            final p = total > 0
+                                ? (pos.inMilliseconds / total)
+                                    .clamp(0.0, 1.0)
+                                : 0.0;
+
+                            return SliderTheme(
+                              data: SliderThemeData(
+                                trackHeight: 3,
+                                activeTrackColor:
+                                    accent.withValues(alpha: 0.92),
+                                inactiveTrackColor: pal.textMuted.withValues(
+                                  alpha: 0.32,
                                 ),
-                              );
-                            },
-                          );
-                        },
-                      ),
+                                thumbColor: thumbColor,
+                                overlayColor:
+                                    WidgetStateColor.resolveWith(
+                                  (_) => Colors.transparent,
+                                ),
+                                thumbShape: _MiniPlayerThumbShape(
+                                  color: thumbColor,
+                                ),
+                                trackShape:
+                                    const RoundedRectSliderTrackShape(),
+                                padding: EdgeInsets.zero,
+                              ),
+                              child: Slider(
+                                value: p,
+                                onChanged: total <= 0
+                                    ? null
+                                    : (v) {
+                                        controller.seek(
+                                          Duration(
+                                            milliseconds: (v * total)
+                                                .round()
+                                                .clamp(0, total),
+                                          ),
+                                        );
+                                      },
+                              ),
+                            );
+                          },
+                        );
+                      },
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ),
