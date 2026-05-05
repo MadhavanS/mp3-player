@@ -36,6 +36,7 @@ class LibraryScreen extends StatefulWidget {
   final List<String> folderPaths;
   final VoidCallback onOpenDrawer;
   final VoidCallback onClearSongsBrowseFilter;
+
   /// When non-null (including empty), Songs tab limits to tracks whose paths match keys from Files.
   final ValueListenable<Set<String>?> songsBrowsePathKeys;
   final VoidCallback? onRefreshLibrary;
@@ -48,18 +49,24 @@ class LibraryScreenState extends State<LibraryScreen>
     with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   late TabController _tabController;
-  List<LibraryTabId> _visibleTabs = List<LibraryTabId>.from(LibraryTabId.values);
+  List<LibraryTabId> _visibleTabs = List<LibraryTabId>.from(
+    LibraryTabId.values,
+  );
   int _recentListRevision = 0;
 
   final GlobalKey _scrollAnchorSongs = GlobalKey(debugLabel: 'libScrollSongs');
-  final GlobalKey _scrollAnchorRecentAdded =
-      GlobalKey(debugLabel: 'libScrollRecentAdded');
-  final GlobalKey _scrollAnchorPlaylist =
-      GlobalKey(debugLabel: 'libScrollPlaylist');
-  final GlobalKey _scrollAnchorFavorites =
-      GlobalKey(debugLabel: 'libScrollFavorites');
-  final GlobalKey _scrollAnchorRecentPlayed =
-      GlobalKey(debugLabel: 'libScrollRecentPlayed');
+  final GlobalKey _scrollAnchorRecentAdded = GlobalKey(
+    debugLabel: 'libScrollRecentAdded',
+  );
+  final GlobalKey _scrollAnchorPlaylist = GlobalKey(
+    debugLabel: 'libScrollPlaylist',
+  );
+  final GlobalKey _scrollAnchorFavorites = GlobalKey(
+    debugLabel: 'libScrollFavorites',
+  );
+  final GlobalKey _scrollAnchorRecentPlayed = GlobalKey(
+    debugLabel: 'libScrollRecentPlayed',
+  );
 
   final ScrollController _songsScrollController = ScrollController();
   final ScrollController _recentAddedScrollController = ScrollController();
@@ -125,10 +132,7 @@ class LibraryScreenState extends State<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(
-      length: _visibleTabs.length,
-      vsync: this,
-    );
+    _tabController = TabController(length: _visibleTabs.length, vsync: this);
     _searchController.addListener(() => setState(() {}));
     _tabController.addListener(_onTabChanged);
     LibraryTabsStore.revision.addListener(_onLibraryTabsRevision);
@@ -153,7 +157,9 @@ class LibraryScreenState extends State<LibraryScreen>
     if (listEquals(_visibleTabs, use)) return;
     final oldLen = _visibleTabs.length;
     final oldIx = oldLen == 0 ? 0 : _tabController.index.clamp(0, oldLen - 1);
-    final oldId = _visibleTabs.isEmpty ? LibraryTabId.songs : _visibleTabs[oldIx];
+    final oldId = _visibleTabs.isEmpty
+        ? LibraryTabId.songs
+        : _visibleTabs[oldIx];
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _visibleTabs = List<LibraryTabId>.from(use);
@@ -237,8 +243,11 @@ class LibraryScreenState extends State<LibraryScreen>
     String query,
     String pathKey,
   ) {
-    final songsTabIndices =
-        _sortedSongsTabIndices(tracks, query, browsePathKeys);
+    final songsTabIndices = _sortedSongsTabIndices(
+      tracks,
+      query,
+      browsePathKeys,
+    );
     for (var i = 0; i < songsTabIndices.length; i++) {
       final fp = tracks[songsTabIndices[i]].filePath;
       if (fp != null && canonicalMusicLibraryPathKey(fp) == pathKey) {
@@ -293,11 +302,9 @@ class LibraryScreenState extends State<LibraryScreen>
       if (maxExtent <= 0) {
         target = 0;
       } else {
-        final scale =
-            totalItems <= 1 ? 0.0 : (clampedIndex / (totalItems - 1));
+        final scale = totalItems <= 1 ? 0.0 : (clampedIndex / (totalItems - 1));
         final proportional = scale * maxExtent;
-        final linear =
-            (index * _kLibraryListRowStride).clamp(0.0, maxExtent);
+        final linear = (index * _kLibraryListRowStride).clamp(0.0, maxExtent);
         target = switch (attempt % 3) {
           0 => proportional.clamp(0.0, maxExtent),
           1 => linear,
@@ -317,8 +324,7 @@ class LibraryScreenState extends State<LibraryScreen>
     if (pathKey.isEmpty) return;
 
     final tracks = player.metadataLibrary;
-    final searchQuery =
-        _effectiveLibrarySearchQuery(_searchController.text);
+    final searchQuery = _effectiveLibrarySearchQuery(_searchController.text);
     final browsePathKeys = widget.songsBrowsePathKeys.value;
 
     switch (_currentLibraryTabId) {
@@ -338,13 +344,13 @@ class LibraryScreenState extends State<LibraryScreen>
         );
         return;
       case LibraryTabId.recentlyAdded:
-        final ordered =
-            await RecentlyAddedStore.orderedPathsForLibrary(tracks);
+        final ordered = await RecentlyAddedStore.orderedPathsForLibrary(tracks);
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(ordered, browsePathKeys);
         paths = _filterPathsBySearch(paths, searchQuery, tracks);
-        final idx =
-            paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
+        final idx = paths.indexWhere(
+          (p) => canonicalMusicLibraryPathKey(p) == pathKey,
+        );
         if (idx < 0) return;
         await _coaxLazyListThenEnsureVisible(
           _recentAddedScrollController,
@@ -367,8 +373,9 @@ class LibraryScreenState extends State<LibraryScreen>
         if (ctx == null) {
           if (_playlistScrollController.hasClients) {
             final max = _playlistScrollController.position.maxScrollExtent;
-            _playlistScrollController
-                .jumpTo((120.0 + idx * 80).clamp(0.0, max));
+            _playlistScrollController.jumpTo(
+              (120.0 + idx * 80).clamp(0.0, max),
+            );
             await WidgetsBinding.instance.endOfFrame;
             if (!mounted) return;
             ctx = _scrollAnchorPlaylist.currentContext;
@@ -383,8 +390,9 @@ class LibraryScreenState extends State<LibraryScreen>
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(favPaths, null);
         paths = _filterPathsBySearch(paths, searchQuery, tracks);
-        final idx =
-            paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
+        final idx = paths.indexWhere(
+          (p) => canonicalMusicLibraryPathKey(p) == pathKey,
+        );
         if (idx < 0) return;
         await _coaxLazyListThenEnsureVisible(
           _favoritesScrollController,
@@ -398,8 +406,9 @@ class LibraryScreenState extends State<LibraryScreen>
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(played, browsePathKeys);
         paths = _filterPathsBySearch(paths, searchQuery, tracks);
-        final idx =
-            paths.indexWhere((p) => canonicalMusicLibraryPathKey(p) == pathKey);
+        final idx = paths.indexWhere(
+          (p) => canonicalMusicLibraryPathKey(p) == pathKey,
+        );
         if (idx < 0) return;
         await _coaxLazyListThenEnsureVisible(
           _recentPlayedScrollController,
@@ -417,15 +426,12 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   String _searchHintForTab(LibraryTabId id) => switch (id) {
-        LibraryTabId.songs ||
-        LibraryTabId.recentlyAdded ||
-        LibraryTabId.playlist =>
-          'Search by title (min. 3 characters)',
-        LibraryTabId.favourites =>
-          'Search favourites (min. 3 characters)',
-        LibraryTabId.recentlyPlayed =>
-          'Search RecentlyPlayed (min. 3 characters)',
-      };
+    LibraryTabId.songs ||
+    LibraryTabId.recentlyAdded ||
+    LibraryTabId.playlist => 'Search by title (min. 3 characters)',
+    LibraryTabId.favourites => 'Search favourites (min. 3 characters)',
+    LibraryTabId.recentlyPlayed => 'Search RecentlyPlayed (min. 3 characters)',
+  };
 
   List<String> _pathsMatchingBrowse(
     List<String> paths,
@@ -643,22 +649,25 @@ class LibraryScreenState extends State<LibraryScreen>
                               ),
                               IconButton(
                                 tooltip: 'Delete playlist',
-                                icon: Icon(Icons.delete_outline_rounded,
-                                    color: pal.textSecondary),
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: pal.textSecondary,
+                                ),
                                 onPressed: () async {
                                   final confirmed = await showDialog<bool>(
                                     context: ctx,
                                     builder: (dialogCtx) {
-                                      final scheme =
-                                          Theme.of(dialogCtx).colorScheme;
+                                      final scheme = Theme.of(
+                                        dialogCtx,
+                                      ).colorScheme;
                                       return AlertDialog(
                                         backgroundColor: pal.surface,
                                         title: Text(
                                           'Delete playlist?',
                                           style: theme.textTheme.titleLarge
                                               ?.copyWith(
-                                            color: pal.textPrimary,
-                                          ),
+                                                color: pal.textPrimary,
+                                              ),
                                         ),
                                         content: Text(
                                           'Remove “${sheetPlaylist.name}” '
@@ -666,20 +675,20 @@ class LibraryScreenState extends State<LibraryScreen>
                                           'Your music files stay on the device.',
                                           style: theme.textTheme.bodyMedium
                                               ?.copyWith(
-                                            color: pal.textSecondary,
-                                          ),
+                                                color: pal.textSecondary,
+                                              ),
                                         ),
                                         actions: [
                                           TextButton(
                                             onPressed: () => Navigator.of(
-                                                    dialogCtx)
-                                                .pop(false),
+                                              dialogCtx,
+                                            ).pop(false),
                                             child: const Text('Cancel'),
                                           ),
                                           FilledButton(
                                             onPressed: () => Navigator.of(
-                                                    dialogCtx)
-                                                .pop(true),
+                                              dialogCtx,
+                                            ).pop(true),
                                             style: FilledButton.styleFrom(
                                               backgroundColor: scheme.error,
                                               foregroundColor: scheme.onError,
@@ -692,7 +701,8 @@ class LibraryScreenState extends State<LibraryScreen>
                                   );
                                   if (confirmed != true) return;
                                   await UserPlaylistsStore.deletePlaylist(
-                                      sheetPlaylist.id);
+                                    sheetPlaylist.id,
+                                  );
                                 },
                               ),
                             ],
@@ -710,8 +720,7 @@ class LibraryScreenState extends State<LibraryScreen>
                           )
                         else ...[
                           Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                             child: Align(
                               alignment: Alignment.centerLeft,
                               child: FilledButton.tonalIcon(
@@ -731,102 +740,118 @@ class LibraryScreenState extends State<LibraryScreen>
                               ),
                             ),
                           ),
-                          SizedBox(
-                            height: min(
-                              MediaQuery.sizeOf(ctx).height * 0.55,
-                              24 + paths.length * 76.0,
-                            ),
-                            child: ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-                              itemCount: paths.length,
-                              separatorBuilder: (_, __) => Divider(
-                                height: 1,
-                                color: pal.dividerOnHero,
-                                indent: 88,
-                              ),
-                              itemBuilder: (context, i) {
-                                final path = paths[i];
-                                final track =
-                                    _trackForPath(path, library);
-                                final selected =
-                                    _isCurrentTrackPath(player, path);
-                                return Material(
-                                  color: selected
-                                      ? pal.onScaffold.withValues(alpha: 0.06)
-                                      : Colors.transparent,
-                                  child: ListTile(
-                                    contentPadding:
-                                        const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 4,
-                                    ),
-                                    leading: TrackAlbumArt(
-                                      track: track,
-                                      display: TrackArtDisplay.list,
-                                    ),
-                                    title: Text(
-                                      track.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          theme.textTheme.titleMedium?.copyWith(
-                                        color: pal.textPrimary,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                    subtitle: Text(
-                                      track.artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.bodySmall?.copyWith(
-                                        color: pal.textSecondary,
-                                      ),
-                                    ),
-                                    trailing: IconButton(
-                                      tooltip: 'Remove from playlist',
-                                      icon: Icon(
-                                        Icons.playlist_remove_rounded,
-                                        color: pal.textSecondary,
-                                      ),
-                                      onPressed: () {
-                                        final ctxTracks = paths
-                                            .map((p) =>
-                                                _trackForPath(p, library))
-                                            .toList();
-                                        unawaited(
-                                          _onTrackOverflow(
-                                            context,
-                                            player,
-                                            -1,
-                                            TrackOverflowAction
-                                                .removeFromPlaylist,
-                                            playbackOriginTab: LibraryTabId.playlist,
-                                            outsideQueue:
-                                                TrackOverflowQueueContext(
-                                              tracks: ctxTracks,
-                                              index: i,
-                                              playbackOriginTab: LibraryTabId.playlist,
-                                            ),
-                                            userPlaylistId: sheetPlaylist.id,
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                    onTap: () {
-                                      Navigator.of(ctx).pop();
-                                      _playOrderedPathsFrom(
-                                        context,
-                                        paths,
-                                        i,
-                                        playbackOriginTab: LibraryTabId.playlist,
-                                        playbackOriginUserPlaylistId:
-                                            sheetPlaylist.id,
-                                      );
-                                    },
+                          Builder(
+                            builder: (_) {
+                              final resolvedTracks = paths
+                                  .map((p) => _trackForPath(p, library))
+                                  .toList();
+                              return SizedBox(
+                                height: min(
+                                  MediaQuery.sizeOf(ctx).height * 0.55,
+                                  24 + paths.length * 76.0,
+                                ),
+                                child: ListView.separated(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    8,
+                                    8,
+                                    8,
+                                    24,
                                   ),
-                                );
-                              },
-                            ),
+                                  itemCount: paths.length,
+                                  separatorBuilder: (_, __) => Divider(
+                                    height: 1,
+                                    color: pal.dividerOnHero,
+                                    indent: 88,
+                                  ),
+                                  itemBuilder: (context, i) {
+                                    final path = paths[i];
+                                    final track = resolvedTracks[i];
+                                    final selected = _isCurrentTrackPath(
+                                      player,
+                                      path,
+                                    );
+                                    return Material(
+                                      color: selected
+                                          ? pal.onScaffold.withValues(
+                                              alpha: 0.06,
+                                            )
+                                          : Colors.transparent,
+                                      child: ListTile(
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 4,
+                                            ),
+                                        leading: TrackAlbumArt(
+                                          track: track,
+                                          display: TrackArtDisplay.list,
+                                        ),
+                                        title: Text(
+                                          track.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.titleMedium
+                                              ?.copyWith(
+                                                color: pal.textPrimary,
+                                                fontSize: 15,
+                                              ),
+                                        ),
+                                        subtitle: Text(
+                                          track.artist,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: pal.textSecondary,
+                                              ),
+                                        ),
+                                        trailing: IconButton(
+                                          tooltip: 'Remove from playlist',
+                                          icon: Icon(
+                                            Icons.playlist_remove_rounded,
+                                            color: pal.textSecondary,
+                                          ),
+                                          onPressed: () {
+                                            unawaited(
+                                              _onTrackOverflow(
+                                                context,
+                                                player,
+                                                -1,
+                                                TrackOverflowAction
+                                                    .removeFromPlaylist,
+                                                playbackOriginTab:
+                                                    LibraryTabId.playlist,
+                                                outsideQueue:
+                                                    TrackOverflowQueueContext(
+                                                      tracks: resolvedTracks,
+                                                      index: i,
+                                                      playbackOriginTab:
+                                                          LibraryTabId.playlist,
+                                                    ),
+                                                userPlaylistId:
+                                                    sheetPlaylist.id,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                        onTap: () {
+                                          Navigator.of(ctx).pop();
+                                          _playOrderedPathsFrom(
+                                            context,
+                                            paths,
+                                            i,
+                                            playbackOriginTab:
+                                                LibraryTabId.playlist,
+                                            playbackOriginUserPlaylistId:
+                                                sheetPlaylist.id,
+                                          );
+                                        },
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
+                            },
                           ),
                         ],
                       ],
@@ -856,8 +881,10 @@ class LibraryScreenState extends State<LibraryScreen>
           future: UserPlaylistsStore.loadAll(),
           builder: (context, snap) {
             final allPlaylists = snap.data ?? [];
-            final filteredPlaylists =
-                _filterPlaylistsBySearch(allPlaylists, query);
+            final filteredPlaylists = _filterPlaylistsBySearch(
+              allPlaylists,
+              query,
+            );
 
             final curPath = player.currentTrack?.filePath;
             final curKey = (curPath != null && curPath.isNotEmpty)
@@ -885,8 +912,9 @@ class LibraryScreenState extends State<LibraryScreen>
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              color: context.controlAccent
-                                  .withValues(alpha: 0.18),
+                              color: context.controlAccent.withValues(
+                                alpha: 0.18,
+                              ),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(
@@ -912,8 +940,9 @@ class LibraryScreenState extends State<LibraryScreen>
                                 Text(
                                   'Name a playlist, then add songs from any track menu.',
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color:
-                                        pal.textSecondary.withValues(alpha: 0.9),
+                                    color: pal.textSecondary.withValues(
+                                      alpha: 0.9,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -967,99 +996,103 @@ class LibraryScreenState extends State<LibraryScreen>
                 else
                   ...() {
                     var anchorIndex = -1;
-                    if (_isActiveTab(LibraryTabId.playlist) && curKey.isNotEmpty) {
+                    if (_isActiveTab(LibraryTabId.playlist) &&
+                        curKey.isNotEmpty) {
                       for (var j = 0; j < filteredPlaylists.length; j++) {
                         if (_userPlaylistContainsCurrentPath(
-                            filteredPlaylists[j], curKey)) {
+                          filteredPlaylists[j],
+                          curKey,
+                        )) {
                           anchorIndex = j;
                           break;
                         }
                       }
                     }
-                    return List.generate(
-                      filteredPlaylists.length,
-                      (i) {
-                        final pl = filteredPlaylists[i];
-                        final attachScrollKey =
-                            _isActiveTab(LibraryTabId.playlist) &&
-                                anchorIndex == i;
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (i > 0)
-                          Divider(
-                            height: 1,
-                            color: pal.dividerOnHero,
-                            indent: 56,
-                          ),
-                        Material(
-                          key: attachScrollKey ? _scrollAnchorPlaylist : null,
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: () {
-                              _showUserPlaylistSheet(
-                                context,
-                                pl,
-                                tracks,
-                                player,
-                              );
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 12,
-                              ),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    backgroundColor:
-                                        pal.onScaffold.withValues(alpha: 0.1),
-                                    child: Icon(
-                                      Icons.queue_music_rounded,
-                                      color: pal.onScaffold.withValues(alpha: 0.75),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 14),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          pl.name,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.titleMedium
-                                              ?.copyWith(
-                                            color: pal.onScaffold,
-                                            fontSize: 15,
-                                          ),
+                    return List.generate(filteredPlaylists.length, (i) {
+                      final pl = filteredPlaylists[i];
+                      final attachScrollKey =
+                          _isActiveTab(LibraryTabId.playlist) &&
+                          anchorIndex == i;
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (i > 0)
+                            Divider(
+                              height: 1,
+                              color: pal.dividerOnHero,
+                              indent: 56,
+                            ),
+                          Material(
+                            key: attachScrollKey ? _scrollAnchorPlaylist : null,
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                _showUserPlaylistSheet(
+                                  context,
+                                  pl,
+                                  tracks,
+                                  player,
+                                );
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      backgroundColor: pal.onScaffold
+                                          .withValues(alpha: 0.1),
+                                      child: Icon(
+                                        Icons.queue_music_rounded,
+                                        color: pal.onScaffold.withValues(
+                                          alpha: 0.75,
                                         ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          '${pl.paths.length} songs',
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                            color: pal.textMuted
-                                                .withValues(alpha: 0.92),
-                                          ),
-                                        ),
-                                      ],
+                                      ),
                                     ),
-                                  ),
-                                  Icon(
-                                    Icons.chevron_right_rounded,
-                                    color: pal.onScaffold.withValues(alpha: 0.45),
-                                  ),
-                                ],
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            pl.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.titleMedium
+                                                ?.copyWith(
+                                                  color: pal.onScaffold,
+                                                  fontSize: 15,
+                                                ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${pl.paths.length} songs',
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                                  color: pal.textMuted
+                                                      .withValues(alpha: 0.92),
+                                                ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: pal.onScaffold.withValues(
+                                        alpha: 0.45,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    );
-                      },
-                    );
+                        ],
+                      );
+                    });
                   }(),
               ],
             );
@@ -1144,8 +1177,11 @@ class LibraryScreenState extends State<LibraryScreen>
             final tracks = player.metadataLibrary;
             final rawSearch = _searchController.text.trim();
             final searchQuery = _effectiveLibrarySearchQuery(rawSearch);
-            final songsTabIndices =
-                _sortedSongsTabIndices(tracks, searchQuery, browsePathKeys);
+            final songsTabIndices = _sortedSongsTabIndices(
+              tracks,
+              searchQuery,
+              browsePathKeys,
+            );
 
             final pal = context.palette;
             final hint = _searchHintForTab(_currentLibraryTabId);
@@ -1177,8 +1213,11 @@ class LibraryScreenState extends State<LibraryScreen>
                                 color: pal.onScaffold,
                                 fontSize: 15,
                               ),
-                              decoration:
-                                  _searchDecoration(pal, theme, hintText: hint),
+                              decoration: _searchDecoration(
+                                pal,
+                                theme,
+                                hintText: hint,
+                              ),
                             ),
                           ),
                           IconButton(
@@ -1216,31 +1255,34 @@ class LibraryScreenState extends State<LibraryScreen>
                         controller: _tabController,
                         isScrollable: true,
                         padding: const EdgeInsets.only(left: 2, right: 8),
-                        labelPadding: const EdgeInsets.symmetric(horizontal: 14),
+                        labelPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                        ),
                         tabAlignment: TabAlignment.start,
                         indicatorColor: pal.onScaffold,
                         indicatorWeight: 2.8,
                         indicatorSize: TabBarIndicatorSize.label,
                         labelColor: pal.onScaffold,
-                        unselectedLabelColor:
-                            pal.textMuted.withValues(alpha: 0.76),
-                        dividerColor:
-                            pal.onScaffold.withValues(alpha: 0.14),
+                        unselectedLabelColor: pal.textMuted.withValues(
+                          alpha: 0.76,
+                        ),
+                        dividerColor: pal.onScaffold.withValues(alpha: 0.14),
                         dividerHeight: 1,
                         labelStyle: theme.textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w700,
                           letterSpacing: -0.2,
                           fontSize: 15,
                         ),
-                        unselectedLabelStyle:
-                            theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: -0.2,
-                          fontSize: 15,
-                        ),
+                        unselectedLabelStyle: theme.textTheme.titleSmall
+                            ?.copyWith(
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: -0.2,
+                              fontSize: 15,
+                            ),
                         splashFactory: NoSplash.splashFactory,
-                        overlayColor:
-                            WidgetStateProperty.all<Color>(Colors.transparent),
+                        overlayColor: WidgetStateProperty.all<Color>(
+                          Colors.transparent,
+                        ),
                         tabs: [
                           for (final id in _visibleTabs)
                             Tab(text: id.shortTitle),
@@ -1290,49 +1332,49 @@ class LibraryScreenState extends State<LibraryScreen>
   ) {
     return switch (id) {
       LibraryTabId.songs => _buildTracksTab(
-            theme,
-            context,
-            tracks,
-            songsTabIndices,
-            player,
-            searchQuery,
-            browsePathKeys: browsePathKeys,
-            onClearBrowseFolder: browsePathKeys == null
-                ? null
-                : widget.onClearSongsBrowseFilter,
-          ),
+        theme,
+        context,
+        tracks,
+        songsTabIndices,
+        player,
+        searchQuery,
+        browsePathKeys: browsePathKeys,
+        onClearBrowseFolder: browsePathKeys == null
+            ? null
+            : widget.onClearSongsBrowseFilter,
+      ),
       LibraryTabId.recentlyAdded => _buildRecentlyAddedTab(
-          theme,
-          pal,
-          searchQuery,
-          player,
-          tracks,
-          browsePathKeys,
-        ),
+        theme,
+        pal,
+        searchQuery,
+        player,
+        tracks,
+        browsePathKeys,
+      ),
       LibraryTabId.playlist => _buildPlaylistTab(
-          theme,
-          context,
-          pal,
-          searchQuery,
-          tracks,
-          player,
-        ),
+        theme,
+        context,
+        pal,
+        searchQuery,
+        tracks,
+        player,
+      ),
       LibraryTabId.favourites => _buildFavoritesTab(
-          theme,
-          pal,
-          searchQuery,
-          player,
-          tracks,
-          null,
-        ),
+        theme,
+        pal,
+        searchQuery,
+        player,
+        tracks,
+        null,
+      ),
       LibraryTabId.recentlyPlayed => _buildRecentTab(
-          theme,
-          pal,
-          searchQuery,
-          player,
-          tracks,
-          browsePathKeys,
-        ),
+        theme,
+        pal,
+        searchQuery,
+        player,
+        tracks,
+        browsePathKeys,
+      ),
     };
   }
 
@@ -1352,14 +1394,11 @@ class LibraryScreenState extends State<LibraryScreen>
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
               return Center(
-                child: CircularProgressIndicator(
-                  color: context.controlAccent,
-                ),
+                child: CircularProgressIndicator(color: context.controlAccent),
               );
             }
 
-            var paths =
-                _pathsMatchingBrowse(snap.data ?? [], browsePathKeys);
+            var paths = _pathsMatchingBrowse(snap.data ?? [], browsePathKeys);
             paths = _filterPathsBySearch(paths, rawQuery, tracks);
 
             if ((snap.data ?? []).isEmpty) {
@@ -1414,11 +1453,8 @@ class LibraryScreenState extends State<LibraryScreen>
               controller: _favoritesScrollController,
               padding: const EdgeInsets.only(bottom: 8),
               itemCount: paths.length,
-              separatorBuilder: (_, __) => Divider(
-                height: 1,
-                color: pal.dividerOnHero,
-                indent: 88,
-              ),
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: pal.dividerOnHero, indent: 88),
               itemBuilder: (context, i) {
                 final path = paths[i];
                 final track = _trackForPath(path, library);
@@ -1438,88 +1474,90 @@ class LibraryScreenState extends State<LibraryScreen>
                       i,
                       playbackOriginTab: LibraryTabId.favourites,
                     ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              TrackAlbumArt(
-                                track: track,
-                                display: TrackArtDisplay.list,
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      track.genres.isEmpty
-                                          ? track.metaLine
-                                          : '${track.metaLine} · ${track.genres}',
-                                      style: theme.textTheme.labelSmall?.copyWith(
-                                        color: pal.textMuted.withValues(alpha: 0.9),
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      track.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.titleMedium?.copyWith(
-                                        color: pal.onScaffold,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      track.artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.bodyMedium?.copyWith(
-                                        color: pal.textSecondary.withValues(alpha: 0.95),
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              TrackOverflowMenuWithFavourite(
-                                pal: pal,
-                                track: track,
-                                onSelected: (action) {
-                                  final ctxTracks = paths
-                                      .map((p) =>
-                                          _trackForPath(p, library))
-                                      .toList();
-                                  unawaited(
-                                    _onTrackOverflow(
-                                      context,
-                                      player,
-                                      plIndex >= 0 ? plIndex : -1,
-                                      action,
-                                      playbackOriginTab: LibraryTabId.favourites,
-                                      outsideQueue: plIndex < 0
-                                          ? TrackOverflowQueueContext(
-                                              tracks: ctxTracks,
-                                              index: i,
-                                              playbackOriginTab: LibraryTabId.favourites,
-                                            )
-                                          : null,
-                                    ),
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
                       ),
-                    );
-                  },
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          TrackAlbumArt(
+                            track: track,
+                            display: TrackArtDisplay.list,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  track.genres.isEmpty
+                                      ? track.metaLine
+                                      : '${track.metaLine} · ${track.genres}',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: pal.textMuted.withValues(alpha: 0.9),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  track.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: pal.onScaffold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  track.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: pal.textSecondary.withValues(
+                                      alpha: 0.95,
+                                    ),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TrackOverflowMenuWithFavourite(
+                            pal: pal,
+                            track: track,
+                            onSelected: (action) {
+                              final resolvedTracks = paths
+                                  .map((p) => _trackForPath(p, library))
+                                  .toList();
+                              unawaited(
+                                _onTrackOverflow(
+                                  context,
+                                  player,
+                                  plIndex >= 0 ? plIndex : -1,
+                                  action,
+                                  playbackOriginTab: LibraryTabId.favourites,
+                                  outsideQueue: plIndex < 0
+                                      ? TrackOverflowQueueContext(
+                                          tracks: resolvedTracks,
+                                          index: i,
+                                          playbackOriginTab:
+                                              LibraryTabId.favourites,
+                                        )
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 );
+              },
+            );
           },
         );
       },
@@ -1641,11 +1679,8 @@ class LibraryScreenState extends State<LibraryScreen>
               controller: _recentAddedScrollController,
               padding: const EdgeInsets.only(bottom: 8),
               itemCount: paths.length,
-              separatorBuilder: (_, __) => Divider(
-                height: 1,
-                color: pal.dividerOnHero,
-                indent: 88,
-              ),
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: pal.dividerOnHero, indent: 88),
               itemBuilder: (context, i) {
                 final path = paths[i];
                 final track = _trackForPath(path, library);
@@ -1671,87 +1706,84 @@ class LibraryScreenState extends State<LibraryScreen>
                         vertical: 12,
                       ),
                       child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              TrackAlbumArt(
-                                track: track,
-                                display: TrackArtDisplay.list,
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      track.genres.isEmpty
-                                          ? track.metaLine
-                                          : '${track.metaLine} · ${track.genres}',
-                                      style:
-                                          theme.textTheme.labelSmall?.copyWith(
-                                        color:
-                                            pal.textMuted.withValues(alpha: 0.9),
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      track.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          theme.textTheme.titleMedium?.copyWith(
-                                        color: pal.onScaffold,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      track.artist,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          theme.textTheme.bodyMedium?.copyWith(
-                                        color: pal.textSecondary
-                                            .withValues(alpha: 0.95),
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              TrackOverflowMenuWithFavourite(
-                                pal: pal,
-                                track: track,
-                                onSelected: (action) {
-                                  final ctxTracks = paths
-                                      .map((p) =>
-                                          _trackForPath(p, library))
-                                      .toList();
-                                  unawaited(
-                                    _onTrackOverflow(
-                                      context,
-                                      player,
-                                      plIndex >= 0 ? plIndex : -1,
-                                      action,
-                                      playbackOriginTab: LibraryTabId.recentlyAdded,
-                                      outsideQueue: plIndex < 0
-                                          ? TrackOverflowQueueContext(
-                                              tracks: ctxTracks,
-                                              index: i,
-                                              playbackOriginTab: LibraryTabId.recentlyAdded,
-                                            )
-                                          : null,
-                                    ),
-                                  );
-                                },
-                              ),
-                            ],
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          TrackAlbumArt(
+                            track: track,
+                            display: TrackArtDisplay.list,
                           ),
-                        ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  track.genres.isEmpty
+                                      ? track.metaLine
+                                      : '${track.metaLine} · ${track.genres}',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: pal.textMuted.withValues(alpha: 0.9),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  track.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: pal.onScaffold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  track.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: pal.textSecondary.withValues(
+                                      alpha: 0.95,
+                                    ),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TrackOverflowMenuWithFavourite(
+                            pal: pal,
+                            track: track,
+                            onSelected: (action) {
+                              final resolvedTracks = paths
+                                  .map((p) => _trackForPath(p, library))
+                                  .toList();
+                              unawaited(
+                                _onTrackOverflow(
+                                  context,
+                                  player,
+                                  plIndex >= 0 ? plIndex : -1,
+                                  action,
+                                  playbackOriginTab: LibraryTabId.recentlyAdded,
+                                  outsideQueue: plIndex < 0
+                                      ? TrackOverflowQueueContext(
+                                          tracks: resolvedTracks,
+                                          index: i,
+                                          playbackOriginTab:
+                                              LibraryTabId.recentlyAdded,
+                                        )
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 );
+              },
+            );
           },
         );
       },
@@ -1772,9 +1804,7 @@ class LibraryScreenState extends State<LibraryScreen>
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
           return Center(
-            child: CircularProgressIndicator(
-              color: context.controlAccent,
-            ),
+            child: CircularProgressIndicator(color: context.controlAccent),
           );
         }
 
@@ -1838,11 +1868,8 @@ class LibraryScreenState extends State<LibraryScreen>
           controller: _recentPlayedScrollController,
           padding: const EdgeInsets.only(bottom: 8),
           itemCount: paths.length,
-          separatorBuilder: (_, __) => Divider(
-            height: 1,
-            color: pal.dividerOnHero,
-            indent: 88,
-          ),
+          separatorBuilder: (_, __) =>
+              Divider(height: 1, color: pal.dividerOnHero, indent: 88),
           itemBuilder: (context, i) {
             final path = paths[i];
             final track = _trackForPath(path, library);
@@ -1904,8 +1931,9 @@ class LibraryScreenState extends State<LibraryScreen>
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyMedium?.copyWith(
-                                color:
-                                    pal.textSecondary.withValues(alpha: 0.95),
+                                color: pal.textSecondary.withValues(
+                                  alpha: 0.95,
+                                ),
                                 fontSize: 13,
                               ),
                             ),
@@ -1916,9 +1944,8 @@ class LibraryScreenState extends State<LibraryScreen>
                         pal: pal,
                         track: track,
                         onSelected: (action) {
-                          final ctxTracks = paths
-                              .map((p) =>
-                                  _trackForPath(p, library))
+                          final resolvedTracks = paths
+                              .map((p) => _trackForPath(p, library))
                               .toList();
                           unawaited(
                             _onTrackOverflow(
@@ -1929,9 +1956,10 @@ class LibraryScreenState extends State<LibraryScreen>
                               playbackOriginTab: LibraryTabId.recentlyPlayed,
                               outsideQueue: plIndex < 0
                                   ? TrackOverflowQueueContext(
-                                      tracks: ctxTracks,
+                                      tracks: resolvedTracks,
                                       index: i,
-                                      playbackOriginTab: LibraryTabId.recentlyPlayed,
+                                      playbackOriginTab:
+                                          LibraryTabId.recentlyPlayed,
                                     )
                                   : null,
                             ),
@@ -2055,8 +2083,7 @@ class LibraryScreenState extends State<LibraryScreen>
       );
     }
 
-    final filteredTracks =
-        filteredIndices.map((idx) => tracks[idx]).toList();
+    final filteredTracks = filteredIndices.map((idx) => tracks[idx]).toList();
     final orderedPaths = filteredTracks
         .map((t) => t.filePath)
         .whereType<String>()
@@ -2067,11 +2094,8 @@ class LibraryScreenState extends State<LibraryScreen>
       cacheExtent: 4000,
       padding: const EdgeInsets.only(bottom: 8),
       itemCount: filteredIndices.length,
-      separatorBuilder: (_, __) => Divider(
-        height: 1,
-        color: pal.dividerOnHero,
-        indent: 88,
-      ),
+      separatorBuilder: (_, __) =>
+          Divider(height: 1, color: pal.dividerOnHero, indent: 88),
       itemBuilder: (context, i) {
         final catalogIndex = filteredIndices[i];
         final track = tracks[catalogIndex];
@@ -2134,6 +2158,7 @@ class _TrackTile extends StatelessWidget {
 
   final TrackItem track;
   final bool selected;
+
   /// When true (Songs tab), shows a play icon next to the title for the now-playing row.
   final bool showPlayingIcon;
   final Key? rowKey;
@@ -2147,7 +2172,9 @@ class _TrackTile extends StatelessWidget {
 
     return Material(
       key: rowKey,
-      color: selected ? pal.onScaffold.withValues(alpha: 0.08) : Colors.transparent,
+      color: selected
+          ? pal.onScaffold.withValues(alpha: 0.08)
+          : Colors.transparent,
       child: InkWell(
         onTap: onTap,
         child: Padding(

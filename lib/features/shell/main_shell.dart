@@ -8,6 +8,7 @@ import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/file_path_mtime_sort.dart';
 import '../../services/mp3_scanner.dart';
+import '../../services/playback_session_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/saved_music_folders.dart';
@@ -45,10 +46,11 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey<LibraryScreenState> _libraryScreenKey =
       GlobalKey<LibraryScreenState>();
+
   /// When non-null from Files browser, Songs tab restricts to paths in this exact set (from scanMp3Files).
   final ValueNotifier<Set<String>?> _songsBrowsePathKeysNotifier =
       ValueNotifier<Set<String>?>(null);
@@ -56,13 +58,15 @@ class _MainShellState extends State<MainShell> {
   List<String> _folderPaths = [];
   bool _scanning = false;
   PlayerController? _playerForRecentHistory;
+  PlayerController? _playerRef;
   String? _dispatchedRecentPath;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _restoreFoldersAndScan();
+      if (mounted) unawaited(_bootstrapShellAsync());
     });
   }
 
@@ -70,11 +74,67 @@ class _MainShellState extends State<MainShell> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final player = PlayerController.of(context);
+    _playerRef = player;
     if (!identical(_playerForRecentHistory, player)) {
       _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
       _playerForRecentHistory = player;
       player.addListener(_recordRecentlyPlayedTrack);
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(_persistSession());
+    }
+  }
+
+  Future<void> _bootstrapShellAsync() async {
+    final showSettings = await PlaybackSessionStore.loadShellPageIsSettings();
+    final browseKeys = await PlaybackSessionStore.loadBrowsePathKeys();
+    final paths = await SavedMusicFolders.load();
+    if (!mounted) return;
+    setState(() {
+      _folderPaths = List<String>.from(paths);
+      _page = showSettings ? _ShellPage.settings : _ShellPage.library;
+      if (browseKeys != null && browseKeys.isNotEmpty) {
+        _songsBrowsePathKeysNotifier.value = browseKeys;
+      }
+    });
+    final player = PlayerController.of(context);
+    if (browseKeys != null && browseKeys.isNotEmpty) {
+      player.setPlaybackPathKeyScope(browseKeys);
+    }
+    if (paths.isEmpty) return;
+    await _scanFoldersAndSetPlaylist(
+      paths,
+      playAfter: false,
+      tryPersistedPlayback: true,
+    );
+  }
+
+  Future<void> _persistSession() async {
+    try {
+      final p = _playerRef;
+      if (p != null) {
+        await PlaybackSessionStore.savePlayer(p);
+      }
+      await PlaybackSessionStore.saveBrowsePathKeys(
+        _songsBrowsePathKeysNotifier.value,
+      );
+    } catch (e, st) {
+      debugPrint('_persistSession: $e\n$st');
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_persistSession());
+    _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
+    _songsBrowsePathKeysNotifier.dispose();
+    super.dispose();
   }
 
   void _recordRecentlyPlayedTrack() {
@@ -86,21 +146,6 @@ class _MainShellState extends State<MainShell> {
     if (path == _dispatchedRecentPath) return;
     _dispatchedRecentPath = path;
     unawaited(RecentlyPlayedStore.recordPlay(path));
-  }
-
-  @override
-  void dispose() {
-    _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
-    _songsBrowsePathKeysNotifier.dispose();
-    super.dispose();
-  }
-
-  Future<void> _restoreFoldersAndScan() async {
-    final paths = await SavedMusicFolders.load();
-    if (!mounted) return;
-    setState(() => _folderPaths = List<String>.from(paths));
-    if (paths.isEmpty) return;
-    await _scanFoldersAndSetPlaylist(paths, playAfter: false);
   }
 
   /// Merges unique MP3 paths from all roots, then sorts by file last-modified (newest first).
@@ -122,18 +167,25 @@ class _MainShellState extends State<MainShell> {
     required bool playAfter,
     int startIndex = 0,
     bool preservePlaybackAfterRescan = false,
+    bool tryPersistedPlayback = false,
   }) async {
     final player = PlayerController.of(context);
-    final pathToPreserve =
-        preservePlaybackAfterRescan ? player.currentTrack?.filePath : null;
+    final pathToPreserve = preservePlaybackAfterRescan
+        ? player.currentTrack?.filePath
+        : null;
     final wasPlaying = preservePlaybackAfterRescan && player.isPlaying;
-    final playbackPosition =
-        preservePlaybackAfterRescan ? player.position : Duration.zero;
+    final playbackPosition = preservePlaybackAfterRescan
+        ? player.position
+        : Duration.zero;
 
     if (paths.isEmpty) {
       await RecentlyAddedStore.mergeScanPaths([]);
       player.setLibraryCatalog([]);
-      await player.setPlaylist([], startIndex: 0, playbackOriginTab: LibraryTabId.songs);
+      await player.setPlaylist(
+        [],
+        startIndex: 0,
+        playbackOriginTab: LibraryTabId.songs,
+      );
       return;
     }
 
@@ -156,39 +208,81 @@ class _MainShellState extends State<MainShell> {
         ),
       );
       player.setLibraryCatalog([]);
-      await player.setPlaylist([], startIndex: 0, playbackOriginTab: LibraryTabId.songs);
+      await player.setPlaylist(
+        [],
+        startIndex: 0,
+        playbackOriginTab: LibraryTabId.songs,
+      );
       return;
     }
 
     final tracks = files.map(TrackItem.fromFilePath).toList();
     player.setLibraryCatalog(tracks);
-    var resolvedStart = startIndex.clamp(0, tracks.length - 1);
-    if (pathToPreserve != null) {
-      final idx = tracks.indexWhere((t) => t.filePath == pathToPreserve);
-      if (idx >= 0) resolvedStart = idx;
+
+    if (preservePlaybackAfterRescan) {
+      var resolvedStart = startIndex.clamp(0, tracks.length - 1);
+      if (pathToPreserve != null) {
+        final idx = tracks.indexWhere((t) => t.filePath == pathToPreserve);
+        if (idx >= 0) resolvedStart = idx;
+      }
+      await player.setPlaylist(
+        tracks,
+        startIndex: resolvedStart,
+        playbackOriginTab: LibraryTabId.songs,
+      );
+      if (pathToPreserve != null && tracks.isNotEmpty) {
+        final atPath =
+            tracks[resolvedStart.clamp(0, tracks.length - 1)].filePath;
+        if (atPath == pathToPreserve && playbackPosition > Duration.zero) {
+          await player.seek(playbackPosition);
+        }
+      }
+      if (playAfter) {
+        await player.play();
+      } else {
+        if (wasPlaying) {
+          await player.play();
+        } else {
+          await player.pause();
+        }
+      }
+      if (!kIsWeb && mounted) {
+        enrichPlaylistTracks(
+          tracks: tracks,
+          onTrackUpdated: player.updateTrackByPath,
+        ).catchError((Object e, StackTrace st) {
+          debugPrint('enrichPlaylistTracks: $e\n$st');
+        });
+      }
+      return;
     }
 
+    if (tryPersistedPlayback) {
+      final restored = await PlaybackSessionStore.restorePlayer(player, tracks);
+      if (!mounted) return;
+      if (restored) {
+        if (playAfter) await player.play();
+        if (!kIsWeb && mounted) {
+          enrichPlaylistTracks(
+            tracks: tracks,
+            onTrackUpdated: player.updateTrackByPath,
+          ).catchError((Object e, StackTrace st) {
+            debugPrint('enrichPlaylistTracks: $e\n$st');
+          });
+        }
+        return;
+      }
+    }
+
+    var resolvedStart = startIndex.clamp(0, tracks.length - 1);
     await player.setPlaylist(
       tracks,
       startIndex: resolvedStart,
       playbackOriginTab: LibraryTabId.songs,
     );
 
-    if (preservePlaybackAfterRescan && pathToPreserve != null && tracks.isNotEmpty) {
-      final atPath = tracks[resolvedStart].filePath;
-      if (atPath == pathToPreserve && playbackPosition > Duration.zero) {
-        await player.seek(playbackPosition);
-      }
-    }
-
     if (playAfter) {
       await player.play();
-    } else if (preservePlaybackAfterRescan) {
-      if (wasPlaying) {
-        await player.play();
-      } else {
-        await player.pause();
-      }
     }
 
     if (!kIsWeb && mounted) {
@@ -205,18 +299,18 @@ class _MainShellState extends State<MainShell> {
     await SavedMusicFolders.save(paths);
     if (!mounted) return;
     setState(() => _folderPaths = List<String>.from(paths));
-    await _scanFoldersAndSetPlaylist(paths, playAfter: false);
+    await _scanFoldersAndSetPlaylist(
+      paths,
+      playAfter: false,
+      tryPersistedPlayback: true,
+    );
   }
 
   Future<void> _refreshLibraryScan() async {
     if (_folderPaths.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Add music folders in Settings first.',
-          ),
-        ),
+        const SnackBar(content: Text('Add music folders in Settings first.')),
       );
       return;
     }
@@ -233,10 +327,12 @@ class _MainShellState extends State<MainShell> {
 
   void _goLibrary() {
     setState(() => _page = _ShellPage.library);
+    unawaited(PlaybackSessionStore.saveShellPageIsSettings(false));
   }
 
   void _goSettings() {
     setState(() => _page = _ShellPage.settings);
+    unawaited(PlaybackSessionStore.saveShellPageIsSettings(true));
   }
 
   void _openNowPlaying() {
@@ -255,8 +351,7 @@ class _MainShellState extends State<MainShell> {
             child: NowPlayingScreen(
               onCollapse: () {
                 Navigator.of(context).pop();
-                final tabId =
-                    player.playbackOriginTab ?? LibraryTabId.songs;
+                final tabId = player.playbackOriginTab ?? LibraryTabId.songs;
                 final userPlaylistId = player.playbackOriginUserPlaylistId;
                 _goLibrary();
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -292,23 +387,20 @@ class _MainShellState extends State<MainShell> {
     TrackOverflowAction action, {
     LibraryTabId? playbackOriginTab,
     TrackOverflowQueueContext? outsideQueue,
-  }) =>
-      applyTrackOverflowAction(
-        context,
-        player,
-        playlistIndex,
-        action,
-        playbackOriginTab: playbackOriginTab,
-        outsideQueue: outsideQueue,
-      );
+  }) => applyTrackOverflowAction(
+    context,
+    player,
+    playlistIndex,
+    action,
+    playbackOriginTab: playbackOriginTab,
+    outsideQueue: outsideQueue,
+  );
 
   Future<void> _openFilesExplorerScreen() async {
     if (_folderPaths.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Add music folders in Settings first.'),
-        ),
+        const SnackBar(content: Text('Add music folders in Settings first.')),
       );
       return;
     }
@@ -325,6 +417,7 @@ class _MainShellState extends State<MainShell> {
       final keys = Set<String>.from(pickedKeys);
       _songsBrowsePathKeysNotifier.value = keys;
       PlayerController.of(context).setPlaybackPathKeyScope(keys);
+      unawaited(PlaybackSessionStore.saveBrowsePathKeys(keys));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _libraryScreenKey.currentState?.switchToSongsTab();
@@ -366,8 +459,7 @@ class _MainShellState extends State<MainShell> {
                   ListTile(
                     leading: const Icon(Icons.library_music_rounded),
                     title: const Text('Library'),
-                    selected:
-                        _page == _ShellPage.library,
+                    selected: _page == _ShellPage.library,
                     onTap: () {
                       Navigator.pop(context);
                       _goLibrary();
@@ -416,16 +508,19 @@ class _MainShellState extends State<MainShell> {
                             songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
                             onClearSongsBrowseFilter: () {
                               _songsBrowsePathKeysNotifier.value = null;
-                              PlayerController.of(context)
-                                  .setPlaybackPathKeyScope(null);
+                              PlayerController.of(
+                                context,
+                              ).setPlaybackPathKeyScope(null);
+                              unawaited(
+                                PlaybackSessionStore.saveBrowsePathKeys(null),
+                              );
                             },
                             onOpenDrawer: _openDrawer,
-                            onRefreshLibrary:
-                                _folderPaths.isEmpty || _scanning
-                                    ? null
-                                    : () {
-                                        unawaited(_refreshLibraryScan());
-                                      },
+                            onRefreshLibrary: _folderPaths.isEmpty || _scanning
+                                ? null
+                                : () {
+                                    unawaited(_refreshLibraryScan());
+                                  },
                           )
                         : SettingsScreen(
                             folderPaths: _folderPaths,
@@ -442,10 +537,7 @@ class _MainShellState extends State<MainShell> {
                           ),
                   ),
                   if (current != null)
-                    MiniPlayerBar(
-                      controller: player,
-                      onTap: _openNowPlaying,
-                    ),
+                    MiniPlayerBar(controller: player, onTap: _openNowPlaying),
                 ],
               ),
               if (_scanning)

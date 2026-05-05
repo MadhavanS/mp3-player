@@ -12,13 +12,17 @@ enum PlaylistRepeatMode { off, all, one }
 /// Local playback + playlist index. Exposes [audioPlayer] for streams in the UI.
 class PlayerController extends ChangeNotifier {
   PlayerController() {
-    _playerStateSub = _player.playerStateStream.listen((_) => notifyListeners());
-    _processingSub = _player.processingStateStream.listen(_onProcessingState);
+    // Single subscription: listening to [processingStateStream] and
+    // [playerStateStream] both triggered platform init; concurrent inits caused
+    // "Platform player … already exists" on some devices (just_audio / Android).
+    _playerStateSub = _player.playerStateStream.listen((state) {
+      _onProcessingState(state.processingState);
+      notifyListeners();
+    });
   }
 
   final AudioPlayer _player = AudioPlayer();
   late final StreamSubscription<PlayerState> _playerStateSub;
-  late final StreamSubscription<ProcessingState> _processingSub;
 
   List<TrackItem> _playlist = [];
   int _index = 0;
@@ -47,7 +51,8 @@ class PlayerController extends ChangeNotifier {
 
   AudioPlayer get audioPlayer => _player;
 
-  List<TrackItem> get libraryCatalog => List<TrackItem>.unmodifiable(_libraryCatalog);
+  List<TrackItem> get libraryCatalog =>
+      List<TrackItem>.unmodifiable(_libraryCatalog);
 
   /// Use for tag resolution in Library: full scan when available, else active queue.
   List<TrackItem> get metadataLibrary =>
@@ -79,8 +84,9 @@ class PlayerController extends ChangeNotifier {
     return _shuffle ? _shuffleOrder[_shufflePos] : _index;
   }
 
-  TrackItem? get currentTrack =>
-      _playlist.isEmpty ? null : _playlist[currentIndex.clamp(0, _playlist.length - 1)];
+  TrackItem? get currentTrack => _playlist.isEmpty
+      ? null
+      : _playlist[currentIndex.clamp(0, _playlist.length - 1)];
 
   /// Track that will play after the current one ([skipNext] semantics), or `null`
   /// when nothing follows (end of queue without [PlaylistRepeatMode.all] wrap).
@@ -135,8 +141,9 @@ class PlayerController extends ChangeNotifier {
 
   /// Limits next/previous and repeat-all to tracks inside the scoped folder (see Files flow).
   void setPlaybackPathKeyScope(Set<String>? pathKeys) {
-    _playbackPathKeysScope =
-        pathKeys == null ? null : Set<String>.from(pathKeys);
+    _playbackPathKeysScope = pathKeys == null
+        ? null
+        : Set<String>.from(pathKeys);
     if (_playbackPathKeysScope != null) {
       _resetShuffleState();
     }
@@ -176,7 +183,8 @@ class PlayerController extends ChangeNotifier {
   Duration? get duration => _player.duration;
 
   static PlayerController of(BuildContext context) {
-    final scope = context.dependOnInheritedWidgetOfExactType<PlayerControllerScope>();
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<PlayerControllerScope>();
     assert(scope != null, 'PlayerControllerScope not found above MaterialApp');
     return scope!.controller;
   }
@@ -186,7 +194,8 @@ class PlayerController extends ChangeNotifier {
       _previousProcessing = state;
       return;
     }
-    final enteredComplete = _previousProcessing != ProcessingState.completed &&
+    final enteredComplete =
+        _previousProcessing != ProcessingState.completed &&
         state == ProcessingState.completed;
     _previousProcessing = state;
     if (enteredComplete) {
@@ -218,10 +227,9 @@ class PlayerController extends ChangeNotifier {
   }) async {
     if (playbackOriginTab != null) {
       _playbackOriginTab = playbackOriginTab;
-      _playbackOriginUserPlaylistId =
-          playbackOriginTab == LibraryTabId.playlist
-              ? playbackOriginUserPlaylistId
-              : null;
+      _playbackOriginUserPlaylistId = playbackOriginTab == LibraryTabId.playlist
+          ? playbackOriginUserPlaylistId
+          : null;
     }
     _playlist = List<TrackItem>.from(tracks);
     _resetShuffleState();
@@ -271,10 +279,7 @@ class PlayerController extends ChangeNotifier {
   static bool _sameQueuedIdentity(TrackItem a, TrackItem b) {
     final pa = a.filePath;
     final pb = b.filePath;
-    if (pa != null &&
-        pa.isNotEmpty &&
-        pb != null &&
-        pb.isNotEmpty) {
+    if (pa != null && pa.isNotEmpty && pb != null && pb.isNotEmpty) {
       return pa == pb;
     }
     return a.title == b.title && a.artist == b.artist;
@@ -604,11 +609,122 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Persisted playback snapshot (`PlaybackSessionStore` v2 schema).
+  Map<String, dynamic> buildPlaybackPersistenceJson() {
+    final paths = _playlist.map((t) => t.filePath).whereType<String>().toList();
+    final ct = currentTrack;
+    final curKey = ct?.filePath == null
+        ? ''
+        : canonicalMusicLibraryPathKey(ct!.filePath!);
+    return <String, dynamic>{
+      'v': 2,
+      'paths': paths,
+      'index': _index,
+      'shuffle': _shuffle,
+      'shuffleOrder': List<int>.from(_shuffleOrder),
+      'shufflePos': _shufflePos,
+      'repeat': _repeat.name,
+      'originTab': _playbackOriginTab?.wireValue,
+      'originPlaylistId': _playbackOriginUserPlaylistId,
+      'scopeKeys': _playbackPathKeysScope?.toList(),
+      'positionMs': _player.position.inMilliseconds,
+      'wasPlaying': _player.playing,
+      'currentKey': curKey,
+    };
+  }
+
+  /// Applies a restored snapshot after the library catalog is available.
+  Future<void> applyRestoredPlayback({
+    required List<TrackItem> queue,
+    required int sequentialIndex,
+    required bool shuffle,
+    required List<int> shuffleOrder,
+    required int shufflePos,
+    required PlaylistRepeatMode repeat,
+    Set<String>? pathScopeKeys,
+    LibraryTabId? originTab,
+    String? originUserPlaylistId,
+    required Duration position,
+    required bool resumePlaying,
+  }) async {
+    _playbackOriginTab = originTab;
+    _playbackOriginUserPlaylistId = originTab == LibraryTabId.playlist
+        ? originUserPlaylistId
+        : null;
+
+    _playbackPathKeysScope = pathScopeKeys == null
+        ? null
+        : Set<String>.from(pathScopeKeys);
+
+    _repeat = repeat;
+
+    _playlist = List<TrackItem>.from(queue);
+
+    if (_playlist.isEmpty) {
+      _resetShuffleState();
+      _index = 0;
+      try {
+        await _player.stop();
+      } catch (_) {}
+      notifyListeners();
+      return;
+    }
+
+    final n = _playlist.length;
+    bool validShuffle =
+        shuffle &&
+        shuffleOrder.length == n &&
+        _isValidShufflePermutation(shuffleOrder, n);
+
+    if (validShuffle) {
+      _shuffle = true;
+      _shuffleOrder = List<int>.from(shuffleOrder);
+      _shufflePos = shufflePos.clamp(0, n - 1);
+      final at = _shuffleOrder[_shufflePos];
+      _index = at.clamp(0, n - 1);
+    } else {
+      _resetShuffleState();
+      _index = sequentialIndex.clamp(0, n - 1);
+    }
+
+    notifyListeners();
+
+    await _loadCurrent();
+
+    Duration seekTo = Duration.zero;
+    if (currentTrack?.filePath != null) {
+      final d = _player.duration;
+      seekTo = position;
+      if (d != null && d > Duration.zero && seekTo > d) seekTo = d;
+      if (seekTo < Duration.zero) seekTo = Duration.zero;
+      try {
+        await _player.seek(seekTo);
+      } catch (_) {}
+    }
+
+    if (resumePlaying) {
+      await _player.play();
+    } else {
+      await _player.pause();
+    }
+    notifyListeners();
+  }
+
+  static bool _isValidShufflePermutation(List<int> order, int n) {
+    if (order.length != n) return false;
+    final seen = List<bool>.filled(n, false);
+    for (final x in order) {
+      if (x < 0 || x >= n) return false;
+      if (seen[x]) return false;
+      seen[x] = true;
+    }
+    return true;
+  }
+
   @override
   void dispose() {
     _playerStateSub.cancel();
-    _processingSub.cancel();
-    _player.dispose();
+    unawaited(_player.dispose());
     super.dispose();
   }
 }
