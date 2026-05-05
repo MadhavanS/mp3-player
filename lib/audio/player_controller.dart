@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 
 import '../models/library_tab_id.dart';
 import '../models/track_item.dart';
@@ -427,7 +428,18 @@ class PlayerController extends ChangeNotifier {
       try {
         await _player.stop();
       } catch (_) {}
-      await _player.setFilePath(path);
+      final track = currentTrack!;
+      await _player.setAudioSource(
+        AudioSource.uri(
+          Uri.file(path),
+          tag: MediaItem(
+            id: path,
+            title: track.title,
+            artist: track.artist,
+            album: track.metaLine,
+          ),
+        ),
+      );
     } catch (e, st) {
       debugPrint('Playback load error: $e\n$st');
     } finally {
