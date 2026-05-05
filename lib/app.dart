@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 
 import 'audio/player_controller.dart';
 import 'features/shell/main_shell.dart';
+import 'services/accent_settings_store.dart';
 import 'services/theme_settings_store.dart';
+import 'theme/accent_color_option.dart';
 import 'theme/app_theme.dart';
+import 'widgets/action_pill_toast.dart';
 
 class Mp3PlayerApp extends StatefulWidget {
   const Mp3PlayerApp({super.key});
@@ -17,6 +20,8 @@ class Mp3PlayerApp extends StatefulWidget {
 class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   late final PlayerController _player = PlayerController();
   AppThemeSetting _themeSetting = AppThemeSetting.automatic;
+  AppAccentColorOption _accentOption = AppAccentColorOption.blue;
+  Color _customAccentColor = AppAccentColorOption.blue.swatchColor;
   DateTime _themeClock = DateTime.now();
   Timer? _themeTimer;
 
@@ -28,9 +33,12 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
 
   Future<void> _loadTheme() async {
     final s = await ThemeSettingsStore.load();
+    final accent = await AccentSettingsStore.load();
     if (!mounted) return;
     setState(() {
       _themeSetting = s;
+      _accentOption = accent.option;
+      _customAccentColor = accent.customAccent;
       _themeClock = DateTime.now();
     });
     _rescheduleThemeTimer();
@@ -54,6 +62,26 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     _rescheduleThemeTimer();
   }
 
+  Future<void> _setAccentOption(AppAccentColorOption option) async {
+    setState(() => _accentOption = option);
+    await AccentSettingsStore.save(
+      option,
+      option == AppAccentColorOption.custom ? _customAccentColor : null,
+    );
+  }
+
+  Future<void> _setCustomAccentColor(Color color) async {
+    setState(() {
+      _customAccentColor = color;
+      _accentOption = AppAccentColorOption.custom;
+    });
+    await AccentSettingsStore.save(AppAccentColorOption.custom, color);
+  }
+
+  Color get _resolvedAccent => _accentOption == AppAccentColorOption.custom
+      ? _customAccentColor
+      : _accentOption.swatchColor;
+
   @override
   void dispose() {
     _themeTimer?.cancel();
@@ -67,12 +95,20 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     return PlayerControllerScope(
       controller: _player,
       child: MaterialApp(
+        navigatorKey: appNavigatorKey,
         title: 'MP3 Player',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.themeFor(resolved),
+        theme: AppTheme.themeFor(
+          resolved,
+          controlAccent: _resolvedAccent,
+        ),
         home: MainShell(
           themeSetting: _themeSetting,
           onThemeSettingChanged: _setThemeSetting,
+          accentColorOption: _accentOption,
+          customAccentColor: _customAccentColor,
+          onAccentColorOptionChanged: _setAccentOption,
+          onCustomAccentColorChanged: _setCustomAccentColor,
         ),
       ),
     );

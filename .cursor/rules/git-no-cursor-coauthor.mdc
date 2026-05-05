@@ -1,5 +1,5 @@
 ---
-description: Do not add Cursor co-author lines to git commits
+description: No Cursor co-author on commits; SMFACN = stage minimal files and commit
 alwaysApply: true
 ---
 
@@ -11,3 +11,11 @@ When creating commits in this repository (via terminal or instructions to the us
 - Use a normal subject and body only.
 
 The repo can strip these lines automatically if hooks are enabled: `git config core.hooksPath githooks` (from the repo root).
+
+# Acronyms
+
+| Acronym | Meaning |
+|--------|---------|
+| **SMFACN** | **Stage Min Files and Commit New** — stage only the smallest set of files that belong to the change (avoid unrelated edits), then create a **new** commit with an appropriate message. |
+
+When the user writes **SMFACN**, follow that workflow unless they specify otherwise.

@@ -55,7 +55,7 @@ class TrackItem {
       title: title.isEmpty ? base : title,
       artist: 'Unknown artist',
       metaLine: 'mp3',
-      genres: '#local',
+      genres: '',
       artColors: _gradientForKey(path),
       filePath: path,
     );
@@ -64,7 +64,12 @@ class TrackItem {
   /// Merge ID3 (or similar) tags; keeps filename fallbacks when fields are empty.
   ///
   /// When [replaceGenreFromFile] is true (reading a fresh snapshot from disk),
-  /// an empty or missing [genre] becomes `#local` instead of keeping the previous value.
+  /// an empty or missing [genre] clears [genres] to '' instead of keeping the
+  /// previous value.
+  ///
+  /// When [replaceAlbumArtFromFile] is true (same: fresh read from disk),
+  /// embedded art follows [albumArtBytes] exactly — `null` or empty clears
+  /// [albumArtBytes] instead of preserving the prior image.
   TrackItem withEmbeddedMetadata({
     String? title,
     String? artist,
@@ -72,6 +77,7 @@ class TrackItem {
     String? genre,
     Uint8List? albumArtBytes,
     bool replaceGenreFromFile = false,
+    bool replaceAlbumArtFromFile = false,
   }) {
     final t = title?.trim();
     final a = artist?.trim();
@@ -82,18 +88,27 @@ class TrackItem {
         return '#${g.replaceAll(RegExp(r'\s+'), '')}';
       }
       if (replaceGenreFromFile) {
-        return '#local';
+        return '';
       }
       return genres;
     }();
+    final mergedArt = () {
+      if (replaceAlbumArtFromFile) {
+        final b = albumArtBytes;
+        if (b != null && b.isNotEmpty) return b;
+        return null;
+      }
+      return albumArtBytes ?? this.albumArtBytes;
+    }();
+
     return TrackItem(
       title: (t != null && t.isNotEmpty) ? t : this.title,
       artist: (a != null && a.isNotEmpty) ? a : this.artist,
-      metaLine: (alb != null && alb.isNotEmpty) ? alb : this.metaLine,
+      metaLine: (alb != null && alb.isNotEmpty) ? alb : metaLine,
       genres: newGenres,
       artColors: artColors,
       filePath: filePath,
-      albumArtBytes: albumArtBytes ?? this.albumArtBytes,
+      albumArtBytes: mergedArt,
     );
   }
 

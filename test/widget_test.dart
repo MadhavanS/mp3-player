@@ -20,6 +20,6 @@ void main() {
   testWidgets('Library shell smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(const Mp3PlayerApp());
 
-    expect(find.text(kLibraryMainTitle), findsOneWidget);
+    expect(find.byKey(librarySearchFieldKey), findsOneWidget);
   });
 }
