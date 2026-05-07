@@ -24,7 +24,7 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
-            android:name="com.ryanheise.audioservice.AudioServiceActivity"
+            android:name=".Mp3PlayerAudioServiceActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
@@ -60,6 +60,25 @@
             tools:ignore="Instantiatable">
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".Mp3PlayerAppWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/mp3_player_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".WidgetMediaActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.mp3_player.action.WIDGET_PLAY_PAUSE" />
+                <action android:name="com.example.mp3_player.action.WIDGET_SKIP_NEXT" />
+                <action android:name="com.example.mp3_player.action.WIDGET_SKIP_PREVIOUS" />
             </intent-filter>
         </receiver>
         <!-- Don't delete the meta-data below.

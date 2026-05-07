@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_title">MP3 Player</string>
+    <string name="widget_description">Now playing: artwork, seek progress, and playback controls.</string>
+    <string name="widget_idle_title">Nothing playing</string>
+    <string name="widget_idle_subtitle">Open the app to play music</string>
+    <string name="widget_unknown_title">Unknown title</string>
+    <string name="widget_art_desc">Album art</string>
+    <string name="widget_prev_desc">Previous track</string>
+    <string name="widget_next_desc">Next track</string>
+    <string name="widget_play_pause_desc">Play or pause</string>
+</resources>
