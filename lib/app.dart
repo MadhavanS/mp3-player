@@ -1,9 +1,14 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart' show PlayerState;
 
+import 'audio/notification_art_uri.dart';
 import 'audio/player_controller.dart';
 import 'features/shell/main_shell.dart';
+import 'platform/android_home_widget_bridge.dart';
 import 'services/accent_settings_store.dart';
 import 'services/theme_settings_store.dart';
 import 'theme/accent_color_option.dart';
@@ -25,10 +30,78 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   DateTime _themeClock = DateTime.now();
   Timer? _themeTimer;
 
+  Timer? _androidWidgetSyncDebounce;
+  Timer? _androidWidgetProgressTimer;
+  StreamSubscription<PlayerState>? _androidWidgetPlayerStateSub;
+
+  bool get _syncAndroidHomeWidget =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  void _onPlayerControllerChanged() => _scheduleAndroidHomeWidgetSync();
+
   @override
   void initState() {
     super.initState();
+    _player.addListener(_onPlayerControllerChanged);
+    _attachAndroidWidgetProgressTicker();
     _loadTheme();
+  }
+
+  void _attachAndroidWidgetProgressTicker() {
+    if (!_syncAndroidHomeWidget) return;
+    _androidWidgetPlayerStateSub =
+        _player.audioPlayer.playerStateStream.listen((state) {
+      _androidWidgetProgressTimer?.cancel();
+      if (!mounted || !state.playing) return;
+      _androidWidgetProgressTimer =
+          Timer.periodic(const Duration(seconds: 1), (_) async {
+        if (!mounted || !_player.isPlaying) {
+          _androidWidgetProgressTimer?.cancel();
+          return;
+        }
+        await AndroidHomeWidgetBridge.syncPlaybackProgress(
+          playing: _player.isPlaying,
+          positionMs: _player.position.inMilliseconds,
+          durationMs: _player.duration?.inMilliseconds ?? 0,
+        );
+      });
+    });
+  }
+
+  void _scheduleAndroidHomeWidgetSync() {
+    if (!_syncAndroidHomeWidget) return;
+    _androidWidgetSyncDebounce?.cancel();
+    _androidWidgetSyncDebounce =
+        Timer(const Duration(milliseconds: 280), () {
+      unawaited(_pushAndroidHomeWidgetState());
+    });
+  }
+
+  Future<void> _pushAndroidHomeWidgetState() async {
+    if (!_syncAndroidHomeWidget || !mounted) return;
+    final track = _player.currentTrack;
+    final palette = _themeSetting.paletteAt(_themeClock);
+    final isDark = palette != AppThemePalette.light;
+
+    var artPath = '';
+    if (track != null) {
+      final uri = await uriForNotificationAlbumArt(track);
+      if (uri != null && uri.isScheme('file')) {
+        artPath = uri.toFilePath();
+      }
+    }
+
+    await AndroidHomeWidgetBridge.sync(
+      hasTrack: track != null,
+      title: track?.title ?? '',
+      artist: track?.artist ?? '',
+      artFilePath: artPath.isEmpty ? null : artPath,
+      playing: _player.isPlaying,
+      positionMs: _player.position.inMilliseconds,
+      durationMs: _player.duration?.inMilliseconds ?? 0,
+      canSkipNext: _player.canSkipNext,
+      isDarkTheme: isDark,
+    );
   }
 
   Future<void> _loadTheme() async {
@@ -42,6 +115,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
       _themeClock = DateTime.now();
     });
     _rescheduleThemeTimer();
+    _scheduleAndroidHomeWidgetSync();
   }
 
   void _rescheduleThemeTimer() {
@@ -50,6 +124,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     _themeTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) return;
       setState(() => _themeClock = DateTime.now());
+      _scheduleAndroidHomeWidgetSync();
     });
   }
 
@@ -60,6 +135,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     });
     await ThemeSettingsStore.save(setting);
     _rescheduleThemeTimer();
+    _scheduleAndroidHomeWidgetSync();
   }
 
   Future<void> _setAccentOption(AppAccentColorOption option) async {
@@ -84,6 +160,10 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
 
   @override
   void dispose() {
+    _androidWidgetSyncDebounce?.cancel();
+    _androidWidgetProgressTimer?.cancel();
+    _androidWidgetPlayerStateSub?.cancel();
+    _player.removeListener(_onPlayerControllerChanged);
     _themeTimer?.cancel();
     _player.dispose();
     super.dispose();
