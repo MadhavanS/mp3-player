@@ -12,6 +12,7 @@ import '../../services/playback_session_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/saved_music_folders.dart';
+import '../../services/song_metadata_cache.dart';
 import '../../services/track_metadata.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_theme.dart';
@@ -216,7 +217,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
 
-    final tracks = files.map(TrackItem.fromFilePath).toList();
+    final cachedByPath = await SongMetadataCache.loadTracksByPaths(files);
+    final tracks = files
+        .map((path) => cachedByPath[path] ?? TrackItem.fromFilePath(path))
+        .toList(growable: false);
+    unawaited(SongMetadataCache.deleteMissingPaths(files.toSet()));
+    unawaited(SongMetadataCache.saveTracks(tracks));
     player.setLibraryCatalog(tracks);
 
     if (preservePlaybackAfterRescan) {
@@ -249,7 +255,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       if (!kIsWeb && mounted) {
         enrichPlaylistTracks(
           tracks: tracks,
-          onTrackUpdated: player.updateTrackByPath,
+          onTrackUpdated: (path, updated) {
+            player.updateTrackByPath(path, updated);
+            unawaited(SongMetadataCache.saveTracks([updated]));
+          },
         ).catchError((Object e, StackTrace st) {
           debugPrint('enrichPlaylistTracks: $e\n$st');
         });
@@ -265,7 +274,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         if (!kIsWeb && mounted) {
           enrichPlaylistTracks(
             tracks: tracks,
-            onTrackUpdated: player.updateTrackByPath,
+            onTrackUpdated: (path, updated) {
+              player.updateTrackByPath(path, updated);
+              unawaited(SongMetadataCache.saveTracks([updated]));
+            },
           ).catchError((Object e, StackTrace st) {
             debugPrint('enrichPlaylistTracks: $e\n$st');
           });
@@ -288,7 +300,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (!kIsWeb && mounted) {
       enrichPlaylistTracks(
         tracks: tracks,
-        onTrackUpdated: player.updateTrackByPath,
+        onTrackUpdated: (path, updated) {
+          player.updateTrackByPath(path, updated);
+          unawaited(SongMetadataCache.saveTracks([updated]));
+        },
       ).catchError((Object e, StackTrace st) {
         debugPrint('enrichPlaylistTracks: $e\n$st');
       });
