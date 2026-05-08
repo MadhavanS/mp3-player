@@ -702,15 +702,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ],
             ),
-            if (_busy)
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(color: Color(0x33000000)),
-                  child: Center(
-                    child: CircularProgressIndicator(color: pal.surface),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
