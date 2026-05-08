@@ -867,32 +867,26 @@ class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
+                    _MarqueeText(
                       widget.track.title,
-                      textAlign: TextAlign.center,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
                       style: titleStyle,
+                      textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 14),
                     Center(child: widget.artwork),
                     const SizedBox(height: 12),
                     if (showArtist)
-                      Text(
+                      _MarqueeText(
                         artistName,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
                         style: artistStyle,
+                        textAlign: TextAlign.center,
                       ),
                     if (showAlbum) ...[
                       const SizedBox(height: 4),
-                      Text(
+                      _MarqueeText(
                         albumName,
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
                         style: albumStyle,
+                        textAlign: TextAlign.center,
                       ),
                     ],
                   ],
@@ -901,6 +895,106 @@ class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MarqueeText extends StatefulWidget {
+  const _MarqueeText(
+    this.text, {
+    required this.style,
+    this.textAlign = TextAlign.start,
+  });
+
+  final String text;
+  final TextStyle? style;
+  final TextAlign textAlign;
+
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText> {
+  final ScrollController _controller = ScrollController();
+  bool _running = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startIfNeeded());
+  }
+
+  @override
+  void didUpdateWidget(covariant _MarqueeText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text || oldWidget.style != widget.style) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _startIfNeeded());
+    }
+  }
+
+  Future<void> _startIfNeeded() async {
+    if (!mounted || !_controller.hasClients || _running) return;
+    final max = _controller.position.maxScrollExtent;
+    if (max <= 0) return;
+    _running = true;
+    while (mounted && _controller.hasClients) {
+      final extent = _controller.position.maxScrollExtent;
+      if (extent <= 0) break;
+      await Future<void>.delayed(const Duration(milliseconds: 550));
+      if (!mounted || !_controller.hasClients) break;
+      await _controller.animateTo(
+        extent,
+        duration: Duration(milliseconds: (1400 + extent * 6).round()),
+        curve: Curves.linear,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      if (!mounted || !_controller.hasClients) break;
+      await _controller.animateTo(
+        0,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOut,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 650));
+    }
+    _running = false;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = widget.style;
+    final fs = style?.fontSize ?? 14;
+    final h = style?.height ?? 1.25;
+    final lineHeight = fs * h + 4;
+    return SizedBox(
+      height: lineHeight,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return ClipRect(
+            child: SingleChildScrollView(
+              controller: _controller,
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                child: Text(
+                  widget.text,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.visible,
+                  textAlign: widget.textAlign,
+                  style: style,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
