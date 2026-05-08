@@ -24,4 +24,7 @@ class SongMetadataCache {
 
   static Future<void> deleteMissingPaths(Set<String> existingPaths) =>
       impl.deleteMissingPaths(existingPaths);
+
+  static Future<void> deletePaths(Iterable<String> paths) =>
+      impl.deletePaths(paths);
 }

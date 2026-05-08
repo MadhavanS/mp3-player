@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/site_audio_rename.dart';
+import '../../services/song_metadata_cache.dart';
 import '../../services/storage_access.dart';
 import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
@@ -51,10 +52,7 @@ Future<void> _resumePlaybackAfterTagSave(
 }
 
 class EditTrackTagsSheet extends StatefulWidget {
-  const EditTrackTagsSheet({
-    super.key,
-    required this.track,
-  });
+  const EditTrackTagsSheet({super.key, required this.track});
 
   final TrackItem track;
 
@@ -80,7 +78,9 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     super.initState();
     final t = widget.track;
     _title = TextEditingController(text: t.title);
-    _artist = TextEditingController(text: t.artist == 'Unknown artist' ? '' : t.artist);
+    _artist = TextEditingController(
+      text: t.artist == 'Unknown artist' ? '' : t.artist,
+    );
     _album = TextEditingController(text: t.metaLine == 'mp3' ? '' : t.metaLine);
     _genre = TextEditingController(text: _genreTextFromTrack(t));
     _title.addListener(_onTagFieldChanged);
@@ -160,7 +160,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     });
   }
 
-  Future<void> _previewSiteRename() async {
+  Future<void> _previewSiteRename({required bool tagOnlyFlow}) async {
     final path = widget.track.filePath;
     if (path == null || path.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -181,50 +181,79 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       final snap = await readAudioMetadata(widget.track);
       if (!mounted) return;
       final albumTag = snap.metaLine == 'mp3' ? null : snap.metaLine;
-      final artistTag =
-          snap.artist == 'Unknown artist' ? '' : snap.artist;
+      final artistTag = snap.artist == 'Unknown artist' ? '' : snap.artist;
       final suggestion = computeSiteRename(
         filePath: path,
         albumFromTags: albumTag,
         artistFromTags: artistTag,
         titleFromTags: snap.title,
+        genreFromTags: _genreTextFromTrack(snap),
       );
       if (!mounted) return;
-      if (!suggestion.hasSuggestion) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('No cleaner name was suggested.')),
+      final noOpSuggestion =
+          !suggestion.filenameChanged &&
+          suggestion.suggestedTitle.trim() == snap.title.trim() &&
+          suggestion.suggestedArtist.trim() == artistTag.trim() &&
+          suggestion.suggestedAlbum.trim() == (albumTag ?? '').trim() &&
+          suggestion.suggestedGenre.trim() == _genreTextFromTrack(snap).trim();
+      if (!suggestion.hasSuggestion || noOpSuggestion) {
+        ActionPillToast.showUsingRootNavigator(
+          'No Auto Rename',
+          icon: Icons.auto_fix_high_outlined,
+          uppercaseLabel: true,
         );
         return;
       }
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Clean site-style filename'),
+          title: Text(
+            tagOnlyFlow
+                ? 'Auto edit tags (tag-only)'
+                : 'Clean site-style filename',
+          ),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Uses the same rules as SongsPK Renamer (filename + tags). '
+                  'Uses the same rules as your tag-editor project (filename + tags). '
                   'Review before updating the file.',
                   style: Theme.of(ctx).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
+                if (!tagOnlyFlow) ...[
+                  Text('Filename', style: Theme.of(ctx).textTheme.labelSmall),
+                  Text(
+                    '${suggestion.originalBasenameWithoutExt}.mp3\n→ ${suggestion.newBasenameWithoutExt}.mp3',
+                    style: Theme.of(ctx).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                Text('Album (tag)', style: Theme.of(ctx).textTheme.labelSmall),
                 Text(
-                  'Filename',
-                  style: Theme.of(ctx).textTheme.labelSmall,
-                ),
-                Text(
-                  '${suggestion.originalBasenameWithoutExt}.mp3\n→ ${suggestion.newBasenameWithoutExt}.mp3',
+                  suggestion.suggestedAlbum,
                   style: Theme.of(ctx).textTheme.bodyMedium,
                 ),
-                const SizedBox(height: 12),
-                Text('Album (tag)', style: Theme.of(ctx).textTheme.labelSmall),
-                Text(suggestion.suggestedAlbum, style: Theme.of(ctx).textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                Text('Artist (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+                Text(
+                  suggestion.suggestedArtist,
+                  style: Theme.of(ctx).textTheme.bodyMedium,
+                ),
                 const SizedBox(height: 8),
                 Text('Title (tag)', style: Theme.of(ctx).textTheme.labelSmall),
-                Text(suggestion.suggestedTitle, style: Theme.of(ctx).textTheme.bodyMedium),
+                Text(
+                  suggestion.suggestedTitle,
+                  style: Theme.of(ctx).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 8),
+                Text('Genre (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+                Text(
+                  suggestion.suggestedGenre,
+                  style: Theme.of(ctx).textTheme.bodyMedium,
+                ),
               ],
             ),
           ),
@@ -235,37 +264,52 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
             ),
             TextButton(
               onPressed: () {
+                if (tagOnlyFlow) {
+                  Navigator.pop(ctx);
+                  unawaited(_applySiteRename(suggestion, tagOnlyFlow: true));
+                  return;
+                }
                 _title.text = suggestion.suggestedTitle;
+                _artist.text = suggestion.suggestedArtist;
                 _album.text = suggestion.suggestedAlbum;
+                _genre.text = suggestion.suggestedGenre;
                 Navigator.pop(ctx);
                 messenger.showSnackBar(
                   const SnackBar(
-                    content: Text('Filled the form — tap Save to write the file.'),
+                    content: Text(
+                      'Filled the form — tap Save to write the file.',
+                    ),
                   ),
                 );
               },
-              child: const Text('Use in editor'),
+              child: Text(tagOnlyFlow ? 'Apply tag edits' : 'Use in editor'),
             ),
-            FilledButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                unawaited(_applySiteRename(suggestion));
-              },
-              child: const Text('Rename & save'),
-            ),
+            if (!tagOnlyFlow)
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  unawaited(_applySiteRename(suggestion, tagOnlyFlow: false));
+                },
+                child: const Text('Rename & save'),
+              ),
           ],
         ),
       );
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(SnackBar(content: Text('Could not analyze file: $e')));
+        messenger.showSnackBar(
+          SnackBar(content: Text('Could not analyze file: $e')),
+        );
       }
     } finally {
       if (mounted) setState(() => _siteRenameBusy = false);
     }
   }
 
-  Future<void> _applySiteRename(SiteRenameSuggestion suggestion) async {
+  Future<void> _applySiteRename(
+    SiteRenameSuggestion suggestion, {
+    required bool tagOnlyFlow,
+  }) async {
     final path = widget.track.filePath;
     if (path == null || path.isEmpty) return;
 
@@ -280,11 +324,12 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     setState(() => _saving = true);
     final wasPlaying = player.isPlaying;
     final resumePosition = player.position;
+    var updateSucceeded = false;
     await player.stopForExternalFileEdit();
 
     try {
       var newPath = path;
-      if (suggestion.filenameChanged) {
+      if (!tagOnlyFlow && suggestion.filenameChanged) {
         newPath = await renameMp3File(path, suggestion.newBasenameWithoutExt);
       }
 
@@ -292,8 +337,8 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         filePath: newPath,
         title: suggestion.suggestedTitle,
         album: suggestion.suggestedAlbum,
-        artist: _artist.text,
-        genre: _genre.text,
+        artist: suggestion.suggestedArtist,
+        genre: suggestion.suggestedGenre,
         artEdit: _artEdit,
         newCoverBytes: _pickedCoverBytes,
         newCoverMimeType: _pickedCoverMime,
@@ -301,11 +346,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
       final base = TrackItem.fromFilePath(newPath);
       final refreshed = await readAudioMetadata(base);
-      if (suggestion.filenameChanged) {
+      if (!tagOnlyFlow && suggestion.filenameChanged) {
         player.replaceTrackPath(path, refreshed);
+        unawaited(SongMetadataCache.deletePaths([path]));
       } else {
         player.updateTrackByPath(path, refreshed);
       }
+      unawaited(SongMetadataCache.saveTracks([refreshed]));
 
       if (mounted) {
         Navigator.of(context).pop();
@@ -316,23 +363,30 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
-      unawaited(_resumePlaybackAfterTagSave(player, wasPlaying, resumePosition));
+      updateSucceeded = true;
+      unawaited(
+        _resumePlaybackAfterTagSave(player, wasPlaying, resumePosition),
+      );
     } on StateError catch (e) {
       if (mounted) {
-        messenger.showSnackBar(SnackBar(content: Text(e.toString())));
+        final msg = e.toString();
+        final alreadyExists = msg.toLowerCase().contains(
+          'target already exists',
+        );
+        messenger.showSnackBar(
+          SnackBar(content: Text(alreadyExists ? 'Already exists' : msg)),
+        );
       }
     } on UnsupportedError catch (e) {
       if (mounted) {
-        messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not supported.')));
+        messenger.showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Not supported.')),
+        );
       }
     } on FileSystemException catch (e) {
       if (mounted) {
         messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not update file. (${e.message})',
-            ),
-          ),
+          SnackBar(content: Text('Could not update file. (${e.message})')),
         );
       }
     } catch (e) {
@@ -340,6 +394,11 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
+      if (!updateSucceeded) {
+        unawaited(
+          _resumePlaybackAfterTagSave(player, wasPlaying, resumePosition),
+        );
+      }
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -393,10 +452,14 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
-      unawaited(_resumePlaybackAfterTagSave(player, wasPlaying, resumePosition));
+      unawaited(
+        _resumePlaybackAfterTagSave(player, wasPlaying, resumePosition),
+      );
     } on UnsupportedError catch (e) {
       if (mounted) {
-        messenger.showSnackBar(SnackBar(content: Text(e.message ?? 'Not supported.')));
+        messenger.showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Not supported.')),
+        );
       }
     } on FileSystemException catch (e) {
       if (mounted) {
@@ -446,21 +509,27 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
               const SizedBox(height: 16),
               Text(
                 'Edit tags',
-                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
                 'Changes are written into the MP3 file.',
-                style: theme.textTheme.bodySmall?.copyWith(color: context.palette.textSecondary),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: context.palette.textSecondary,
+                ),
               ),
               const SizedBox(height: 12),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   IconButton(
-                    tooltip: 'Clean site-style name',
+                    tooltip: 'Auto edit tags (tag-only)',
                     visualDensity: VisualDensity.compact,
-                    onPressed: (_saving || _siteRenameBusy) ? null : _previewSiteRename,
+                    onPressed: (_saving || _siteRenameBusy)
+                        ? null
+                        : () => _previewSiteRename(tagOnlyFlow: true),
                     icon: _siteRenameBusy
                         ? SizedBox(
                             width: 22,
@@ -479,7 +548,9 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                   const SizedBox(width: 4),
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: (_saving || _siteRenameBusy) ? null : _previewSiteRename,
+                      onPressed: (_saving || _siteRenameBusy)
+                          ? null
+                          : () => _previewSiteRename(tagOnlyFlow: false),
                       child: const Text('Clean site-style name'),
                     ),
                   ),
@@ -501,11 +572,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                           : Container(
                               width: 120,
                               height: 120,
-                              color: context.controlAccent.withValues(alpha: 0.12),
+                              color: context.controlAccent.withValues(
+                                alpha: 0.12,
+                              ),
                               child: Icon(
                                 Icons.album_outlined,
                                 size: 48,
-                                color: context.palette.textSecondary.withValues(alpha: 0.6),
+                                color: context.palette.textSecondary.withValues(
+                                  alpha: 0.6,
+                                ),
                               ),
                             ),
                     ),
@@ -524,7 +599,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                             widget.track.albumArtBytes != null)
                           TextButton.icon(
                             onPressed: _saving ? null : _clearCover,
-                            icon: const Icon(Icons.hide_image_outlined, size: 20),
+                            icon: const Icon(
+                              Icons.hide_image_outlined,
+                              size: 20,
+                            ),
                             label: const Text('Remove art'),
                           ),
                         if (_artEdit != AlbumArtEditKind.keep)
@@ -586,7 +664,9 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                      onPressed: _saving
+                          ? null
+                          : () => Navigator.of(context).pop(),
                       child: const Text('Cancel'),
                     ),
                   ),

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/site_audio_rename.dart';
+import '../../services/song_metadata_cache.dart';
 import '../../services/storage_access.dart';
 import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
@@ -68,7 +69,9 @@ Future<void> showStandaloneSiteRenameDialog(
     snap = await readAudioMetadata(track);
   } catch (e) {
     if (!context.mounted) return;
-    messenger.showSnackBar(SnackBar(content: Text('Could not analyze file: $e')));
+    messenger.showSnackBar(
+      SnackBar(content: Text('Could not analyze file: $e')),
+    );
     return;
   }
 
@@ -81,11 +84,14 @@ Future<void> showStandaloneSiteRenameDialog(
     albumFromTags: albumTag,
     artistFromTags: artistTag,
     titleFromTags: snap.title,
+    genreFromTags: _genrePlain(snap),
   );
 
   if (!suggestion.hasSuggestion) {
-    messenger.showSnackBar(
-      const SnackBar(content: Text('No cleaner name was suggested.')),
+    ActionPillToast.showUsingRootNavigator(
+      'No Auto Rename',
+      icon: Icons.auto_fix_high_outlined,
+      uppercaseLabel: true,
     );
     return;
   }
@@ -100,15 +106,12 @@ Future<void> showStandaloneSiteRenameDialog(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Uses the same rules as SongsPK Renamer (filename + tags). '
+              'Uses the same rules as your tag-editor project (filename + tags). '
               'Review before updating the file.',
               style: Theme.of(ctx).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
-            Text(
-              'Filename',
-              style: Theme.of(ctx).textTheme.labelSmall,
-            ),
+            Text('Filename', style: Theme.of(ctx).textTheme.labelSmall),
             Text(
               '${suggestion.originalBasenameWithoutExt}.mp3'
               '\n→ ${suggestion.newBasenameWithoutExt}.mp3',
@@ -116,10 +119,28 @@ Future<void> showStandaloneSiteRenameDialog(
             ),
             const SizedBox(height: 12),
             Text('Album (tag)', style: Theme.of(ctx).textTheme.labelSmall),
-            Text(suggestion.suggestedAlbum, style: Theme.of(ctx).textTheme.bodyMedium),
+            Text(
+              suggestion.suggestedAlbum,
+              style: Theme.of(ctx).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            Text('Artist (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+            Text(
+              suggestion.suggestedArtist,
+              style: Theme.of(ctx).textTheme.bodyMedium,
+            ),
             const SizedBox(height: 8),
             Text('Title (tag)', style: Theme.of(ctx).textTheme.labelSmall),
-            Text(suggestion.suggestedTitle, style: Theme.of(ctx).textTheme.bodyMedium),
+            Text(
+              suggestion.suggestedTitle,
+              style: Theme.of(ctx).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            Text('Genre (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+            Text(
+              suggestion.suggestedGenre,
+              style: Theme.of(ctx).textTheme.bodyMedium,
+            ),
           ],
         ),
       ),
@@ -160,24 +181,25 @@ Future<void> _applySiteRenameStandalone(
   final messenger = ScaffoldMessenger.maybeOf(context);
   final wasPlaying = player.isPlaying;
   final resumePosition = player.position;
+  var updateSucceeded = false;
 
   await player.stopForExternalFileEdit();
 
   try {
     var newPath = originalPath;
     if (suggestion.filenameChanged) {
-      newPath = await renameMp3File(originalPath, suggestion.newBasenameWithoutExt);
+      newPath = await renameMp3File(
+        originalPath,
+        suggestion.newBasenameWithoutExt,
+      );
     }
-
-    final artistWrite =
-        snapBefore.artist == 'Unknown artist' ? '' : snapBefore.artist;
 
     await writeEmbeddedAudioTags(
       filePath: newPath,
       title: suggestion.suggestedTitle,
       album: suggestion.suggestedAlbum,
-      artist: artistWrite,
-      genre: _genrePlain(snapBefore),
+      artist: suggestion.suggestedArtist,
+      genre: suggestion.suggestedGenre,
       artEdit: AlbumArtEditKind.keep,
     );
 
@@ -185,9 +207,11 @@ Future<void> _applySiteRenameStandalone(
     final refreshed = await readAudioMetadata(base);
     if (suggestion.filenameChanged) {
       player.replaceTrackPath(originalPath, refreshed);
+      unawaited(SongMetadataCache.deletePaths([originalPath]));
     } else {
       player.updateTrackByPath(originalPath, refreshed);
     }
+    unawaited(SongMetadataCache.saveTracks([refreshed]));
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ActionPillToast.showUsingRootNavigator(
@@ -195,10 +219,17 @@ Future<void> _applySiteRenameStandalone(
         uppercaseLabel: true,
       );
     });
-    unawaited(_resumePlaybackAfterExternalWrite(player, wasPlaying, resumePosition));
+    updateSucceeded = true;
+    unawaited(
+      _resumePlaybackAfterExternalWrite(player, wasPlaying, resumePosition),
+    );
   } on StateError catch (e) {
     if (!context.mounted) return;
-    messenger?.showSnackBar(SnackBar(content: Text(e.toString())));
+    final msg = e.toString();
+    final alreadyExists = msg.toLowerCase().contains('target already exists');
+    messenger?.showSnackBar(
+      SnackBar(content: Text(alreadyExists ? 'Already exists' : msg)),
+    );
   } on UnsupportedError catch (e) {
     if (!context.mounted) return;
     messenger?.showSnackBar(
@@ -207,14 +238,16 @@ Future<void> _applySiteRenameStandalone(
   } on FileSystemException catch (e) {
     if (!context.mounted) return;
     messenger?.showSnackBar(
-      SnackBar(
-        content: Text(
-          'Could not update file. (${e.message})',
-        ),
-      ),
+      SnackBar(content: Text('Could not update file. (${e.message})')),
     );
   } catch (e) {
     if (!context.mounted) return;
     messenger?.showSnackBar(SnackBar(content: Text('Error: $e')));
+  } finally {
+    if (!updateSucceeded) {
+      unawaited(
+        _resumePlaybackAfterExternalWrite(player, wasPlaying, resumePosition),
+      );
+    }
   }
 }

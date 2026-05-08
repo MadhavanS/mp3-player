@@ -1,5 +1,4 @@
-// Port of Java SiteTextConst + SiteAudioRenamer (songsPKRenamer) filename cleanup.
-// Suggests a clean basename (no .mp3) and tag values matching Java TagEdit.setTag split.
+// Port of tag-editor rules engine semantics for in-app cleanup suggestions.
 
 import 'dart:io';
 
@@ -9,14 +8,18 @@ import 'package:path/path.dart' as p;
 class SiteRenameSuggestion {
   SiteRenameSuggestion({
     required this.newBasenameWithoutExt,
+    required this.suggestedArtist,
     required this.suggestedAlbum,
     required this.suggestedTitle,
+    required this.suggestedGenre,
     required this.originalBasenameWithoutExt,
   });
 
   final String newBasenameWithoutExt;
+  final String suggestedArtist;
   final String suggestedAlbum;
   final String suggestedTitle;
+  final String suggestedGenre;
   final String originalBasenameWithoutExt;
 
   bool get filenameChanged =>
@@ -25,48 +28,17 @@ class SiteRenameSuggestion {
   bool get hasSuggestion =>
       newBasenameWithoutExt.isNotEmpty &&
       (filenameChanged ||
+          suggestedArtist.isNotEmpty ||
           suggestedAlbum.isNotEmpty ||
-          suggestedTitle.isNotEmpty);
+          suggestedTitle.isNotEmpty ||
+          suggestedGenre.isNotEmpty);
 }
 
 abstract final class SiteTextConst {
-  static const starmusiqFun = 'StarMusiQ.Fun';
-  static const starmusiqOne = 'StarMusiQ.One';
-  static const starmusiq5 = '5StarMusiQ.Com';
-  static const starmusiqtop = 'StarMusiQ.Top';
-  static const sunmusiq = 'SunMusiQ.Com';
-  static const tamilwire = 'TamilWire.com';
-  static const vmusiq = 'VmusiQ.Com';
-  static const masstamilanIO = 'MassTamilan.io';
-  static const masstamilanCom = 'MassTamilan.com';
-  static const masstamilanFM = 'MassTamilan.fm';
-  static const masstamilanDev = 'MassTamilan.dev';
-  static const masstamila = 'MassTamila';
-  static const masstamilanSo = 'MassTamilan.so';
-  static const starmusiq = 'StarMusiQ.Com';
-  static const downloadSouthMp3 = 'DownloadSouthMP3.SE';
-  static const tnWaps = 'TNwaps.com';
-  static const songsPK = '[Songs.PK]';
-  static const songsPKLink = '[Songspk.LINK]';
-  static const tamilDaDa = 'TamilDaDa.info';
-  static const sebastian = 'Sebastian[Ub3r]';
-  static const hindiMp3India = 'Hindimp3india.Com';
-  static const downloadMing = 'DownloadMing.SE';
-  static const downloadMingLA = 'DownloadMing.LA';
-  static const downloadMingCom = 'www.downloadming.com';
-  static const newtamilhits = 'NewTamilHits.Com';
-  static const maango = '[Maango.me]';
-  static const maangoInfo = '[Maango.info]';
-  static const maangoWS = '[Maango.ws]';
-  static const maaMp3 = '[www.MaaMp3.com]';
-  static const iSongsInfo = '[iSongs.info]';
-  static const songsNut = '[Songsnut.com]';
-  static const sensongsMp3 = 'SenSongsMp3.Co';
-  static const sensongsCom = 'www.sensongs.com';
-  static const singamdaCom = 'Singamda.Com';
-  static const tnWapNet = 'Tnwap.Net';
-  static const tgx = '[TGx]';
-  static const uyirvani = 'www.uyirvani.com';
+  static const title = 'title';
+  static const artist = 'artist';
+  static const album = 'album';
+  static const genre = 'genre';
 }
 
 String _stripExtension(String? str) {
@@ -76,465 +48,579 @@ String _stripExtension(String? str) {
   return str.substring(0, pos);
 }
 
-RegExp _pattern(String pat) => RegExp(pat);
+class _Rule {
+  const _Rule({
+    required this.name,
+    required this.enabled,
+    required this.filenameRegex,
+    required this.setTags,
+    required this.renameTo,
+    required this.stripSubstrings,
+    required this.stripFields,
+    required this.whenTagsContain,
+    required this.stripIgnoreCase,
+    required this.collapseWhitespace,
+    required this.stripTrailingDash,
+    this.clearFields = const <String>[],
+  });
 
-bool _patternFind(String str, String pat) => _pattern(pat).hasMatch(str);
-
-String _capitalize(String line) {
-  if (line.isEmpty) return line;
-  final c = line.codeUnitAt(0);
-  if (c >= 65 && c <= 90) return line;
-  return String.fromCharCode(c >= 97 && c <= 122 ? c - 32 : c) +
-      line.substring(1);
+  final String name;
+  final bool enabled;
+  final String filenameRegex;
+  final Map<String, String> setTags;
+  final String renameTo;
+  final List<String> stripSubstrings;
+  final List<String> stripFields;
+  final List<String> whenTagsContain;
+  final bool stripIgnoreCase;
+  final bool collapseWhitespace;
+  final bool stripTrailingDash;
+  final List<String> clearFields;
 }
 
-String _capitalizeWords(String s) {
-  if (s.trim().isEmpty) return s;
-  return s
+const _allFieldKeys = <String>[
+  SiteTextConst.title,
+  SiteTextConst.artist,
+  SiteTextConst.album,
+  SiteTextConst.genre,
+];
+
+const _rules = <_Rule>[
+  _Rule(
+    name: 'Masstamilan.com cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {},
+    renameTo: '{album_titlecompact_cleanyear} - {title_titlecompact}.mp3',
+    stripSubstrings: [
+      ' - MassTamilan.org',
+      ' - Masstamilan.org',
+      ' - MassTamilan.fm',
+      ' - Masstamilan.fm',
+      ' - MassTamilan.dev',
+      ' - Masstamilan.dev',
+      ' - MassTamilan.com',
+      ' - Masstamilan.com',
+      '- MassTamilan.org',
+      '- Masstamilan.org',
+      '- MassTamilan.fm',
+      '- Masstamilan.fm',
+      '- MassTamilan.dev',
+      '- Masstamilan.dev',
+      '- MassTamilan.com',
+      '- Masstamilan.com',
+      'MassTamilan.org',
+      'MassTamilan.fm',
+      'MassTamilan.dev',
+      'MassTamilan.com',
+      'MassTamilan.io',
+      'tamil',
+      'soundtrack',
+      'unknown',
+      'soundtrack - tamil',
+      '[Masstamilan.In]',
+      '[MassTamilan.In]',
+      'Masstamilan.In',
+      'MassTamilan.In',
+      ' - Masstamilan.In',
+      '- Masstamilan.In',
+      '[Massan.In]',
+      'Massan.In',
+      ' - Massan.In',
+      '- Massan.In',
+      'MassTamilan.so',
+      ' - MassTamilan.so',
+      '- MassTamilan.so',
+      '[MassTamilan.so]',
+      'MassTamilan',
+      'MassTamilan ',
+      ' - MassTamilan',
+      '- MassTamilan',
+      '[MassTamilan]',
+      '(MassTamilan)',
+      '::MassTamilan::',
+    ],
+    stripFields: _allFieldKeys,
+    clearFields: ['comment'],
+    whenTagsContain: [
+      'masstamilan.com',
+      'masstamilan.dev',
+      'masstamilan.fm',
+      'masstamilan.org',
+      'masstamilan.in',
+      'massan.in',
+      'masstamilan.so',
+      'masstamilan.io',
+      'masstamilan',
+    ],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: '5StarMusiQ.Com cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {},
+    renameTo: '{album_titlecase} - {title_titlecompact}.mp3',
+    stripSubstrings: [
+      '5StarMusiQ.Com -',
+      '5starmusiq.com -',
+      'StarMusiQ.Com -',
+      'starmusiq.com -',
+      'VmusiQ.Com -',
+      'vmusiq.com -',
+      ' - 5StarMusiQ.Com',
+      ' - 5starmusiq.com',
+      ' - StarMusiQ.Com',
+      ' - starmusiq.com',
+      ' - VmusiQ.Com',
+      ' - vmusiq.com',
+      '- 5StarMusiQ.Com',
+      '- 5starmusiq.com',
+      '- StarMusiQ.Com',
+      '- starmusiq.com',
+      '- VmusiQ.Com',
+      '- vmusiq.com',
+      '5StarMusiQ.Com',
+      'StarMusiQ.Com',
+      'VmusiQ.Com',
+      'tamil',
+      'soundtrack',
+      'unknown',
+      'soundtrack - tamil',
+      'SunMusiQ.Com -',
+      ' - SunMusiQ.Com',
+      '- SunMusiQ.Com',
+      'SunMusiQ.Com',
+      'StarMusiQ.One -',
+      ' - StarMusiQ.One',
+      '- StarMusiQ.One',
+      'StarMusiQ.One',
+      'StarMusiQ.Fun',
+      '-StarMusiQ.Fun',
+      ' - StarMusiQ.Fun',
+      '- StarMusiQ.Fun',
+      'StarMusiQ.Fun -',
+      '[StarMusiQ.Fun]',
+    ],
+    stripFields: _allFieldKeys,
+    clearFields: ['comment'],
+    whenTagsContain: [
+      '5starmusiq.com',
+      'starmusiq.com',
+      'vmusiq.com',
+      'sunmusiq.com',
+      'starmusiq.one',
+      'starmusiq.fun',
+    ],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: 'SenSongsMp3.Co cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {},
+    renameTo: '{album_titlecompact_cleanyear} - {title_titlecompact}.mp3',
+    stripSubstrings: [
+      ' ::: www.sensongs.com :::  ® Riya collections ®',
+      '::: www.sensongs.com ::: ® Riya collections ®',
+      '::: www.sensongs.com :::  ® Riya collections ®',
+      ':: www.sensongs.com :: ® Riya collections ®',
+      'www.sensongs.com ::: ® Riya collections ®',
+      '® Riya collections ®',
+      ' :: SenSongsMp3.Co',
+      ':: SenSongsMp3.Co',
+      ', SenSongsMp3.Co',
+      'SenSongsMp3.Co',
+      'tamil',
+      'soundtrack',
+      'unknown',
+      'soundtrack - tamil',
+      'www.sensongs.com',
+      ':: www.sensongs.com ::',
+    ],
+    stripFields: _allFieldKeys,
+    whenTagsContain: ['sensongsmp3.co', 'www.sensongs.com', 'riya collections'],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: 'iSongs.info cleanup',
+    enabled: true,
+    filenameRegex: r'^\[\s*iSongs\.info\s*\]\s*(\d+)\s*-\s*(.+)\.mp3$',
+    setTags: {SiteTextConst.title: r'$2'},
+    renameTo: '{album_titlecompact_cleanyear} - {title_titlecase}.mp3',
+    stripSubstrings: [
+      '[iSongs.info]',
+      '[ isongs.info ]',
+      'iSongs.info',
+      'isongs.info',
+      'tamil',
+      'soundtrack',
+      'unknown',
+      'soundtrack - tamil',
+    ],
+    stripFields: _allFieldKeys,
+    clearFields: ['comment'],
+    whenTagsContain: [],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: 'Singamda.Com cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {},
+    renameTo: '{album_titlecompact_cleanyear} - {title_titlecase}.mp3',
+    stripSubstrings: [
+      '::Singamda.Com::',
+      ':: Singamda.Com ::',
+      ' ::Singamda.Com:: ',
+      'Singamda.Com',
+      'tamil',
+      'soundtrack',
+      'unknown',
+      'soundtrack - tamil',
+    ],
+    stripFields: _allFieldKeys,
+    clearFields: ['comment', 'disc', 'genre'],
+    whenTagsContain: ['singamda.com'],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: 'isaimini.co cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {},
+    renameTo: '{album_titlecompact_cleanyear} - {title_titlecompact}.mp3',
+    stripSubstrings: [
+      ' :: isaimini.co',
+      ':: isaimini.co',
+      '::isaimini.co',
+      ' :: isaimini.co ::',
+      'isaimini.co',
+      'Isaimini.Co',
+      'ISAIMINI.CO',
+      '[isaimini.co]',
+      '(isaimini.co)',
+      'tamil',
+      'soundtrack',
+      'unknown',
+      'soundtrack - tamil',
+    ],
+    stripFields: [
+      SiteTextConst.title,
+      SiteTextConst.genre,
+      SiteTextConst.album,
+      SiteTextConst.artist,
+    ],
+    whenTagsContain: ['isaimini.co'],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: 'DownloadSouthMP3.Com cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {SiteTextConst.title: '{title_noleadtrack}'},
+    renameTo:
+        '{album_titlecompact_cleanyear} - {title_titlecompact_nolead}.mp3',
+    stripSubstrings: [
+      'DownloadSouthMP3.Com',
+      'downloadsouthmp3.com',
+      'DownloadSouthMP3.SE',
+      'downloadsouthmp3.se',
+      'tamil',
+      'soundtrack',
+      'unknown',
+      'soundtrack - tamil',
+    ],
+    stripFields: _allFieldKeys,
+    whenTagsContain: ['downloadsouthmp3.com', 'downloadsouthmp3.se'],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: 'oruTamilsong.com cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {},
+    renameTo: '{album_titlecompact_cleanyear} - {title_titlecompact}.mp3',
+    stripSubstrings: [
+      'oruTamilsong.com',
+      'orutamilsong.com',
+      'OruTamilsong.Com',
+      'OruTamilSong.Com',
+      '[oruTamilsong.com]',
+      '[orutamilsong.com]',
+      '[OruTamilsong.Com]',
+      '- oruTamilsong.com',
+      ' - oruTamilsong.com',
+      '- OruTamilsong.Com',
+      ' - OruTamilsong.Com',
+      'tamil',
+      'soundtrack',
+      'soundtrack - tamil',
+      'unknown',
+    ],
+    stripFields: _allFieldKeys,
+    clearFields: ['comment', 'genre'],
+    whenTagsContain: ['orutamilsong.com'],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: 'TamilPaadalgal cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {},
+    renameTo: '{album_titlecompact_cleanyear} - {title_titlecompact}.mp3',
+    stripSubstrings: [
+      'TamilPaadalgal.com™',
+      'tamilpaadalgal.com™',
+      'TamilPaadalgal.com',
+      'tamilpaadalgal.com',
+      '[TamilPaadalgal.com™]',
+      '[tamilpaadalgal.com™]',
+      '- TamilPaadalgal.com™',
+      ' - TamilPaadalgal.com™',
+      '- TamilPaadalgal.com',
+      ' - TamilPaadalgal.com',
+      'tamil',
+      'soundtrack',
+      'soundtrack - tamil',
+      'unknown',
+    ],
+    stripFields: _allFieldKeys,
+    clearFields: ['comment', 'track', 'genre'],
+    whenTagsContain: ['tamilpaadalgal.com'],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+  _Rule(
+    name: 'NewTamilHits.Com cleanup',
+    enabled: true,
+    filenameRegex: '.*',
+    setTags: {},
+    renameTo: '{album_titlecompact_cleanyear} - {title_titlecompact}.mp3',
+    stripSubstrings: [
+      'NewTamilHits.Com',
+      'newtamilhits.com',
+      'NewTamilHits.com',
+      '[NewTamilHits.Com]',
+      '[newtamilhits.com]',
+      '- NewTamilHits.Com',
+      ' - NewTamilHits.Com',
+      '- newtamilhits.com',
+      ' - newtamilhits.com',
+      'tamil',
+      'soundtrack',
+      'soundtrack - tamil',
+      'unknown',
+    ],
+    stripFields: _allFieldKeys,
+    clearFields: ['comment', 'track', 'genre'],
+    whenTagsContain: ['newtamilhits.com'],
+    stripIgnoreCase: true,
+    collapseWhitespace: true,
+    stripTrailingDash: true,
+  ),
+];
+
+String _titleWordsSpaced(String text) {
+  final out = <String>[];
+  for (final w in text.split(RegExp(r'\s+'))) {
+    if (w.isEmpty) continue;
+    out.add(
+      w[0].toUpperCase() + (w.length > 1 ? w.substring(1).toLowerCase() : ''),
+    );
+  }
+  return out.join(' ');
+}
+
+String _titleTitleCompact(String title) =>
+    _titleWordsSpaced(title).replaceAll(' ', '');
+
+String _titleDropLeadingTrackNum(String text) {
+  final out = text.replaceFirst(
+    RegExp(r'^\s*\d{1,3}(?:\s*/\s*\d{1,3})?\s*[-.:)]?\s*'),
+    '',
+  );
+  return out.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).join(' ');
+}
+
+String _albumRenameBase(String text) {
+  final base = text
+      .replaceAll('(*)', '')
       .split(RegExp(r'\s+'))
       .where((w) => w.isNotEmpty)
-      .map(_capitalize)
       .join(' ');
+  return base.replaceFirst(RegExp(r'[-–—]+\s*$'), '').trim();
 }
 
-/// Mirrors Java TagEdit.setTag: album = segment before first '-', title = rest (or full if single).
-void splitBasenameLikeJavaSetTag(String base, void Function(String album, String title) out) {
-  final b = base.trim();
-  final dash = b.indexOf('-');
-  if (dash == -1) {
-    final one = b;
-    out(one, one);
-    return;
-  }
-  out(b.substring(0, dash).trim(), b.substring(dash + 1).trim());
+String _albumDropYearBrackets(String text) {
+  final out = text.replaceAll(RegExp(r'\(\s*\d{4}\s*\)'), ' ');
+  return out
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .join(' ')
+      .replaceFirst(RegExp(r'\s*[-–—]+\s*$'), '')
+      .trim();
 }
 
-String _albumNameFromTags(String? raw) {
-  if (raw == null) return '';
-  var albumName = raw.trim();
-  if (albumName.toLowerCase() == 'title') return '';
-
-  final parts = albumName.split('-');
-  final buf = StringBuffer();
-  for (final s0 in parts) {
-    var s = s0;
-    final t = s.toLowerCase().trim();
-    if (t.contains(SiteTextConst.vmusiq.toLowerCase())) {
-      continue;
-    } else if (t.contains(SiteTextConst.masstamilanIO.toLowerCase())) {
-      continue;
-    } else if (t.contains(SiteTextConst.masstamilanFM.toLowerCase())) {
-      continue;
-    } else if (t.contains(SiteTextConst.masstamilanDev.toLowerCase())) {
-      continue;
-    } else if (t.contains(SiteTextConst.masstamilanCom.toLowerCase())) {
-      continue;
-    } else if (t.contains(SiteTextConst.masstamilanSo.toLowerCase())) {
-      continue;
-    } else if (t == SiteTextConst.starmusiq.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.downloadSouthMp3.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.hindiMp3India.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.songsPK.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.tamilwire.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.uyirvani.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.newtamilhits.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.maango.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.maangoInfo.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.maangoWS.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.maaMp3.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.songsNut.toLowerCase()) {
-      continue;
-    } else if (t == SiteTextConst.sensongsMp3.toLowerCase()) {
-      continue;
-    } else if (t.contains(SiteTextConst.sensongsCom.toLowerCase()) ||
-        t.contains(SiteTextConst.singamdaCom.toLowerCase())) {
-      final lower = s.toLowerCase();
-      final start = lower.indexOf(':');
-      final end = lower.lastIndexOf(':');
-      if (start > 0 && end >= start) {
-        s = s.replaceRange(start > 0 ? start - 1 : start, end + 1, '');
-      }
-      s = s.replaceAll('®', '');
-      buf.write(s);
-    } else if (t.contains(SiteTextConst.tamilDaDa.toLowerCase())) {
-      continue;
-    } else if (t.contains(SiteTextConst.masstamila.toLowerCase())) {
-      continue;
-    } else {
-      buf.write(s0);
-    }
-  }
-  return buf.toString();
+String _sanitizeFilename(String input) {
+  var out = input.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_');
+  out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
+  out = out.replaceFirst(RegExp(r'[. ]+$'), '');
+  if (out.isEmpty) return 'untitled';
+  return out;
 }
 
-String _songsPkSite(String str) {
-  var parts = str.split('-');
-  var temp = StringBuffer();
-  for (final s in parts) {
-    if (_patternFind(s.trim(), r'^[0-9]')) {
-      temp.write(s.replaceAll(RegExp(r'[0-9]'), ''));
-      temp.write('-');
-    } else {
-      temp.write(s);
-    }
-  }
-  var tempStr = temp.toString();
-  if (!tempStr.contains('-')) {
-    if (_patternFind(str.replaceAll(' ', ''), r'^\[[\w.[\w]+][0-9]+')) {
-      tempStr = str
-          .replaceAll(' ', '')
-          .replaceFirst(RegExp(r'^\[[\w.]+\][0-9]+-'), '');
-    }
-  }
-  final words = tempStr.split(' ');
-  final fin = StringBuffer();
-  for (final s in words) {
-    if (s == SiteTextConst.songsPK ||
-        s == SiteTextConst.songsPKLink ||
-        s == SiteTextConst.iSongsInfo) {
-      continue;
-    }
-    if (_patternFind(s.trim(), r'^[0-9]')) {
-      continue;
-    }
-    fin.write(s);
-  }
-  return fin.toString();
+String _expandDollarGroups(String template, RegExpMatch? match) {
+  if (match == null) return template;
+  return template.replaceAllMapped(RegExp(r'\$(\d+)'), (m) {
+    final idx = int.tryParse(m.group(1) ?? '') ?? -1;
+    if (idx == 0) return match.group(0) ?? '';
+    if (idx < 0 || idx > match.groupCount) return '';
+    return match.group(idx) ?? '';
+  });
 }
 
-String _tnWaps(String str) {
-  var parts = str.split('-');
-  var temp = StringBuffer();
-  for (final s in parts) {
-    if (_patternFind(s.trim(), r'^[0-9]')) {
-      temp.write(s.replaceAll(RegExp(r'[0-9]'), ''));
-    } else {
-      temp.write(s);
-    }
+String _expandBraceFields(String template, Map<String, String> fields) {
+  var out = template;
+  final keys = fields.keys.toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  for (final key in keys) {
+    out = out.replaceAll('{$key}', fields[key] ?? '');
   }
-  final fin = StringBuffer();
-  for (final s in temp.toString().split(' ')) {
-    if (s.toLowerCase() == SiteTextConst.tnWaps.toLowerCase()) {
-      continue;
-    }
-    fin.write(s);
-  }
-  return fin.toString();
+  return out;
 }
 
-String _songsNut(String str) {
-  var parts = str.split('-');
-  var temp = StringBuffer();
-  for (final s in parts) {
-    final tr = s.trim();
-    if (_patternFind(tr, r'^[0-9]+\.')) {
-      temp.write(tr.replaceFirst(RegExp(r'^[0-9]+\.'), ''));
-    } else if (_patternFind(tr.toLowerCase(), r'^[0-9]+kbps')) {
-      temp.write(tr.replaceFirst(RegExp(r'^[0-9]+kbps', caseSensitive: false), ''));
-    } else {
-      temp.write(s);
-    }
-  }
-  final fin = StringBuffer();
-  for (final s in temp.toString().split(' ')) {
-    if (s.toLowerCase() == SiteTextConst.songsNut.toLowerCase()) {
-      continue;
-    }
-    fin.write(s);
-  }
-  return fin.toString();
+String _expandTemplate(
+  String template,
+  RegExpMatch? match,
+  Map<String, String> fields,
+) {
+  final withGroups = _expandDollarGroups(template, match);
+  return _expandBraceFields(withGroups, fields);
 }
 
-String _tamilDaDa(String str) {
-  final fin = StringBuffer();
-  for (final s in str.split(' ')) {
-    if (s.toLowerCase().contains(SiteTextConst.tamilDaDa.toLowerCase())) {
-      break;
-    }
-    fin.write(s);
-  }
-  return fin.toString();
-}
-
-String _tamilWire(String str) {
-  final fin = StringBuffer();
-  for (final s in str.split('-')) {
-    final t = s.toLowerCase().trim();
-    if (t == SiteTextConst.tamilwire.toLowerCase()) {
-      continue;
-    }
-    if (fin.isEmpty) {
-      fin.write(s.trim());
-    } else {
-      fin.write(' - ');
-      fin.write(s.trim());
+bool _matchesWhenTagsContain(
+  Map<String, String> fields,
+  List<String> triggers,
+) {
+  final eff = triggers.map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+  if (eff.isEmpty) return true;
+  for (final value in fields.values) {
+    final lower = value.toLowerCase();
+    if (eff.any((t) => lower.contains(t.toLowerCase()))) {
+      return true;
     }
   }
-  return fin.toString();
+  return false;
 }
 
-String _downloadSouthMp3(String str) {
-  var parts = str.split('-');
-  var temp = StringBuffer();
-  for (final s in parts) {
-    if (_patternFind(s.trim(), r'^[0-9]')) {
-      temp.write(s.replaceAll(RegExp(r'[0-9]'), ''));
-    } else {
-      if (temp.toString().trim().isEmpty) {
-        temp.write(s);
+void _applySetTags(_Rule rule, Map<String, String> fields, RegExpMatch? match) {
+  for (final e in rule.setTags.entries) {
+    if (!_allFieldKeys.contains(e.key)) continue;
+    fields[e.key] = _expandTemplate(e.value, match, fields);
+  }
+}
+
+void _applyClearFields(_Rule rule, Map<String, String> fields) {
+  for (final key in rule.clearFields) {
+    if (!_allFieldKeys.contains(key)) continue;
+    fields[key] = '';
+  }
+}
+
+void _applyStrip(_Rule rule, Map<String, String> fields) {
+  var subs = rule.stripSubstrings.where((s) => s.trim().isNotEmpty).toList();
+  if (subs.isEmpty) return;
+  subs.sort((a, b) => b.length.compareTo(a.length));
+  final keys = rule.stripFields.isEmpty ? _allFieldKeys : rule.stripFields;
+  for (final key in keys) {
+    if (!_allFieldKeys.contains(key)) continue;
+    var val = fields[key] ?? '';
+    for (final sub in subs) {
+      if (rule.stripIgnoreCase) {
+        val = val.replaceAll(
+          RegExp(RegExp.escape(sub), caseSensitive: false),
+          '',
+        );
       } else {
-        temp.write('-');
-        temp.write(s);
+        val = val.replaceAll(sub, '');
       }
     }
+    fields[key] = val.trim();
   }
-  final fin = StringBuffer();
-  for (final s in temp.toString().split(' ')) {
-    final t = s.toLowerCase();
-    if (t == SiteTextConst.songsPKLink.toLowerCase() ||
-        t == SiteTextConst.maango.toLowerCase() ||
-        t == SiteTextConst.maangoWS.toLowerCase() ||
-        t == SiteTextConst.maangoInfo.toLowerCase() ||
-        t == SiteTextConst.maaMp3.toLowerCase()) {
-      continue;
-    }
-    if (!(t == SiteTextConst.downloadSouthMp3.toLowerCase() ||
-        t == SiteTextConst.downloadMing.toLowerCase() ||
-        t == SiteTextConst.downloadMingCom.toLowerCase() ||
-        t == SiteTextConst.downloadMingLA.toLowerCase())) {
-      fin.write(s);
-    }
-  }
-  return fin.toString();
 }
 
-String _senSongs(String str) {
-  var temp = StringBuffer();
-  for (final s in str.split(' ')) {
-    if (_patternFind(s.trim(), r'^[0-9]')) {
-      temp.write(s.replaceAll(RegExp(r'[0-9]'), ''));
-    } else {
-      temp.write(_capitalize(s));
+void _applyCorePostTransforms(_Rule rule, Map<String, String> fields) {
+  final album = fields[SiteTextConst.album] ?? '';
+  fields[SiteTextConst.album] = album
+      .replaceFirst(RegExp(r'\s*\.mp3\s*$', caseSensitive: false), '')
+      .trim();
+
+  for (final key in [SiteTextConst.title, SiteTextConst.album]) {
+    final value = fields[key] ?? '';
+    fields[key] = value.replaceFirst(RegExp(r'_+\s*$'), '').trim();
+  }
+
+  if (rule.collapseWhitespace) {
+    for (final key in _allFieldKeys) {
+      fields[key] = (fields[key] ?? '')
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .join(' ');
     }
   }
-  final fin = StringBuffer();
-  for (final s in temp.toString().split('-')) {
-    final t = s.toLowerCase();
-    if (t.contains(SiteTextConst.sensongsMp3.toLowerCase())) {
-      continue;
+  if (rule.stripTrailingDash) {
+    for (final key in _allFieldKeys) {
+      final value = (fields[key] ?? '').trimRight();
+      fields[key] = value.endsWith('-')
+          ? value.substring(0, value.length - 1).trimRight()
+          : value;
     }
-    if (t.contains(SiteTextConst.sensongsCom.toLowerCase())) {
-      continue;
-    }
-    fin.write(s);
   }
-  return fin.toString();
 }
 
-String _starMusiq(String str) {
-  var temp = StringBuffer();
-  var parts = <String>[];
-  if (str.contains('_')) 
-    parts = str.split('_');
-  else if (str.contains('-'))
-    parts = str.split('-');
-  else
-    parts = str.split(' ');
-  for (final s in parts) {
-    if (_patternFind(s.trim(), r'^[0-9]')) {
-      temp.write(s.replaceAll(RegExp(r'[0-9]'), ''));
-    } else {
-      temp.write(s);
-    }
-  }
-  final fin = StringBuffer();
-  for (final s in temp.toString().split('-')) {
-    final t = s.toLowerCase();
-    if (t.contains(SiteTextConst.vmusiq.toLowerCase())) {
-      if (t == SiteTextConst.vmusiq.toLowerCase()) {
-        continue;
-      }
-      fin.write(s.replaceAll(SiteTextConst.vmusiq, ''));
-    } else if (t == SiteTextConst.starmusiq.toLowerCase() ||
-        t == SiteTextConst.sunmusiq.toLowerCase() ||
-        t == SiteTextConst.starmusiqtop.toLowerCase() ||
-        t == SiteTextConst.starmusiqFun.toLowerCase() ||
-        t == SiteTextConst.starmusiqOne.toLowerCase() ||
-        t == SiteTextConst.starmusiq5.toLowerCase() ||
-        t == SiteTextConst.tnWapNet.toLowerCase() ||
-        t == SiteTextConst.masstamilanIO.toLowerCase() ||
-        t == SiteTextConst.masstamilanFM.toLowerCase() ||
-        t == SiteTextConst.masstamilanCom.toLowerCase() ||
-        t == SiteTextConst.masstamilanDev.toLowerCase() ||
-        t == SiteTextConst.masstamilanSo.toLowerCase()) {
-      break;
-    } else {
-      fin.write(s);
-    }
-  }
-  return fin.toString();
-}
+String? _resolveRename(
+  _Rule rule,
+  String originalPath,
+  Map<String, String> renameFields,
+  RegExpMatch? match,
+) {
+  final template = rule.renameTo.trim();
+  if (template.isEmpty) return null;
 
-String _newTamilHits(String str) {
-  for (final s in str.split('-')) {
-    if (s.contains('NewTamilHits.Com')) {
-      return s.replaceAll('NewTamilHits.Com', '').replaceAll('_', '');
-    }
+  final expanded = _expandTemplate(template, match, renameFields).trim();
+  if (expanded.isEmpty) return null;
+
+  var name = _sanitizeFilename(expanded);
+  if (name.toLowerCase().endsWith('.mp3')) {
+    name =
+        '${name.substring(0, name.length - 4).trimRight().replaceFirst(RegExp(r'[. ]+$'), '')}.mp3';
+  } else {
+    name = '${name.trimRight().replaceFirst(RegExp(r'[. ]+$'), '')}.mp3';
   }
-  return '';
-}
+  if (name == '.mp3') name = 'untitled.mp3';
 
-String _tgxFromTags(String artist, String title) {
-  if (artist.trim().isEmpty && title.trim().isEmpty) {
-    return '';
-  }
-  return '${_capitalizeWords(artist)} - ${_capitalizeWords(title)}';
-}
-
-class _SplitOutcome {
-  _SplitOutcome(this.text, {this.usedTgx = false});
-  final String text;
-  final bool usedTgx;
-}
-
-_SplitOutcome _splitString(
-  String str, {
-  required String id3Artist,
-  required String id3Title,
-}) {
-  if (RegExp(r'^[0-9]+$').hasMatch(str)) {
-    //
-  }
-  final splitted = str.split(' ');
-  var temp = StringBuffer();
-  for (final s in splitted) {
-    if (s == SiteTextConst.sebastian || s == SiteTextConst.hindiMp3India) {
-      continue;
-    }
-    if (s == SiteTextConst.songsPK || s == SiteTextConst.iSongsInfo) {
-      return _SplitOutcome(_songsPkSite(str));
-    }
-    if (s.contains(SiteTextConst.tnWaps)) {
-      return _SplitOutcome(_tnWaps(str));
-    }
-    if (s.contains(SiteTextConst.tamilwire)) {
-      return _SplitOutcome(_tamilWire(str));
-    }
-    if (s.contains(SiteTextConst.downloadSouthMp3) ||
-        s.contains(SiteTextConst.downloadMing) ||
-        s.contains(SiteTextConst.downloadMingCom) ||
-        s.contains(SiteTextConst.maango) ||
-        s.contains(SiteTextConst.maaMp3) ||
-        s == SiteTextConst.songsPKLink ||
-        s.contains(SiteTextConst.downloadMingLA) ||
-        s.contains(SiteTextConst.maangoInfo) ||
-        s.contains(SiteTextConst.maangoWS)) {
-      return _SplitOutcome(_downloadSouthMp3(str));
-    }
-    if (s.contains(SiteTextConst.vmusiq) ||
-        s.contains(SiteTextConst.starmusiq) ||
-        s.contains(SiteTextConst.starmusiqtop) ||
-        s.contains(SiteTextConst.sunmusiq) ||
-        s.contains(SiteTextConst.starmusiqFun) ||
-        s.contains(SiteTextConst.masstamilanFM) ||
-        s.contains(SiteTextConst.starmusiqOne) ||
-        s.contains(SiteTextConst.tnWapNet) ||
-        s.contains(SiteTextConst.masstamilanIO) ||
-        s.contains(SiteTextConst.masstamilanCom) ||
-        s.contains(SiteTextConst.masstamilanDev) ||
-        s.contains(SiteTextConst.masstamilanSo)) {
-      return _SplitOutcome(_starMusiq(str));
-    }
-    if (s.contains(SiteTextConst.newtamilhits)) {
-      return _SplitOutcome(_newTamilHits(str));
-    }
-    if (s.contains(SiteTextConst.songsNut)) {
-      return _SplitOutcome(_songsNut(str));
-    }
-    if (s.contains(SiteTextConst.sensongsMp3) ||
-        s.contains(SiteTextConst.sensongsCom)) {
-      return _SplitOutcome(_senSongs(str));
-    }
-    if (s.contains(SiteTextConst.tamilDaDa)) {
-      return _SplitOutcome(_tamilDaDa(str));
-    }
-    if (s.contains(SiteTextConst.tgx)) {
-      final line = _tgxFromTags(id3Artist, id3Title);
-      if (line.isEmpty) {
-        temp.write(_capitalize(s));
-      } else {
-        return _SplitOutcome(line, usedTgx: true);
-      }
-    } else if (_patternFind(s.trim(), r'^[0-9]')) {
-      temp.write(s.replaceAll(RegExp(r'[0-9]*[\.\-]'), ''));
-    } else {
-      temp.write(_capitalize(s));
-    }
-  }
-  return _SplitOutcome(temp.toString());
-}
-
-String _getMp3Status(
-  String newFileName,
-  String albumRaw,
-  String originalBaseNoExt,
-  String originalFileNameWithExt, {
-  required bool skipAlbumRefine,
-}) {
-  if (skipAlbumRefine) return newFileName.trim();
-
-  var newName = newFileName.trim();
-  final albumName = _albumNameFromTags(albumRaw.isEmpty ? null : albumRaw);
-  final albumCompact = albumName.replaceAll(' ', '');
-
-  if ('$newName.mp3'.replaceAll(' ', '') ==
-          originalFileNameWithExt.replaceAll(' ', '') &&
-      albumCompact.isNotEmpty &&
-      newName.contains(albumCompact)) {
-    return originalBaseNoExt.trim();
-  }
-
-  if (newName.contains(albumCompact.replaceAll(RegExp(r'\(\d+\)?'), '').replaceAll(RegExp(r'\(\w+\)?'), ''))) {
-    newName = newName.replaceAll(RegExp(r'\(\d+\)?'), '').replaceAll(RegExp(r'\(\w+\)?'), '');
-  } else if (albumName.isNotEmpty) {
-    if (!newName.contains(albumCompact.replaceAll(RegExp(r'\(\d+\)'), '')) &&
-        !newName.contains(albumName.replaceAll(' ', ''))) {
-      var alb = albumName;
-      if (alb.contains('| Songsnut.')) {
-        alb = alb.replaceAll('| Songsnut.', '');
-      } else if (alb.contains('- TamilDaDa.Info')) {
-        alb = alb.replaceAll('- TamilDaDa.Info', '');
-      }
-      newName = '${alb.trim().replaceAll(' ', '')} - $newName';
-    } else if (newName.trim() == albumName || newName == albumName.replaceAll(' ', '')) {
-      newName = '${albumName.trim().replaceAll(' ', '')} - ${newName.trim()}';
-    } else if (newName.trim().startsWith(albumName) &&
-        newName.trim().length != albumName.trim().length) {
-      if (newName.trim().length == albumName.trim().length) {
-        if (!newName.contains('$albumName-')) {
-          newName = newName.replaceAll(albumName, '$albumName -');
-        }
-      } else {
-        newName = '${albumName.trim().replaceAll(' ', '')} - ${newName.trim()}';
-      }
-    } else if (newName.trim().startsWith(albumName.replaceAll(' ', '')) &&
-        newName.trim() == albumName &&
-        newName == albumName.replaceAll(' ', '')) {
-      newName = newName.replaceAll(albumName.replaceAll(' ', ''), '$albumName - ');
-    }
-  }
-  return newName.trim();
+  final parent = p.dirname(originalPath);
+  final target = p.normalize(p.join(parent, name));
+  if (target == p.normalize(originalPath)) return null;
+  return p.basenameWithoutExtension(target);
 }
 
 /// Computes a clean filename + album/title split (Java SiteAudioRenamer + TagEdit.setTag).
@@ -543,36 +629,117 @@ SiteRenameSuggestion computeSiteRename({
   required String? albumFromTags,
   required String artistFromTags,
   required String titleFromTags,
+  required String genreFromTags,
 }) {
   final filename = p.basename(filePath);
   final originalBase = _stripExtension(filename);
-  final split = _splitString(originalBase, id3Artist: artistFromTags, id3Title: titleFromTags);
-  var fName = split.text;
-  fName = _getMp3Status(
-    fName,
-    albumFromTags ?? '',
-    originalBase,
-    filename,
-    skipAlbumRefine: split.usedTgx,
-  );
+  final sourceFields = <String, String>{
+    SiteTextConst.title: titleFromTags.trim(),
+    SiteTextConst.artist: artistFromTags.trim(),
+    SiteTextConst.album: (albumFromTags ?? '').trim(),
+    SiteTextConst.genre: genreFromTags.trim(),
+    'filename': filename,
+    'stem': originalBase,
+    'ext': '.mp3',
+    'title_noleadtrack': _titleDropLeadingTrackNum(titleFromTags.trim()),
+  };
 
-  var album = '';
-  var title = '';
-  splitBasenameLikeJavaSetTag(fName, (a, t) {
-    album = a;
-    title = t;
-  });
+  var chosenName = originalBase;
+  var title = sourceFields[SiteTextConst.title] ?? '';
+  var artist = sourceFields[SiteTextConst.artist] ?? '';
+  var album = sourceFields[SiteTextConst.album] ?? '';
+  var genre = sourceFields[SiteTextConst.genre] ?? '';
+  var matchedRule = false;
+
+  for (final rule in _rules) {
+    if (!rule.enabled) continue;
+    if (!_matchesWhenTagsContain(sourceFields, rule.whenTagsContain)) continue;
+
+    RegExpMatch? match;
+    if (rule.filenameRegex.trim().isNotEmpty) {
+      final regex = RegExp(rule.filenameRegex);
+      match = regex.firstMatch(filename);
+      if (match == null) continue;
+    }
+
+    final fields = <String, String>{
+      SiteTextConst.title: sourceFields[SiteTextConst.title] ?? '',
+      SiteTextConst.artist: sourceFields[SiteTextConst.artist] ?? '',
+      SiteTextConst.album: sourceFields[SiteTextConst.album] ?? '',
+      SiteTextConst.genre: sourceFields[SiteTextConst.genre] ?? '',
+      'filename': filename,
+      'stem': originalBase,
+      'ext': '.mp3',
+      'title_noleadtrack': sourceFields['title_noleadtrack'] ?? '',
+    };
+
+    _applySetTags(rule, fields, match);
+    _applyClearFields(rule, fields);
+    _applyStrip(rule, fields);
+    _applyCorePostTransforms(rule, fields);
+
+    final renameFields = <String, String>{...fields};
+    final t = renameFields[SiteTextConst.title] ?? '';
+    final a = renameFields[SiteTextConst.album] ?? '';
+    renameFields['title_titlecompact'] = _titleTitleCompact(t);
+    renameFields['title_titlecase'] = _titleWordsSpaced(t);
+    renameFields['title_titlecompact_nolead'] = _titleTitleCompact(
+      _titleDropLeadingTrackNum(t),
+    );
+    renameFields['album_titlecase'] = _titleWordsSpaced(a);
+    renameFields['album_titlecase_clean'] = _titleWordsSpaced(
+      _albumRenameBase(a),
+    );
+    renameFields['album_titlecompact_cleanyear'] = _titleTitleCompact(
+      _albumDropYearBrackets(_albumRenameBase(a)),
+    );
+
+    final renamed = _resolveRename(rule, filePath, renameFields, match);
+    if (renamed != null && renamed.trim().isNotEmpty) {
+      chosenName = renamed.trim();
+    }
+    title = fields[SiteTextConst.title] ?? title;
+    artist = fields[SiteTextConst.artist] ?? artist;
+    album = fields[SiteTextConst.album] ?? album;
+    genre = fields[SiteTextConst.genre] ?? genre;
+    matchedRule = true;
+    break;
+  }
+
+  if (!matchedRule) {
+    return SiteRenameSuggestion(
+      newBasenameWithoutExt: originalBase,
+      suggestedArtist: '',
+      suggestedAlbum: '',
+      suggestedTitle: '',
+      suggestedGenre: '',
+      originalBasenameWithoutExt: originalBase,
+    );
+  }
+
+  if (title.trim().isEmpty) {
+    title = chosenName;
+  }
+  if (album.trim().isEmpty) {
+    final dash = chosenName.indexOf('-');
+    if (dash > 0) album = chosenName.substring(0, dash).trim();
+  }
 
   return SiteRenameSuggestion(
-    newBasenameWithoutExt: fName,
+    newBasenameWithoutExt: chosenName,
+    suggestedArtist: artist,
     suggestedAlbum: album,
     suggestedTitle: title,
+    suggestedGenre: genre,
     originalBasenameWithoutExt: originalBase,
   );
 }
 
 /// Renames [oldPath] to sibling `$newBasenameWithoutExt.mp3`. Returns new path.
-Future<String> renameMp3File(String oldPath, String newBasenameWithoutExt) async {
+Future<String> renameMp3File(
+  String oldPath,
+  String newBasenameWithoutExt,
+) async {
   final old = File(oldPath);
   if (!await old.exists()) {
     throw StateError('File not found.');
@@ -593,4 +760,3 @@ Future<String> renameMp3File(String oldPath, String newBasenameWithoutExt) async
   await old.rename(newPath);
   return normNew;
 }
-

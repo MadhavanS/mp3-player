@@ -13,3 +13,5 @@ Future<Map<String, CachedTrackSnapshot>> loadSnapshotsForRoots(
 Future<void> saveTrackSnapshots(Iterable<CachedTrackSnapshot> tracks) async {}
 
 Future<void> deleteMissingPaths(Set<String> existingPaths) async {}
+
+Future<void> deletePaths(Iterable<String> paths) async {}

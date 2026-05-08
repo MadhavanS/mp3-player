@@ -192,6 +192,28 @@ Future<void> deleteMissingPaths(Set<String> existingPaths) async {
   }
 }
 
+Future<void> deletePaths(Iterable<String> paths) async {
+  final normalized = paths
+      .map((p0) => p0.trim())
+      .where((p0) => p0.isNotEmpty)
+      .toSet();
+  if (normalized.isEmpty) return;
+  try {
+    final db = await _openIsar();
+    final rows = await db.songMetadataCacheRows
+        .where()
+        .anyOf(normalized.toList(), (q, path) => q.pathEqualTo(path))
+        .findAll();
+    if (rows.isEmpty) return;
+    final ids = rows.map((r) => r.id).toList(growable: false);
+    await db.writeAsync((isar) {
+      isar.songMetadataCacheRows.deleteAll(ids);
+    });
+  } catch (e, st) {
+    debugPrint('SongMetadataCache.deletePaths: $e\n$st');
+  }
+}
+
 int _stablePathId(String value) {
   var hash = 0x811C9DC5;
   for (final c in value.codeUnits) {

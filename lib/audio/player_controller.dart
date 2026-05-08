@@ -411,26 +411,74 @@ class PlayerController extends ChangeNotifier {
   }
 
   void updateTrackByPath(String path, TrackItem updated) {
-    final i = _playlist.indexWhere((t) => t.filePath == path);
-    if (i >= 0) _playlist[i] = updated;
-    final c = _libraryCatalog.indexWhere((t) => t.filePath == path);
-    if (c >= 0) _libraryCatalog[c] = updated;
-    if (i >= 0 || c >= 0) notifyListeners();
+    var changed = false;
+    for (var i = 0; i < _playlist.length; i++) {
+      if (_playlist[i].filePath == path) {
+        _playlist[i] = updated;
+        changed = true;
+      }
+    }
+    for (var c = 0; c < _libraryCatalog.length; c++) {
+      if (_libraryCatalog[c].filePath == path) {
+        _libraryCatalog[c] = updated;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
   }
 
   /// Replace the playlist entry for [oldPath] with [updated] (new path + tags).
   /// Reloads the audio source when the renamed file is currently playing.
   void replaceTrackPath(String oldPath, TrackItem updated) {
-    final i = _playlist.indexWhere((t) => t.filePath == oldPath);
-    if (i >= 0) _playlist[i] = updated;
-    final c = _libraryCatalog.indexWhere((t) => t.filePath == oldPath);
-    if (c >= 0) _libraryCatalog[c] = updated;
-    if (i < 0 && c < 0) return;
+    var changed = false;
+    for (var i = 0; i < _playlist.length; i++) {
+      if (_playlist[i].filePath == oldPath) {
+        _playlist[i] = updated;
+        changed = true;
+      }
+    }
+    for (var c = 0; c < _libraryCatalog.length; c++) {
+      if (_libraryCatalog[c].filePath == oldPath) {
+        _libraryCatalog[c] = updated;
+        changed = true;
+      }
+    }
+    if (!changed) return;
     final currentPath = currentTrack?.filePath;
     notifyListeners();
     if (currentPath == oldPath) {
       unawaited(_loadCurrent());
     }
+  }
+
+  bool _prunePlaylistPathsNotInCatalog() {
+    if (_libraryCatalog.isEmpty || _playlist.isEmpty) return false;
+    final validPaths = _libraryCatalog
+        .map((t) => t.filePath)
+        .whereType<String>()
+        .where((p) => p.trim().isNotEmpty)
+        .toSet();
+    if (validPaths.isEmpty) return false;
+
+    final before = _playlist.length;
+    _playlist.removeWhere((t) {
+      final fp = t.filePath;
+      if (fp == null || fp.trim().isEmpty) return true;
+      return !validPaths.contains(fp);
+    });
+    if (_playlist.length == before) return false;
+
+    if (_playlist.isEmpty) {
+      _index = 0;
+      _resetShuffleState();
+    } else {
+      _index = _index.clamp(0, _playlist.length - 1);
+      if (_shuffle) {
+        _shuffleOrder = List<int>.generate(_playlist.length, (i) => i);
+        _shufflePos = _shufflePos.clamp(0, _shuffleOrder.length - 1);
+      }
+    }
+    return true;
   }
 
   /// Removes one queue entry and keeps playback coherent. Shuffle is turned off.
@@ -495,6 +543,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> _loadCurrent({
     Duration initialPosition = Duration.zero,
     bool stopBeforeLoad = true,
+    bool retryAfterMissingPath = true,
   }) async {
     final preview = currentTrack;
     final pathPreview = preview?.filePath;
@@ -519,6 +568,9 @@ class PlayerController extends ChangeNotifier {
 
     _isLoadingSource = true;
     try {
+      if (_prunePlaylistPathsNotInCatalog() && _playlist.isNotEmpty) {
+        notifyListeners();
+      }
       try {
         await _player.stop();
       } catch (_) {}
@@ -591,10 +643,65 @@ class PlayerController extends ChangeNotifier {
       );
     } catch (e, st) {
       debugPrint('Playback load error: $e\n$st');
+      if (retryAfterMissingPath) {
+        final missingPath = _extractMissingPathFromLoadError(e);
+        if (missingPath != null && missingPath.isNotEmpty) {
+          final removed = _removeMissingTrackPath(missingPath);
+          if (removed && _playlist.isNotEmpty) {
+            await _loadCurrent(
+              initialPosition: Duration.zero,
+              stopBeforeLoad: true,
+              retryAfterMissingPath: false,
+            );
+            return;
+          }
+        }
+      }
     } finally {
       _isLoadingSource = false;
     }
     notifyListeners();
+  }
+
+  String? _extractMissingPathFromLoadError(Object error) {
+    final s = error.toString();
+    final marker = 'FileNotFoundException:';
+    final at = s.indexOf(marker);
+    if (at < 0) return null;
+    final tail = s.substring(at + marker.length).trim();
+    final end = tail.indexOf(': open failed');
+    if (end <= 0) return null;
+    final path = tail.substring(0, end).trim();
+    if (path.isEmpty) return null;
+    return path;
+  }
+
+  bool _removeMissingTrackPath(String path) {
+    final beforePlaylist = _playlist.length;
+    _playlist.removeWhere((t) => t.filePath == path);
+    final beforeCatalog = _libraryCatalog.length;
+    _libraryCatalog.removeWhere((t) => t.filePath == path);
+
+    if (_playlist.isEmpty) {
+      _index = 0;
+      _resetShuffleState();
+    } else {
+      if (_index >= _playlist.length) {
+        _index = _playlist.length - 1;
+      }
+      if (_shuffle) {
+        _shuffleOrder = List<int>.generate(_playlist.length, (i) => i);
+        if (_shufflePos >= _shuffleOrder.length) {
+          _shufflePos = _shuffleOrder.length - 1;
+        }
+      }
+    }
+
+    final changed =
+        _playlist.length != beforePlaylist ||
+        _libraryCatalog.length != beforeCatalog;
+    if (changed) notifyListeners();
+    return changed;
   }
 
   /// Reload the current file from disk (e.g. after embedded tags were rewritten).
