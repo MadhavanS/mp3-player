@@ -58,6 +58,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   _ShellPage _page = _ShellPage.library;
   List<String> _folderPaths = [];
   bool _scanning = false;
+  /// Set after filesystem scan completes; `null` means still enumerating MP3 paths.
+  int? _scanDetectedMp3Count;
   PlayerController? _playerForRecentHistory;
   PlayerController? _playerRef;
   String? _dispatchedRecentPath;
@@ -108,11 +110,36 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       player.setPlaybackPathKeyScope(browseKeys);
     }
     if (paths.isEmpty) return;
-    await _scanFoldersAndSetPlaylist(
-      paths,
-      playAfter: false,
-      tryPersistedPlayback: true,
+    await _restoreLibraryFromCacheAndSession(player);
+  }
+
+  Future<void> _restoreLibraryFromCacheAndSession(PlayerController player) async {
+    final persistedQueuePaths = await PlaybackSessionStore.loadPersistedQueuePaths();
+    if (!mounted || persistedQueuePaths.isEmpty) return;
+
+    final cachedByPath = await SongMetadataCache.loadTracksByPaths(
+      persistedQueuePaths,
     );
+    if (!mounted) return;
+
+    final tracks = persistedQueuePaths
+        .map((path) => cachedByPath[path] ?? TrackItem.fromFilePath(path))
+        .toList(growable: false);
+
+    if (tracks.isEmpty) return;
+    player.setLibraryCatalog(tracks);
+    await PlaybackSessionStore.restorePlayer(player, tracks);
+    if (!kIsWeb && mounted) {
+      enrichPlaylistTracks(
+        tracks: tracks,
+        onTrackUpdated: (path, updated) {
+          player.updateTrackByPath(path, updated);
+          unawaited(SongMetadataCache.saveTracks([updated]));
+        },
+      ).catchError((Object e, StackTrace st) {
+        debugPrint('enrichPlaylistTracks(startup): $e\n$st');
+      });
+    }
   }
 
   Future<void> _persistSession() async {
@@ -190,87 +217,72 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
 
-    setState(() => _scanning = true);
+    setState(() {
+      _scanning = true;
+      _scanDetectedMp3Count = null;
+    });
     List<String> files;
     try {
       files = await _collectMp3Paths(paths);
-    } finally {
-      if (mounted) setState(() => _scanning = false);
-    }
-    if (!mounted) return;
-
-    await RecentlyAddedStore.mergeScanPaths(files);
-    if (!mounted) return;
-
-    if (files.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No .mp3 files found in the saved folders.'),
-        ),
-      );
-      player.setLibraryCatalog([]);
-      await player.setPlaylist(
-        [],
-        startIndex: 0,
-        playbackOriginTab: LibraryTabId.songs,
-      );
-      return;
-    }
-
-    final cachedByPath = await SongMetadataCache.loadTracksByPaths(files);
-    final tracks = files
-        .map((path) => cachedByPath[path] ?? TrackItem.fromFilePath(path))
-        .toList(growable: false);
-    unawaited(SongMetadataCache.deleteMissingPaths(files.toSet()));
-    unawaited(SongMetadataCache.saveTracks(tracks));
-    player.setLibraryCatalog(tracks);
-
-    if (preservePlaybackAfterRescan) {
-      var resolvedStart = startIndex.clamp(0, tracks.length - 1);
-      if (pathToPreserve != null) {
-        final idx = tracks.indexWhere((t) => t.filePath == pathToPreserve);
-        if (idx >= 0) resolvedStart = idx;
+      if (!mounted) return;
+      if (files.isNotEmpty) {
+        setState(() => _scanDetectedMp3Count = files.length);
       }
-      await player.setPlaylist(
-        tracks,
-        startIndex: resolvedStart,
-        playbackOriginTab: LibraryTabId.songs,
-      );
-      if (pathToPreserve != null && tracks.isNotEmpty) {
-        final atPath =
-            tracks[resolvedStart.clamp(0, tracks.length - 1)].filePath;
-        if (atPath == pathToPreserve && playbackPosition > Duration.zero) {
-          await player.seek(playbackPosition);
+
+      await RecentlyAddedStore.mergeScanPaths(files);
+      if (!mounted) return;
+
+      if (files.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No .mp3 files found in the saved folders.'),
+          ),
+        );
+        player.setLibraryCatalog([]);
+        await player.setPlaylist(
+          [],
+          startIndex: 0,
+          playbackOriginTab: LibraryTabId.songs,
+        );
+        return;
+      }
+
+      final cachedByPath = await SongMetadataCache.loadTracksByPaths(files);
+      final tracks = files
+          .map((path) => cachedByPath[path] ?? TrackItem.fromFilePath(path))
+          .toList(growable: false);
+      unawaited(SongMetadataCache.deleteMissingPaths(files.toSet()));
+      unawaited(SongMetadataCache.saveTracks(tracks));
+      player.setLibraryCatalog(tracks);
+
+      if (preservePlaybackAfterRescan) {
+        var resolvedStart = startIndex.clamp(0, tracks.length - 1);
+        if (pathToPreserve != null) {
+          final idx = tracks.indexWhere((t) => t.filePath == pathToPreserve);
+          if (idx >= 0) resolvedStart = idx;
         }
-      }
-      if (playAfter) {
-        await player.play();
-      } else {
-        if (wasPlaying) {
+        await player.setPlaylist(
+          tracks,
+          startIndex: resolvedStart,
+          playbackOriginTab: LibraryTabId.songs,
+        );
+        if (pathToPreserve != null && tracks.isNotEmpty) {
+          final atPath =
+              tracks[resolvedStart.clamp(0, tracks.length - 1)].filePath;
+          if (atPath == pathToPreserve && playbackPosition > Duration.zero) {
+            await player.seek(playbackPosition);
+          }
+        }
+        if (playAfter) {
           await player.play();
         } else {
-          await player.pause();
+          if (wasPlaying) {
+            await player.play();
+          } else {
+            await player.pause();
+          }
         }
-      }
-      if (!kIsWeb && mounted) {
-        enrichPlaylistTracks(
-          tracks: tracks,
-          onTrackUpdated: (path, updated) {
-            player.updateTrackByPath(path, updated);
-            unawaited(SongMetadataCache.saveTracks([updated]));
-          },
-        ).catchError((Object e, StackTrace st) {
-          debugPrint('enrichPlaylistTracks: $e\n$st');
-        });
-      }
-      return;
-    }
-
-    if (tryPersistedPlayback) {
-      final restored = await PlaybackSessionStore.restorePlayer(player, tracks);
-      if (!mounted) return;
-      if (restored) {
-        if (playAfter) await player.play();
         if (!kIsWeb && mounted) {
           enrichPlaylistTracks(
             tracks: tracks,
@@ -284,29 +296,57 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         }
         return;
       }
-    }
 
-    var resolvedStart = startIndex.clamp(0, tracks.length - 1);
-    await player.setPlaylist(
-      tracks,
-      startIndex: resolvedStart,
-      playbackOriginTab: LibraryTabId.songs,
-    );
+      if (tryPersistedPlayback) {
+        final restored =
+            await PlaybackSessionStore.restorePlayer(player, tracks);
+        if (!mounted) return;
+        if (restored) {
+          if (playAfter) await player.play();
+          if (!kIsWeb && mounted) {
+            enrichPlaylistTracks(
+              tracks: tracks,
+              onTrackUpdated: (path, updated) {
+                player.updateTrackByPath(path, updated);
+                unawaited(SongMetadataCache.saveTracks([updated]));
+              },
+            ).catchError((Object e, StackTrace st) {
+              debugPrint('enrichPlaylistTracks: $e\n$st');
+            });
+          }
+          return;
+        }
+      }
 
-    if (playAfter) {
-      await player.play();
-    }
+      var resolvedStart = startIndex.clamp(0, tracks.length - 1);
+      await player.setPlaylist(
+        tracks,
+        startIndex: resolvedStart,
+        playbackOriginTab: LibraryTabId.songs,
+      );
 
-    if (!kIsWeb && mounted) {
-      enrichPlaylistTracks(
-        tracks: tracks,
-        onTrackUpdated: (path, updated) {
-          player.updateTrackByPath(path, updated);
-          unawaited(SongMetadataCache.saveTracks([updated]));
-        },
-      ).catchError((Object e, StackTrace st) {
-        debugPrint('enrichPlaylistTracks: $e\n$st');
-      });
+      if (playAfter) {
+        await player.play();
+      }
+
+      if (!kIsWeb && mounted) {
+        enrichPlaylistTracks(
+          tracks: tracks,
+          onTrackUpdated: (path, updated) {
+            player.updateTrackByPath(path, updated);
+            unawaited(SongMetadataCache.saveTracks([updated]));
+          },
+        ).catchError((Object e, StackTrace st) {
+          debugPrint('enrichPlaylistTracks: $e\n$st');
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _scanDetectedMp3Count = null;
+        });
+      }
     }
   }
 
@@ -558,10 +598,59 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               if (_scanning)
                 Positioned.fill(
                   child: DecoratedBox(
-                    decoration: const BoxDecoration(color: Color(0x33000000)),
+                    decoration: const BoxDecoration(color: Color(0x59000000)),
                     child: Center(
-                      child: CircularProgressIndicator(
-                        color: context.palette.surface,
+                      child: Material(
+                        color: pal.surface,
+                        elevation: 6,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(28, 24, 28, 22),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 320),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.library_music_rounded,
+                                  size: 40,
+                                  color: context.controlAccent,
+                                ),
+                                const SizedBox(height: 18),
+                                SizedBox(
+                                  width: 36,
+                                  height: 36,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    color: context.controlAccent,
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                Text(
+                                  _scanDetectedMp3Count == null
+                                      ? 'Searching for songs…'
+                                      : 'Found $_scanDetectedMp3Count ${_scanDetectedMp3Count == 1 ? 'song' : 'songs'}',
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: pal.textPrimary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _scanDetectedMp3Count == null
+                                      ? 'Scanning your music folders for MP3 files. Large libraries can take a moment.'
+                                      : 'Loading tags and preparing your library…',
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: pal.textSecondary,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),

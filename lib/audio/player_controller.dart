@@ -41,6 +41,11 @@ class PlayerController extends ChangeNotifier {
   ProcessingState? _previousProcessing;
   bool _isLoadingSource = false;
 
+  /// While rebuilding [ConcatenatingAudioSource] for shuffle, [AudioPlayer.stop] makes
+  /// `playing` false briefly; UI uses [isPlaying] which ORs this in so play/pause
+  /// doesn't flash (repeat never reloads the source, so it has no such gap).
+  bool _retainPlayingUiForShuffleReload = false;
+
   /// When non-null, [skipNext], [skipPrevious], [upcomingTrack], and repeat-all wrap
   /// only among tracks whose path key is in this set (same as Songs tab folder filter).
   Set<String>? _playbackPathKeysScope;
@@ -146,7 +151,14 @@ class PlayerController extends ChangeNotifier {
   PlaylistRepeatMode get repeatMode => _repeat;
 
   /// Limits next/previous and repeat-all to tracks inside the scoped folder (see Files flow).
-  void setPlaybackPathKeyScope(Set<String>? pathKeys) {
+  ///
+  /// When [reloadQueue] is false, only updates scope (and shuffle reset when scope is non-null).
+  /// Call this before [setPlaylist]/[setPlaylistAndPlay] so a single [_loadCurrent] runs with
+  /// the new queue instead of racing a reload that preserves the old playback position.
+  void setPlaybackPathKeyScope(
+    Set<String>? pathKeys, {
+    bool reloadQueue = true,
+  }) {
     _playbackPathKeysScope = pathKeys == null
         ? null
         : Set<String>.from(pathKeys);
@@ -154,6 +166,7 @@ class PlayerController extends ChangeNotifier {
       _resetShuffleState();
     }
     notifyListeners();
+    if (!reloadQueue) return;
     unawaited(_loadCurrent(initialPosition: _player.position));
   }
 
@@ -185,7 +198,8 @@ class PlayerController extends ChangeNotifier {
     return out;
   }
 
-  bool get isPlaying => _player.playing;
+  bool get isPlaying =>
+      _player.playing || _retainPlayingUiForShuffleReload;
   Duration get position => _player.position;
   Duration? get duration => _player.duration;
 
@@ -450,13 +464,18 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadCurrent({Duration initialPosition = Duration.zero}) async {
+  Future<void> _loadCurrent({
+    Duration initialPosition = Duration.zero,
+    bool stopBeforeLoad = true,
+  }) async {
     final preview = currentTrack;
     final pathPreview = preview?.filePath;
     if (preview == null || pathPreview == null || pathPreview.isEmpty) {
-      try {
-        await _player.stop();
-      } catch (_) {}
+      if (stopBeforeLoad) {
+        try {
+          await _player.stop();
+        } catch (_) {}
+      }
       notifyListeners();
       return;
     }
@@ -711,7 +730,6 @@ class PlayerController extends ChangeNotifier {
       _shuffle = true;
     }
     notifyListeners();
-    unawaited(_loadCurrent(initialPosition: _player.position));
   }
 
   void cycleRepeatMode() {
