@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
@@ -41,6 +42,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   late final TextEditingController _artist;
   late final TextEditingController _album;
   late final TextEditingController _genre;
+  late final TextEditingController _fileName;
 
   AlbumArtEditKind _artEdit = AlbumArtEditKind.keep;
   Uint8List? _pickedCoverBytes;
@@ -59,10 +61,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     );
     _album = TextEditingController(text: t.metaLine == 'mp3' ? '' : t.metaLine);
     _genre = TextEditingController(text: _genreTextFromTrack(t));
+    final fp = t.filePath ?? '';
+    _fileName = TextEditingController(
+      text: fp.isEmpty ? '' : p.basenameWithoutExtension(fp),
+    );
     _title.addListener(_onTagFieldChanged);
     _artist.addListener(_onTagFieldChanged);
     _album.addListener(_onTagFieldChanged);
     _genre.addListener(_onTagFieldChanged);
+    _fileName.addListener(_onTagFieldChanged);
   }
 
   void _onTagFieldChanged() {
@@ -87,10 +94,12 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     _artist.removeListener(_onTagFieldChanged);
     _album.removeListener(_onTagFieldChanged);
     _genre.removeListener(_onTagFieldChanged);
+    _fileName.removeListener(_onTagFieldChanged);
     _title.dispose();
     _artist.dispose();
     _album.dispose();
     _genre.dispose();
+    _fileName.dispose();
     super.dispose();
   }
 
@@ -391,8 +400,14 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
     setState(() => _saving = true);
     try {
+      final desiredBasename = sanitizeRenameBasename(_fileName.text);
+      var targetPath = path;
+      final currentBasename = p.basenameWithoutExtension(path);
+      if (desiredBasename != currentBasename) {
+        targetPath = await renameMp3File(path, desiredBasename);
+      }
       await writeEmbeddedAudioTags(
-        filePath: path,
+        filePath: targetPath,
         title: _title.text,
         artist: _artist.text,
         album: _album.text,
@@ -401,8 +416,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         newCoverBytes: _pickedCoverBytes,
         newCoverMimeType: _pickedCoverMime,
       );
-      final refreshed = await readAudioMetadata(widget.track);
-      player.updateTrackByPath(path, refreshed);
+      final refreshed = await readAudioMetadata(
+        TrackItem.fromFilePath(targetPath),
+      );
+      if (targetPath != path) {
+        player.replaceTrackPath(path, refreshed);
+        unawaited(SongMetadataCache.deletePaths([path]));
+      } else {
+        player.updateTrackByPath(path, refreshed);
+      }
       if (mounted) {
         Navigator.of(context).pop();
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -571,6 +593,17 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                       ],
                     ),
                   ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _fileName,
+                enabled: !_saving,
+                decoration: InputDecoration(
+                  labelText: 'File name',
+                  helperText: 'Saved as .mp3',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _clearFieldSuffix(_fileName),
                 ),
               ),
               const SizedBox(height: 12),
