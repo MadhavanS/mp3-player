@@ -514,9 +514,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       player.setLibraryCatalog(tracks);
 
       if (preservePlaybackAfterRescan) {
-        if (keepCurrentQueue &&
-            player.currentTrack != null &&
-            player.playlist.isNotEmpty) {
+        if (keepCurrentQueue && player.playlist.isNotEmpty) {
           if (!kIsWeb && mounted) {
             enrichPlaylistTracks(
               tracks: tracks,

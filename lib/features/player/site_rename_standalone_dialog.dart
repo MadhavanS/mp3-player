@@ -17,30 +17,6 @@ String _genrePlain(TrackItem t) {
   return t.genres.replaceAll('#', ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
 }
 
-Future<void> _resumePlaybackAfterExternalWrite(
-  PlayerController player,
-  bool resume,
-  Duration resumePosition,
-) async {
-  try {
-    await player.reloadCurrentSource().timeout(const Duration(seconds: 20));
-    var target = resumePosition;
-    final dur = player.audioPlayer.duration;
-    if (dur != null && target > dur) {
-      target = dur;
-    }
-    if (target.isNegative) {
-      target = Duration.zero;
-    }
-    await player.seek(target);
-    if (resume) {
-      await player.play();
-    }
-  } catch (e, st) {
-    debugPrint('Playback reload after rename: $e\n$st');
-  }
-}
-
 /// Shows only the “Clean site-style filename” confirmation (no tag editor sheet).
 Future<void> showStandaloneSiteRenameDialog(
   BuildContext context,
@@ -179,11 +155,6 @@ Future<void> _applySiteRenameStandalone(
 
   final player = PlayerController.of(context);
   final messenger = ScaffoldMessenger.maybeOf(context);
-  final wasPlaying = player.isPlaying;
-  final resumePosition = player.position;
-  var updateSucceeded = false;
-
-  await player.stopForExternalFileEdit();
 
   try {
     var newPath = originalPath;
@@ -219,10 +190,6 @@ Future<void> _applySiteRenameStandalone(
         uppercaseLabel: true,
       );
     });
-    updateSucceeded = true;
-    unawaited(
-      _resumePlaybackAfterExternalWrite(player, wasPlaying, resumePosition),
-    );
   } on StateError catch (e) {
     if (!context.mounted) return;
     final msg = e.toString();
@@ -243,11 +210,5 @@ Future<void> _applySiteRenameStandalone(
   } catch (e) {
     if (!context.mounted) return;
     messenger?.showSnackBar(SnackBar(content: Text('Error: $e')));
-  } finally {
-    if (!updateSucceeded) {
-      unawaited(
-        _resumePlaybackAfterExternalWrite(player, wasPlaying, resumePosition),
-      );
-    }
   }
 }

@@ -27,30 +27,6 @@ String _mimeFromFileName(String name) {
   return 'image/jpeg';
 }
 
-Future<void> _resumePlaybackAfterTagSave(
-  PlayerController player,
-  bool resume,
-  Duration resumePosition,
-) async {
-  try {
-    await player.reloadCurrentSource().timeout(const Duration(seconds: 20));
-    var target = resumePosition;
-    final dur = player.audioPlayer.duration;
-    if (dur != null && target > dur) {
-      target = dur;
-    }
-    if (target.isNegative) {
-      target = Duration.zero;
-    }
-    await player.seek(target);
-    if (resume) {
-      await player.play();
-    }
-  } catch (e, st) {
-    debugPrint('Playback reload after tag save: $e\n$st');
-  }
-}
-
 class EditTrackTagsSheet extends StatefulWidget {
   const EditTrackTagsSheet({super.key, required this.track});
 
@@ -322,10 +298,6 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     final messenger = ScaffoldMessenger.of(context);
 
     setState(() => _saving = true);
-    final wasPlaying = player.isPlaying;
-    final resumePosition = player.position;
-    var updateSucceeded = false;
-    await player.stopForExternalFileEdit();
 
     try {
       var newPath = path;
@@ -363,10 +335,6 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
-      updateSucceeded = true;
-      unawaited(
-        _resumePlaybackAfterTagSave(player, wasPlaying, resumePosition),
-      );
     } on StateError catch (e) {
       if (mounted) {
         final msg = e.toString();
@@ -394,11 +362,6 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
-      if (!updateSucceeded) {
-        unawaited(
-          _resumePlaybackAfterTagSave(player, wasPlaying, resumePosition),
-        );
-      }
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -427,9 +390,6 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     }
 
     setState(() => _saving = true);
-    final wasPlaying = player.isPlaying;
-    final resumePosition = player.position;
-    await player.stopForExternalFileEdit();
     try {
       await writeEmbeddedAudioTags(
         filePath: path,
@@ -452,9 +412,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
-      unawaited(
-        _resumePlaybackAfterTagSave(player, wasPlaying, resumePosition),
-      );
+      unawaited(SongMetadataCache.saveTracks([refreshed]));
     } on UnsupportedError catch (e) {
       if (mounted) {
         messenger.showSnackBar(

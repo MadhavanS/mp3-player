@@ -570,9 +570,11 @@ class PlayerController extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      try {
-        await _player.stop();
-      } catch (_) {}
+      if (stopBeforeLoad) {
+        try {
+          await _player.stop();
+        } catch (_) {}
+      }
 
       var logical = _logicalPlaylistIndex();
       if (!order.contains(logical)) {
