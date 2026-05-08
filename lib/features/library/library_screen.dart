@@ -498,9 +498,9 @@ class LibraryScreenState extends State<LibraryScreen>
         .map((path) => _trackForPath(path, library))
         .toList();
     if (pathKeyScope != null) {
-      player.setPlaybackPathKeyScope(pathKeyScope);
+      player.setPlaybackPathKeyScope(pathKeyScope, reloadQueue: false);
     } else {
-      player.setPlaybackPathKeyScope(null);
+      player.setPlaybackPathKeyScope(null, reloadQueue: false);
     }
     await player.setPlaylistAndPlay(
       tracks,

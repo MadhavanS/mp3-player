@@ -7,12 +7,15 @@ import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/file_path_mtime_sort.dart';
+import '../../services/first_run_library_hint_store.dart';
 import '../../services/mp3_scanner.dart';
+import '../../services/mp3_scanner_types.dart';
 import '../../services/playback_session_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/saved_music_folders.dart';
 import '../../services/song_metadata_cache.dart';
+import '../../services/song_metadata_cache_types.dart';
 import '../../services/track_metadata.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_theme.dart';
@@ -58,11 +61,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   _ShellPage _page = _ShellPage.library;
   List<String> _folderPaths = [];
   bool _scanning = false;
+
   /// Set after filesystem scan completes; `null` means still enumerating MP3 paths.
   int? _scanDetectedMp3Count;
   PlayerController? _playerForRecentHistory;
   PlayerController? _playerRef;
   String? _dispatchedRecentPath;
+  bool _showingFirstRunHint = false;
+  Timer? _idleRescanTimer;
+  bool _backgroundSyncInProgress = false;
+  bool _backgroundSyncQueued = false;
 
   @override
   void initState() {
@@ -87,8 +95,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _scheduleIdleRescan();
+    }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
+      _idleRescanTimer?.cancel();
       unawaited(_persistSession());
     }
   }
@@ -109,36 +121,211 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (browseKeys != null && browseKeys.isNotEmpty) {
       player.setPlaybackPathKeyScope(browseKeys);
     }
-    if (paths.isEmpty) return;
-    await _restoreLibraryFromCacheAndSession(player);
+    if (paths.isEmpty) {
+      unawaited(_maybeShowFirstRunLibraryHint());
+      return;
+    }
+    await _restoreLibraryFromCacheAndSession(player, paths);
+    _scheduleBackgroundSync(delay: const Duration(milliseconds: 500));
+    _scheduleIdleRescan();
   }
 
-  Future<void> _restoreLibraryFromCacheAndSession(PlayerController player) async {
-    final persistedQueuePaths = await PlaybackSessionStore.loadPersistedQueuePaths();
-    if (!mounted || persistedQueuePaths.isEmpty) return;
+  void _scheduleBackgroundSync({Duration delay = Duration.zero}) {
+    final paths = List<String>.from(_folderPaths);
+    if (paths.isEmpty) return;
+    unawaited(() async {
+      if (delay > Duration.zero) await Future<void>.delayed(delay);
+      if (!mounted) return;
+      final player = PlayerController.of(context);
+      await _runBackgroundSyncGuarded(player, paths);
+    }());
+  }
 
-    final cachedByPath = await SongMetadataCache.loadTracksByPaths(
-      persistedQueuePaths,
-    );
-    if (!mounted) return;
+  void _scheduleIdleRescan() {
+    _idleRescanTimer?.cancel();
+    if (_folderPaths.isEmpty) return;
+    _idleRescanTimer = Timer(const Duration(minutes: 2), () {
+      if (!mounted) return;
+      _scheduleBackgroundSync();
+    });
+  }
 
-    final tracks = persistedQueuePaths
-        .map((path) => cachedByPath[path] ?? TrackItem.fromFilePath(path))
-        .toList(growable: false);
+  Future<void> _runBackgroundSyncGuarded(
+    PlayerController player,
+    List<String> roots,
+  ) async {
+    if (_backgroundSyncInProgress) {
+      _backgroundSyncQueued = true;
+      return;
+    }
+    _backgroundSyncInProgress = true;
+    try {
+      await _syncLibraryFromDiskInBackground(player, roots);
+    } finally {
+      _backgroundSyncInProgress = false;
+      if (_backgroundSyncQueued) {
+        _backgroundSyncQueued = false;
+        _scheduleBackgroundSync();
+      }
+    }
+  }
 
-    if (tracks.isEmpty) return;
-    player.setLibraryCatalog(tracks);
-    await PlaybackSessionStore.restorePlayer(player, tracks);
-    if (!kIsWeb && mounted) {
-      enrichPlaylistTracks(
-        tracks: tracks,
-        onTrackUpdated: (path, updated) {
-          player.updateTrackByPath(path, updated);
-          unawaited(SongMetadataCache.saveTracks([updated]));
+  Future<void> _maybeShowFirstRunLibraryHint() async {
+    if (!mounted || _showingFirstRunHint) return;
+    final shouldShow = await FirstRunLibraryHintStore.shouldShowHint();
+    if (!mounted || !shouldShow || _folderPaths.isNotEmpty) return;
+    _showingFirstRunHint = true;
+    try {
+      await FirstRunLibraryHintStore.markSeen();
+      if (!mounted) return;
+      final goToSettings = await showDialog<bool>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialogContext) {
+          final theme = Theme.of(dialogContext);
+          final pal = dialogContext.palette;
+          return AlertDialog(
+            title: const Text('Add your music folders'),
+            content: Text(
+              'To build your Music Library, first add one or more folders that contain MP3 files.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: pal.textSecondary,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Later'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                icon: const Icon(Icons.settings_rounded),
+                label: const Text('Open Settings'),
+              ),
+            ],
+          );
         },
-      ).catchError((Object e, StackTrace st) {
-        debugPrint('enrichPlaylistTracks(startup): $e\n$st');
-      });
+      );
+      if (!mounted) return;
+      if (goToSettings == true) _goSettings();
+    } finally {
+      _showingFirstRunHint = false;
+    }
+  }
+
+  Future<void> _restoreLibraryFromCacheAndSession(
+    PlayerController player,
+    List<String> roots,
+  ) async {
+    final cachedByPath = await SongMetadataCache.loadSnapshotsForRoots(roots);
+    if (!mounted) return;
+    if (cachedByPath.isNotEmpty) {
+      final tracks =
+          cachedByPath.values.map((s) => s.track).toList(growable: false)
+            ..sort((a, b) {
+              final am = cachedByPath[a.filePath]?.fileModifiedMs ?? 0;
+              final bm = cachedByPath[b.filePath]?.fileModifiedMs ?? 0;
+              return bm.compareTo(am);
+            });
+      player.setLibraryCatalog(tracks);
+    }
+
+    final restoreTracks = cachedByPath.values
+        .map((s) => s.track)
+        .toList(growable: false);
+    if (restoreTracks.isNotEmpty) {
+      await PlaybackSessionStore.restorePlayer(player, restoreTracks);
+    }
+  }
+
+  Future<List<ScannedMp3File>> _collectMp3FileStats(List<String> roots) async {
+    final seen = <String>{};
+    final out = <ScannedMp3File>[];
+    for (final root in roots) {
+      final files = await scanMp3FilesWithStats(root, recursive: true);
+      for (final f in files) {
+        if (seen.add(f.path)) out.add(f);
+      }
+    }
+    out.sort((a, b) => b.lastModifiedMs.compareTo(a.lastModifiedMs));
+    return out;
+  }
+
+  Future<void> _syncLibraryFromDiskInBackground(
+    PlayerController player,
+    List<String> roots,
+  ) async {
+    if (kIsWeb) return;
+    try {
+      final cachedByPath = await SongMetadataCache.loadSnapshotsForRoots(roots);
+      final scanned = await _collectMp3FileStats(roots);
+      if (!mounted) return;
+
+      final existingPaths = scanned.map((f) => f.path).toSet();
+      await SongMetadataCache.deleteMissingPaths(existingPaths);
+
+      final live = <String, TrackItem>{
+        for (final e in cachedByPath.entries) e.key: e.value.track,
+      };
+      final changedPaths = <ScannedMp3File>[];
+
+      for (final f in scanned) {
+        final snap = cachedByPath[f.path];
+        if (snap == null ||
+            snap.fileModifiedMs != f.lastModifiedMs ||
+            snap.fileSizeBytes != f.fileSizeBytes) {
+          changedPaths.add(f);
+        } else {
+          live[f.path] = snap.track;
+        }
+      }
+
+      const batchSize = 4;
+      for (var i = 0; i < changedPaths.length; i += batchSize) {
+        final batch = changedPaths
+            .skip(i)
+            .take(batchSize)
+            .toList(growable: false);
+        final updated = await Future.wait(
+          batch.map((f) async {
+            final base = live[f.path] ?? TrackItem.fromFilePath(f.path);
+            final parsed = await readAudioMetadata(base);
+            return CachedTrackSnapshot(
+              track: parsed,
+              fileModifiedMs: f.lastModifiedMs,
+              fileSizeBytes: f.fileSizeBytes,
+            );
+          }),
+        );
+        await SongMetadataCache.saveTrackSnapshots(updated);
+        for (final s in updated) {
+          final p = s.track.filePath;
+          if (p != null && p.isNotEmpty) {
+            live[p] = s.track;
+          }
+        }
+        if (!mounted) return;
+        final partial = scanned
+            .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
+            .toList(growable: false);
+        player.setLibraryCatalog(partial);
+      }
+
+      if (!mounted) return;
+      final finalTracks = scanned
+          .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
+          .toList(growable: false);
+      player.setLibraryCatalog(finalTracks);
+
+      if (finalTracks.isNotEmpty) {
+        await RecentlyAddedStore.mergeScanPaths(
+          finalTracks.map((t) => t.filePath).whereType<String>().toList(),
+        );
+      } else {
+        await RecentlyAddedStore.mergeScanPaths(const <String>[]);
+      }
+    } catch (e, st) {
+      debugPrint('_syncLibraryFromDiskInBackground: $e\n$st');
     }
   }
 
@@ -159,6 +346,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _idleRescanTimer?.cancel();
     unawaited(_persistSession());
     _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
     _songsBrowsePathKeysNotifier.dispose();
@@ -196,6 +384,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     int startIndex = 0,
     bool preservePlaybackAfterRescan = false,
     bool tryPersistedPlayback = false,
+    bool keepCurrentQueue = false,
   }) async {
     final player = PlayerController.of(context);
     final pathToPreserve = preservePlaybackAfterRescan
@@ -257,6 +446,22 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       player.setLibraryCatalog(tracks);
 
       if (preservePlaybackAfterRescan) {
+        if (keepCurrentQueue &&
+            player.currentTrack != null &&
+            player.playlist.isNotEmpty) {
+          if (!kIsWeb && mounted) {
+            enrichPlaylistTracks(
+              tracks: tracks,
+              onTrackUpdated: (path, updated) {
+                player.updateTrackByPath(path, updated);
+                unawaited(SongMetadataCache.saveTracks([updated]));
+              },
+            ).catchError((Object e, StackTrace st) {
+              debugPrint('enrichPlaylistTracks: $e\n$st');
+            });
+          }
+          return;
+        }
         var resolvedStart = startIndex.clamp(0, tracks.length - 1);
         if (pathToPreserve != null) {
           final idx = tracks.indexWhere((t) => t.filePath == pathToPreserve);
@@ -298,8 +503,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
 
       if (tryPersistedPlayback) {
-        final restored =
-            await PlaybackSessionStore.restorePlayer(player, tracks);
+        final restored = await PlaybackSessionStore.restorePlayer(
+          player,
+          tracks,
+        );
         if (!mounted) return;
         if (restored) {
           if (playAfter) await player.play();
@@ -357,8 +564,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     await _scanFoldersAndSetPlaylist(
       paths,
       playAfter: false,
-      tryPersistedPlayback: true,
+      preservePlaybackAfterRescan: true,
+      keepCurrentQueue: true,
     );
+    _scheduleIdleRescan();
   }
 
   Future<void> _refreshLibraryScan() async {

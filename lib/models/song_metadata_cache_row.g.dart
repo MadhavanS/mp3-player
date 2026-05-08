@@ -46,8 +46,8 @@ const SongMetadataCacheRowSchema = IsarGeneratedSchema(
         type: IsarType.longList,
       ),
       IsarPropertySchema(
-        name: 'albumArtBytes',
-        type: IsarType.longList,
+        name: 'fileSizeBytes',
+        type: IsarType.long,
       ),
       IsarPropertySchema(
         name: 'updatedAtMs',
@@ -89,18 +89,7 @@ int serializeSongMetadataCacheRow(
     }
     IsarCore.endList(writer, listWriter);
   }
-  {
-    final list = object.albumArtBytes;
-    if (list == null) {
-      IsarCore.writeNull(writer, 7);
-    } else {
-      final listWriter = IsarCore.beginList(writer, 7, list.length);
-      for (var i = 0; i < list.length; i++) {
-        IsarCore.writeLong(listWriter, i, list[i]);
-      }
-      IsarCore.endList(writer, listWriter);
-    }
-  }
+  IsarCore.writeLong(writer, 7, object.fileSizeBytes);
   IsarCore.writeLong(writer, 8, object.updatedAtMs);
   return object.id;
 }
@@ -131,23 +120,7 @@ SongMetadataCacheRow deserializeSongMetadataCacheRow(IsarReader reader) {
       }
     }
   }
-  {
-    final length = IsarCore.readList(reader, 7, IsarCore.readerPtrPtr);
-    {
-      final reader = IsarCore.readerPtr;
-      if (reader.isNull) {
-        object.albumArtBytes = null;
-      } else {
-        final list =
-            List<int>.filled(length, -9223372036854775808, growable: true);
-        for (var i = 0; i < length; i++) {
-          list[i] = IsarCore.readLong(reader, i);
-        }
-        IsarCore.freeReader(reader);
-        object.albumArtBytes = list;
-      }
-    }
-  }
+  object.fileSizeBytes = IsarCore.readLong(reader, 7);
   object.updatedAtMs = IsarCore.readLong(reader, 8);
   return object;
 }
@@ -186,23 +159,7 @@ dynamic deserializeSongMetadataCacheRowProp(IsarReader reader, int property) {
         }
       }
     case 7:
-      {
-        final length = IsarCore.readList(reader, 7, IsarCore.readerPtrPtr);
-        {
-          final reader = IsarCore.readerPtr;
-          if (reader.isNull) {
-            return null;
-          } else {
-            final list =
-                List<int>.filled(length, -9223372036854775808, growable: true);
-            for (var i = 0; i < length; i++) {
-              list[i] = IsarCore.readLong(reader, i);
-            }
-            IsarCore.freeReader(reader);
-            return list;
-          }
-        }
-      }
+      return IsarCore.readLong(reader, 7);
     case 8:
       return IsarCore.readLong(reader, 8);
     default:
@@ -218,6 +175,7 @@ sealed class _SongMetadataCacheRowUpdate {
     String? artist,
     String? album,
     String? genres,
+    int? fileSizeBytes,
     int? updatedAtMs,
   });
 }
@@ -235,6 +193,7 @@ class _SongMetadataCacheRowUpdateImpl implements _SongMetadataCacheRowUpdate {
     Object? artist = ignore,
     Object? album = ignore,
     Object? genres = ignore,
+    Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
   }) {
     return collection.updateProperties([
@@ -245,6 +204,7 @@ class _SongMetadataCacheRowUpdateImpl implements _SongMetadataCacheRowUpdate {
           if (artist != ignore) 3: artist as String?,
           if (album != ignore) 4: album as String?,
           if (genres != ignore) 5: genres as String?,
+          if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
           if (updatedAtMs != ignore) 8: updatedAtMs as int?,
         }) >
         0;
@@ -259,6 +219,7 @@ sealed class _SongMetadataCacheRowUpdateAll {
     String? artist,
     String? album,
     String? genres,
+    int? fileSizeBytes,
     int? updatedAtMs,
   });
 }
@@ -277,6 +238,7 @@ class _SongMetadataCacheRowUpdateAllImpl
     Object? artist = ignore,
     Object? album = ignore,
     Object? genres = ignore,
+    Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
   }) {
     return collection.updateProperties(id, {
@@ -285,6 +247,7 @@ class _SongMetadataCacheRowUpdateAllImpl
       if (artist != ignore) 3: artist as String?,
       if (album != ignore) 4: album as String?,
       if (genres != ignore) 5: genres as String?,
+      if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
       if (updatedAtMs != ignore) 8: updatedAtMs as int?,
     });
   }
@@ -306,6 +269,7 @@ sealed class _SongMetadataCacheRowQueryUpdate {
     String? artist,
     String? album,
     String? genres,
+    int? fileSizeBytes,
     int? updatedAtMs,
   });
 }
@@ -324,6 +288,7 @@ class _SongMetadataCacheRowQueryUpdateImpl
     Object? artist = ignore,
     Object? album = ignore,
     Object? genres = ignore,
+    Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
   }) {
     return query.updateProperties(limit: limit, {
@@ -332,6 +297,7 @@ class _SongMetadataCacheRowQueryUpdateImpl
       if (artist != ignore) 3: artist as String?,
       if (album != ignore) 4: album as String?,
       if (genres != ignore) 5: genres as String?,
+      if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
       if (updatedAtMs != ignore) 8: updatedAtMs as int?,
     });
   }
@@ -360,6 +326,7 @@ class _SongMetadataCacheRowQueryBuilderUpdateImpl
     Object? artist = ignore,
     Object? album = ignore,
     Object? genres = ignore,
+    Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
   }) {
     final q = query.build();
@@ -370,6 +337,7 @@ class _SongMetadataCacheRowQueryBuilderUpdateImpl
         if (artist != ignore) 3: artist as String?,
         if (album != ignore) 4: album as String?,
         if (genres != ignore) 5: genres as String?,
+        if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
         if (updatedAtMs != ignore) 8: updatedAtMs as int?,
       });
     } finally {
@@ -1486,21 +1454,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesIsNull() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(const IsNullCondition(property: 7));
-    });
-  }
-
-  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesIsNotNull() {
-    return QueryBuilder.apply(not(), (query) {
-      return query.addFilterCondition(const IsNullCondition(property: 7));
-    });
-  }
-
-  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesElementEqualTo(
+      QAfterFilterCondition> fileSizeBytesEqualTo(
     int value,
   ) {
     return QueryBuilder.apply(this, (query) {
@@ -1514,7 +1468,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesElementGreaterThan(
+      QAfterFilterCondition> fileSizeBytesGreaterThan(
     int value,
   ) {
     return QueryBuilder.apply(this, (query) {
@@ -1528,7 +1482,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesElementGreaterThanOrEqualTo(
+      QAfterFilterCondition> fileSizeBytesGreaterThanOrEqualTo(
     int value,
   ) {
     return QueryBuilder.apply(this, (query) {
@@ -1542,7 +1496,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesElementLessThan(
+      QAfterFilterCondition> fileSizeBytesLessThan(
     int value,
   ) {
     return QueryBuilder.apply(this, (query) {
@@ -1556,7 +1510,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesElementLessThanOrEqualTo(
+      QAfterFilterCondition> fileSizeBytesLessThanOrEqualTo(
     int value,
   ) {
     return QueryBuilder.apply(this, (query) {
@@ -1570,7 +1524,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesElementBetween(
+      QAfterFilterCondition> fileSizeBytesBetween(
     int lower,
     int upper,
   ) {
@@ -1581,22 +1535,6 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
           lower: lower,
           upper: upper,
         ),
-      );
-    });
-  }
-
-  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesIsEmpty() {
-    return not().group(
-      (q) => q.albumArtBytesIsNull().or().albumArtBytesIsNotEmpty(),
-    );
-  }
-
-  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
-      QAfterFilterCondition> albumArtBytesIsNotEmpty() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addFilterCondition(
-        const GreaterOrEqualCondition(property: 7, value: null),
       );
     });
   }
@@ -1813,6 +1751,20 @@ extension SongMetadataCacheRowQuerySortBy
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByFileSizeBytes() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(7);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByFileSizeBytesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(7, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
       sortByUpdatedAtMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(8);
@@ -1914,6 +1866,20 @@ extension SongMetadataCacheRowQuerySortThenBy
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByFileSizeBytes() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(7);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByFileSizeBytesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(7, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
       thenByUpdatedAtMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(8);
@@ -1973,7 +1939,7 @@ extension SongMetadataCacheRowQueryWhereDistinct
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByAlbumArtBytes() {
+      distinctByFileSizeBytes() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(7);
     });
@@ -2032,8 +1998,8 @@ extension SongMetadataCacheRowQueryProperty1
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, List<int>?, QAfterProperty>
-      albumArtBytesProperty() {
+  QueryBuilder<SongMetadataCacheRow, int, QAfterProperty>
+      fileSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(7);
     });
@@ -2097,8 +2063,8 @@ extension SongMetadataCacheRowQueryProperty2<R>
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, (R, List<int>?), QAfterProperty>
-      albumArtBytesProperty() {
+  QueryBuilder<SongMetadataCacheRow, (R, int), QAfterProperty>
+      fileSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(7);
     });
@@ -2162,8 +2128,8 @@ extension SongMetadataCacheRowQueryProperty3<R1, R2>
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, (R1, R2, List<int>?), QOperations>
-      albumArtBytesProperty() {
+  QueryBuilder<SongMetadataCacheRow, (R1, R2, int), QOperations>
+      fileSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(7);
     });

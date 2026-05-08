@@ -16,6 +16,9 @@ class SongMetadataCacheRow {
   String album = '';
   String genres = '';
   List<int> artColorValues = const <int>[];
-  List<int>? albumArtBytes;
+
+  /// Embedded cover art is not cached here — storing it as List<int> mapped Isar to
+  /// longList (one long per byte) and crashed on large images; art loads during enrichment.
+  int fileSizeBytes = 0;
   int updatedAtMs = 0;
 }
