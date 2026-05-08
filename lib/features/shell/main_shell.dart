@@ -18,6 +18,7 @@ import '../../services/song_metadata_cache.dart';
 import '../../services/song_metadata_cache_types.dart';
 import '../../services/track_metadata.dart';
 import '../../theme/accent_color_option.dart';
+import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
 import '../library/library_files_page.dart';
 import '../library/library_screen.dart';
@@ -33,6 +34,8 @@ class MainShell extends StatefulWidget {
     super.key,
     required this.themeSetting,
     required this.onThemeSettingChanged,
+    required this.fontOption,
+    required this.onFontOptionChanged,
     required this.accentColorOption,
     required this.customAccentColor,
     required this.onAccentColorOptionChanged,
@@ -41,6 +44,8 @@ class MainShell extends StatefulWidget {
 
   final AppThemeSetting themeSetting;
   final ValueChanged<AppThemeSetting> onThemeSettingChanged;
+  final AppFontOption fontOption;
+  final ValueChanged<AppFontOption> onFontOptionChanged;
   final AppAccentColorOption accentColorOption;
   final Color customAccentColor;
   final ValueChanged<AppAccentColorOption> onAccentColorOptionChanged;
@@ -436,6 +441,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     bool preservePlaybackAfterRescan = false,
     bool tryPersistedPlayback = false,
     bool keepCurrentQueue = false,
+    bool showProgressOverlay = true,
   }) async {
     final player = PlayerController.of(context);
     final pathToPreserve = preservePlaybackAfterRescan
@@ -457,15 +463,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
 
-    setState(() {
-      _scanning = true;
-      _scanDetectedMp3Count = null;
-    });
+    if (showProgressOverlay) {
+      setState(() {
+        _scanning = true;
+        _scanDetectedMp3Count = null;
+      });
+    }
     List<String> files;
     try {
       files = await _collectMp3Paths(paths);
       if (!mounted) return;
-      if (files.isNotEmpty) {
+      if (showProgressOverlay && files.isNotEmpty) {
         setState(() => _scanDetectedMp3Count = files.length);
       }
 
@@ -600,7 +608,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         });
       }
     } finally {
-      if (mounted) {
+      if (showProgressOverlay && mounted) {
         setState(() {
           _scanning = false;
           _scanDetectedMp3Count = null;
@@ -630,8 +638,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       );
       return;
     }
-    final player = PlayerController.of(context);
-    await _runBackgroundSyncGuarded(player, List<String>.from(_folderPaths));
+    await _scanFoldersAndSetPlaylist(
+      _folderPaths,
+      playAfter: false,
+      preservePlaybackAfterRescan: true,
+      keepCurrentQueue: true,
+      showProgressOverlay: false,
+    );
   }
 
   void _openDrawer() {
@@ -841,6 +854,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                             onOpenDrawer: _openDrawer,
                             themeSetting: widget.themeSetting,
                             onThemeSettingChanged: widget.onThemeSettingChanged,
+                            fontOption: widget.fontOption,
+                            onFontOptionChanged: widget.onFontOptionChanged,
                             accentColorOption: widget.accentColorOption,
                             customAccentColor: widget.customAccentColor,
                             onAccentColorOptionChanged:

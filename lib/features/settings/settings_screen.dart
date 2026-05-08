@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../services/library_tabs_store.dart';
 import '../../services/storage_access.dart';
 import '../../theme/accent_color_option.dart';
+import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -17,6 +18,8 @@ class SettingsScreen extends StatefulWidget {
     required this.onOpenDrawer,
     required this.themeSetting,
     required this.onThemeSettingChanged,
+    required this.fontOption,
+    required this.onFontOptionChanged,
     required this.accentColorOption,
     required this.customAccentColor,
     required this.onAccentColorOptionChanged,
@@ -28,6 +31,8 @@ class SettingsScreen extends StatefulWidget {
   final VoidCallback onOpenDrawer;
   final AppThemeSetting themeSetting;
   final ValueChanged<AppThemeSetting> onThemeSettingChanged;
+  final AppFontOption fontOption;
+  final ValueChanged<AppFontOption> onFontOptionChanged;
   final AppAccentColorOption accentColorOption;
   final Color customAccentColor;
   final ValueChanged<AppAccentColorOption> onAccentColorOptionChanged;
@@ -184,8 +189,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   enableAlpha: false,
                   displayThumbColor: true,
                   paletteType: PaletteType.hsvWithHue,
-                  pickerAreaBorderRadius:
-                      const BorderRadius.all(Radius.circular(12)),
+                  pickerAreaBorderRadius: const BorderRadius.all(
+                    Radius.circular(12),
+                  ),
                 ),
               ),
               actions: [
@@ -356,17 +362,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: widget.themeSetting,
               isExpanded: true,
               dropdownColor: pal.surface,
-              style: TextStyle(
-                color: pal.textPrimary,
-                fontSize: 15,
-              ),
+              style: TextStyle(color: pal.textPrimary, fontSize: 15),
               iconEnabledColor: pal.onScaffold.withValues(alpha: 0.85),
               items: [
                 for (final s in AppThemeSetting.values)
-                  DropdownMenuItem(
-                    value: s,
-                    child: Text(s.label),
-                  ),
+                  DropdownMenuItem(value: s, child: Text(s.label)),
               ],
               onChanged: _busy
                   ? null
@@ -379,6 +379,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 8),
         Text(
           widget.themeSetting.subtitle,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.onScaffold.withValues(alpha: 0.65),
+          ),
+        ),
+        const SizedBox(height: 22),
+        Text(
+          'Font',
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: pal.onScaffold.withValues(alpha: 0.92),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        InputDecorator(
+          decoration: _appearanceDropdownDecoration(pal).copyWith(
+            labelText: 'Player font',
+            labelStyle: TextStyle(
+              color: pal.onScaffold.withValues(alpha: 0.72),
+              fontSize: 13,
+            ),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<AppFontOption>(
+              value: widget.fontOption,
+              isExpanded: true,
+              dropdownColor: pal.surface,
+              style: TextStyle(color: pal.textPrimary, fontSize: 15),
+              iconEnabledColor: pal.onScaffold.withValues(alpha: 0.85),
+              items: [
+                for (final o in AppFontOption.values)
+                  DropdownMenuItem(value: o, child: Text(o.label)),
+              ],
+              onChanged: _busy
+                  ? null
+                  : (v) {
+                      if (v != null) widget.onFontOptionChanged(v);
+                    },
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          widget.fontOption.subtitle,
           style: theme.textTheme.bodySmall?.copyWith(
             color: pal.onScaffold.withValues(alpha: 0.65),
           ),
@@ -405,10 +448,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: widget.accentColorOption,
               isExpanded: true,
               dropdownColor: pal.surface,
-              style: TextStyle(
-                color: pal.textPrimary,
-                fontSize: 15,
-              ),
+              style: TextStyle(color: pal.textPrimary, fontSize: 15),
               iconEnabledColor: pal.onScaffold.withValues(alpha: 0.85),
               selectedItemBuilder: (context) {
                 return [
@@ -427,8 +467,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   : o.swatchColor,
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
-                                color:
-                                    pal.onScaffold.withValues(alpha: 0.15),
+                                color: pal.onScaffold.withValues(alpha: 0.15),
                               ),
                             ),
                           ),
@@ -469,10 +508,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Text(
-                            o.label,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          child: Text(o.label, overflow: TextOverflow.ellipsis),
                         ),
                       ],
                     ),
@@ -617,9 +653,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 24),
             child: Center(
-              child: CircularProgressIndicator(
-                color: context.controlAccent,
-              ),
+              child: CircularProgressIndicator(color: context.controlAccent),
             ),
           )
         else
@@ -631,8 +665,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onReorder: _busy ? (_, __) {} : _onLibraryTabsReorder,
               itemBuilder: (ctx, i) {
                 final row = _libraryTabRows![i];
-                final enabledCount =
-                    _libraryTabRows!.where((r) => r.enabled).length;
+                final enabledCount = _libraryTabRows!
+                    .where((r) => r.enabled)
+                    .length;
                 final lastEnabled = row.enabled && enabledCount <= 1;
                 return Material(
                   key: ValueKey(row.id.wireValue),
@@ -694,10 +729,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Expanded(
                   child: switch (_section) {
                     _SettingsSection.menu => _buildMainMenu(theme, pal),
-                    _SettingsSection.appearance =>
-                      _buildAppearanceDetail(theme, pal),
-                    _SettingsSection.musicFolders =>
-                      _buildMusicFoldersDetail(theme, pal),
+                    _SettingsSection.appearance => _buildAppearanceDetail(
+                      theme,
+                      pal,
+                    ),
+                    _SettingsSection.musicFolders => _buildMusicFoldersDetail(
+                      theme,
+                      pal,
+                    ),
                   },
                 ),
               ],

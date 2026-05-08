@@ -8,6 +8,7 @@ enum AppThemeSetting {
   light,
   dark,
   grey,
+
   /// Charcoal surfaces, electric blue controls, mint secondary (player-style UI).
   player,
   automatic,
@@ -34,21 +35,21 @@ extension AppThemeSettingResolve on AppThemeSetting {
   }
 
   String get label => switch (this) {
-        AppThemeSetting.light => 'Light',
-        AppThemeSetting.dark => 'Dark',
-        AppThemeSetting.grey => 'Grey',
-        AppThemeSetting.player => 'Player',
-        AppThemeSetting.automatic => 'Automatic (by time)',
-      };
+    AppThemeSetting.light => 'Light',
+    AppThemeSetting.dark => 'Dark',
+    AppThemeSetting.grey => 'Grey',
+    AppThemeSetting.player => 'Player',
+    AppThemeSetting.automatic => 'Automatic (by time)',
+  };
 
   String get subtitle => switch (this) {
-        AppThemeSetting.light => 'Navy header and white surfaces',
-        AppThemeSetting.dark => 'Dim surfaces and cool accents',
-        AppThemeSetting.grey => 'Neutral blue-grey tones',
-        AppThemeSetting.player =>
-          'Charcoal background, electric blue accents, mint highlights',
-        AppThemeSetting.automatic => 'Light during the day, dark at night',
-      };
+    AppThemeSetting.light => 'Navy header and white surfaces',
+    AppThemeSetting.dark => 'Dim surfaces and cool accents',
+    AppThemeSetting.grey => 'Neutral blue-grey tones',
+    AppThemeSetting.player =>
+      'Charcoal background, electric blue accents, mint highlights',
+    AppThemeSetting.automatic => 'Light during the day, dark at night',
+  };
 }
 
 @immutable
@@ -66,8 +67,10 @@ class AppPalette extends ThemeExtension<AppPalette> {
 
   final Color scaffoldBackground;
   final Color surface;
+
   /// Main brand / progress / key actions.
   final Color primary;
+
   /// Secondary positive / saved / chip highlights (mint in Player theme).
   final Color accent;
   final Color onScaffold;
@@ -123,11 +126,11 @@ class AppPalette extends ThemeExtension<AppPalette> {
   );
 
   static AppPalette forPalette(AppThemePalette p) => switch (p) {
-        AppThemePalette.light => AppPalette.light,
-        AppThemePalette.dark => AppPalette.dark,
-        AppThemePalette.grey => AppPalette.grey,
-        AppThemePalette.player => AppPalette.player,
-      };
+    AppThemePalette.light => AppPalette.light,
+    AppThemePalette.dark => AppPalette.dark,
+    AppThemePalette.grey => AppPalette.grey,
+    AppThemePalette.player => AppPalette.player,
+  };
 
   @override
   AppPalette copyWith({
@@ -156,8 +159,11 @@ class AppPalette extends ThemeExtension<AppPalette> {
   AppPalette lerp(ThemeExtension<AppPalette>? other, double t) {
     if (other is! AppPalette) return this;
     return AppPalette(
-      scaffoldBackground:
-          Color.lerp(scaffoldBackground, other.scaffoldBackground, t)!,
+      scaffoldBackground: Color.lerp(
+        scaffoldBackground,
+        other.scaffoldBackground,
+        t,
+      )!,
       surface: Color.lerp(surface, other.surface, t)!,
       primary: Color.lerp(primary, other.primary, t)!,
       accent: Color.lerp(accent, other.accent, t)!,
@@ -184,9 +190,7 @@ class AppControlAccent extends ThemeExtension<AppControlAccent> {
   @override
   AppControlAccent lerp(ThemeExtension<AppControlAccent>? other, double t) {
     if (other is! AppControlAccent) return this;
-    return AppControlAccent(
-      color: Color.lerp(color, other.color, t)!,
-    );
+    return AppControlAccent(color: Color.lerp(color, other.color, t)!);
   }
 }
 
@@ -204,10 +208,7 @@ class ActiveAppThemePalette extends ThemeExtension<ActiveAppThemePalette> {
   }
 
   @override
-  ActiveAppThemePalette lerp(
-    covariant ActiveAppThemePalette? other,
-    double t,
-  ) {
+  ActiveAppThemePalette lerp(covariant ActiveAppThemePalette? other, double t) {
     return t < 0.5 ? this : (other ?? this);
   }
 }
@@ -218,16 +219,14 @@ extension AppThemeContext on BuildContext {
 
   /// Play buttons, notification pills, active shuffle/repeat/favourite, key list highlights.
   Color get controlAccent =>
-      Theme.of(this).extension<AppControlAccent>()?.color ??
-      palette.primary;
+      Theme.of(this).extension<AppControlAccent>()?.color ?? palette.primary;
 
   /// Prefer this over guessing from colors (matches [ThemeSettingsStore] resolve).
   AppThemePalette get appliedThemePalette =>
       Theme.of(this).extension<ActiveAppThemePalette>()?.palette ??
       AppThemePalette.dark;
 
-  bool get usesPlayerChrome =>
-      appliedThemePalette == AppThemePalette.player;
+  bool get usesPlayerChrome => appliedThemePalette == AppThemePalette.player;
 }
 
 extension AppThemeSettingPreviewStripe on AppThemeSetting {
@@ -243,12 +242,7 @@ extension AppThemeSettingPreviewStripe on AppThemeSetting {
         ];
       default:
         final pal = AppPalette.forPalette(paletteAt(resolvedClock));
-        return [
-          pal.scaffoldBackground,
-          pal.surface,
-          pal.primary,
-          pal.accent,
-        ];
+        return [pal.scaffoldBackground, pal.surface, pal.primary, pal.accent];
     }
   }
 }
@@ -257,6 +251,7 @@ abstract final class AppTheme {
   static ThemeData themeFor(
     AppThemePalette palette, {
     required Color controlAccent,
+    String? fontFamily,
   }) {
     final ext = AppPalette.forPalette(palette);
     final brightness = switch (palette) {
@@ -272,6 +267,7 @@ abstract final class AppTheme {
 
     return ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily,
       brightness: brightness,
       scaffoldBackgroundColor: ext.scaffoldBackground,
       extensions: [
@@ -333,14 +329,8 @@ abstract final class AppTheme {
           fontSize: 16,
           color: ext.textPrimary,
         ),
-        bodyMedium: TextStyle(
-          fontSize: 14,
-          color: ext.textSecondary,
-        ),
-        bodySmall: TextStyle(
-          fontSize: 12,
-          color: ext.textMuted,
-        ),
+        bodyMedium: TextStyle(fontSize: 14, color: ext.textSecondary),
+        bodySmall: TextStyle(fontSize: 12, color: ext.textMuted),
         labelSmall: TextStyle(
           fontSize: 11,
           color: ext.textMuted,

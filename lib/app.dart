@@ -10,8 +10,10 @@ import 'audio/player_controller.dart';
 import 'features/shell/main_shell.dart';
 import 'platform/android_home_widget_bridge.dart';
 import 'services/accent_settings_store.dart';
+import 'services/font_settings_store.dart';
 import 'services/theme_settings_store.dart';
 import 'theme/accent_color_option.dart';
+import 'theme/app_font_option.dart';
 import 'theme/app_theme.dart';
 import 'widgets/action_pill_toast.dart';
 
@@ -25,6 +27,7 @@ class Mp3PlayerApp extends StatefulWidget {
 class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   late final PlayerController _player = PlayerController();
   AppThemeSetting _themeSetting = AppThemeSetting.automatic;
+  AppFontOption _fontOption = AppFontOption.system;
   AppAccentColorOption _accentOption = AppAccentColorOption.blue;
   Color _customAccentColor = AppAccentColorOption.blue.swatchColor;
   DateTime _themeClock = DateTime.now();
@@ -108,10 +111,12 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
 
   Future<void> _loadTheme() async {
     final s = await ThemeSettingsStore.load();
+    final font = await FontSettingsStore.load();
     final accent = await AccentSettingsStore.load();
     if (!mounted) return;
     setState(() {
       _themeSetting = s;
+      _fontOption = font;
       _accentOption = accent.option;
       _customAccentColor = accent.customAccent;
       _themeClock = DateTime.now();
@@ -138,6 +143,11 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     await ThemeSettingsStore.save(setting);
     _rescheduleThemeTimer();
     _scheduleAndroidHomeWidgetSync();
+  }
+
+  Future<void> _setFontOption(AppFontOption option) async {
+    setState(() => _fontOption = option);
+    await FontSettingsStore.save(option);
   }
 
   Future<void> _setAccentOption(AppAccentColorOption option) async {
@@ -180,10 +190,16 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
         navigatorKey: appNavigatorKey,
         title: 'MadPlay',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.themeFor(resolved, controlAccent: _resolvedAccent),
+        theme: AppTheme.themeFor(
+          resolved,
+          controlAccent: _resolvedAccent,
+          fontFamily: _fontOption.fontFamily,
+        ),
         home: MainShell(
           themeSetting: _themeSetting,
           onThemeSettingChanged: _setThemeSetting,
+          fontOption: _fontOption,
+          onFontOptionChanged: _setFontOption,
           accentColorOption: _accentOption,
           customAccentColor: _customAccentColor,
           onAccentColorOptionChanged: _setAccentOption,
