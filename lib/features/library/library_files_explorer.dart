@@ -405,7 +405,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     final cb = widget.onSongChosenFromExplorer;
 
     if (kIsWeb) {
-      player.setPlaybackPathKeyScope(null);
+      player.setPlaybackPathKeyScope(null, reloadQueue: false);
       if (cb != null) await cb(null);
       await player.setPlaylistAndPlay(
         [TrackItem.fromFilePath(filePath)],
@@ -418,7 +418,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     final keys = <String>{
       for (final path in scanned) canonicalMusicLibraryPathKey(path),
     }..removeWhere((k) => k.isEmpty);
-    player.setPlaybackPathKeyScope(keys);
+    player.setPlaybackPathKeyScope(keys, reloadQueue: false);
     if (cb != null) await cb(keys);
 
     final library = player.metadataLibrary;

@@ -42,6 +42,21 @@ abstract final class PlaybackSessionStore {
     }
   }
 
+  /// Loads persisted queue paths saved by [savePlayer], without restoring playback.
+  static Future<List<String>> loadPersistedQueuePaths() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_playbackKey);
+    if (raw == null || raw.isEmpty) return const <String>[];
+    try {
+      final map = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final restored = _Restore.tryParse(map);
+      if (restored == null) return const <String>[];
+      return List<String>.from(restored.playlistPaths);
+    } catch (_) {
+      return const <String>[];
+    }
+  }
+
   static Future<void> saveBrowsePathKeys(Set<String>? keys) async {
     final prefs = await SharedPreferences.getInstance();
     if (keys == null) {

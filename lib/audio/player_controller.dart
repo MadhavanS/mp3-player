@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -14,6 +15,23 @@ enum PlaylistRepeatMode { off, all, one }
 
 /// Local playback + playlist index. Exposes [audioPlayer] for streams in the UI.
 class PlayerController extends ChangeNotifier {
+  bool _isInterruptedAbort(Object error) {
+    if (error is! PlatformException) return false;
+    final code = error.code.toLowerCase();
+    final message = (error.message ?? '').toLowerCase();
+    return code == 'abort' && message.contains('loading interrupted');
+  }
+
+  Future<void> _playSafely({String context = 'play'}) async {
+    try {
+      await _player.play();
+    } catch (e, st) {
+      if (_isInterruptedAbort(e)) return;
+      debugPrint('$context error: $e\n$st');
+      rethrow;
+    }
+  }
+
   PlayerController() {
     // Single subscription: listening to [processingStateStream] and
     // [playerStateStream] both triggered platform init; concurrent inits caused
@@ -22,8 +40,7 @@ class PlayerController extends ChangeNotifier {
       _onProcessingState(state.processingState);
       notifyListeners();
     });
-    _concatIndexSub =
-        _player.currentIndexStream.listen(_onConcatIndexChanged);
+    _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
   }
 
   final AudioPlayer _player = AudioPlayer();
@@ -40,6 +57,11 @@ class PlayerController extends ChangeNotifier {
   PlaylistRepeatMode _repeat = PlaylistRepeatMode.off;
   ProcessingState? _previousProcessing;
   bool _isLoadingSource = false;
+
+  /// While rebuilding [ConcatenatingAudioSource] for shuffle, [AudioPlayer.stop] makes
+  /// `playing` false briefly; UI uses [isPlaying] which ORs this in so play/pause
+  /// doesn't flash (repeat never reloads the source, so it has no such gap).
+  bool _retainPlayingUiForShuffleReload = false;
 
   /// When non-null, [skipNext], [skipPrevious], [upcomingTrack], and repeat-all wrap
   /// only among tracks whose path key is in this set (same as Songs tab folder filter).
@@ -146,7 +168,14 @@ class PlayerController extends ChangeNotifier {
   PlaylistRepeatMode get repeatMode => _repeat;
 
   /// Limits next/previous and repeat-all to tracks inside the scoped folder (see Files flow).
-  void setPlaybackPathKeyScope(Set<String>? pathKeys) {
+  ///
+  /// When [reloadQueue] is false, only updates scope (and shuffle reset when scope is non-null).
+  /// Call this before [setPlaylist]/[setPlaylistAndPlay] so a single [_loadCurrent] runs with
+  /// the new queue instead of racing a reload that preserves the old playback position.
+  void setPlaybackPathKeyScope(
+    Set<String>? pathKeys, {
+    bool reloadQueue = true,
+  }) {
     _playbackPathKeysScope = pathKeys == null
         ? null
         : Set<String>.from(pathKeys);
@@ -154,6 +183,7 @@ class PlayerController extends ChangeNotifier {
       _resetShuffleState();
     }
     notifyListeners();
+    if (!reloadQueue) return;
     unawaited(_loadCurrent(initialPosition: _player.position));
   }
 
@@ -185,7 +215,7 @@ class PlayerController extends ChangeNotifier {
     return out;
   }
 
-  bool get isPlaying => _player.playing;
+  bool get isPlaying => _player.playing || _retainPlayingUiForShuffleReload;
   Duration get position => _player.position;
   Duration? get duration => _player.duration;
 
@@ -214,7 +244,7 @@ class PlayerController extends ChangeNotifier {
     if (_playlist.isEmpty) return;
     if (_repeat == PlaylistRepeatMode.one) {
       await _player.seek(Duration.zero);
-      await _player.play();
+      await _playSafely(context: 'repeat-one play');
       return;
     }
     await skipNext();
@@ -235,8 +265,7 @@ class PlayerController extends ChangeNotifier {
     return List<int>.generate(_playlist.length, (i) => i);
   }
 
-  int _logicalPlaylistIndex() =>
-      _shuffle ? _shuffleOrder[_shufflePos] : _index;
+  int _logicalPlaylistIndex() => _shuffle ? _shuffleOrder[_shufflePos] : _index;
 
   void _onConcatIndexChanged(int? concatIdx) {
     if (_isLoadingSource || concatIdx == null) return;
@@ -294,7 +323,7 @@ class PlayerController extends ChangeNotifier {
     if (wasEmpty) {
       _index = 0;
       await _loadCurrent();
-      await _player.play();
+      await _playSafely(context: 'appendToPlaylist.play');
     } else {
       await _loadCurrent(initialPosition: resumePos);
     }
@@ -313,7 +342,7 @@ class PlayerController extends ChangeNotifier {
       playbackOriginTab: playbackOriginTab,
       playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
     );
-    await _player.play();
+    await _playSafely(context: 'setPlaylistAndPlay.play');
   }
 
   static bool _sameQueuedIdentity(TrackItem a, TrackItem b) {
@@ -446,17 +475,22 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
     await _loadCurrent();
     if (autoPlay) {
-      await _player.play();
+      await _playSafely(context: 'jumpToIndex.play');
     }
   }
 
-  Future<void> _loadCurrent({Duration initialPosition = Duration.zero}) async {
+  Future<void> _loadCurrent({
+    Duration initialPosition = Duration.zero,
+    bool stopBeforeLoad = true,
+  }) async {
     final preview = currentTrack;
     final pathPreview = preview?.filePath;
     if (preview == null || pathPreview == null || pathPreview.isEmpty) {
-      try {
-        await _player.stop();
-      } catch (_) {}
+      if (stopBeforeLoad) {
+        try {
+          await _player.stop();
+        } catch (_) {}
+      }
       notifyListeners();
       return;
     }
@@ -501,8 +535,9 @@ class PlayerController extends ChangeNotifier {
       final children = <AudioSource>[];
       var initialConcatIndex = 0;
       var concatPos = 0;
-      final logicalTrack =
-          logical >= 0 && logical < _playlist.length ? _playlist[logical] : preview;
+      final logicalTrack = logical >= 0 && logical < _playlist.length
+          ? _playlist[logical]
+          : preview;
       final logicalArtUri = await uriForNotificationAlbumArt(logicalTrack);
 
       for (final pi in order) {
@@ -561,7 +596,7 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> play() => _player.play();
+  Future<void> play() => _playSafely(context: 'play');
 
   Future<void> pause() => _player.pause();
 
@@ -569,7 +604,7 @@ class PlayerController extends ChangeNotifier {
     if (_player.playing) {
       await _player.pause();
     } else {
-      await _player.play();
+      await _playSafely(context: 'togglePlayPause.play');
     }
   }
 
@@ -596,7 +631,7 @@ class PlayerController extends ChangeNotifier {
 
       notifyListeners();
       await _loadCurrent();
-      await _player.play();
+      await _playSafely(context: 'skipNext.shuffle play');
       return;
     }
 
@@ -631,7 +666,7 @@ class PlayerController extends ChangeNotifier {
 
     notifyListeners();
     await _loadCurrent();
-    await _player.play();
+    await _playSafely(context: 'skipNext.play');
   }
 
   Future<void> skipPrevious() async {
@@ -654,7 +689,7 @@ class PlayerController extends ChangeNotifier {
 
       notifyListeners();
       await _loadCurrent();
-      await _player.play();
+      await _playSafely(context: 'skipPrevious.shuffle play');
       return;
     }
 
@@ -689,7 +724,7 @@ class PlayerController extends ChangeNotifier {
 
     notifyListeners();
     await _loadCurrent();
-    await _player.play();
+    await _playSafely(context: 'skipPrevious.play');
   }
 
   void toggleShuffle() {
@@ -711,7 +746,6 @@ class PlayerController extends ChangeNotifier {
       _shuffle = true;
     }
     notifyListeners();
-    unawaited(_loadCurrent(initialPosition: _player.position));
   }
 
   void cycleRepeatMode() {
@@ -817,7 +851,7 @@ class PlayerController extends ChangeNotifier {
     }
 
     if (resumePlaying) {
-      await _player.play();
+      await _playSafely(context: 'applyRestoredPlayback.play');
     } else {
       await _player.pause();
     }
