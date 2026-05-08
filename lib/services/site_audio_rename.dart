@@ -487,6 +487,16 @@ String _sanitizeFilename(String input) {
   return out;
 }
 
+/// Applies the same filename cleanup semantics as the tag-editor rules engine,
+/// returning a safe basename without extension.
+String sanitizeRenameBasename(String input) {
+  final raw = input.trim().replaceFirst(
+    RegExp(r'\.mp3$', caseSensitive: false),
+    '',
+  );
+  return _sanitizeFilename(raw);
+}
+
 String _expandDollarGroups(String template, RegExpMatch? match) {
   if (match == null) return template;
   return template.replaceAllMapped(RegExp(r'\$(\d+)'), (m) {
