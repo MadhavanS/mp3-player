@@ -1,18 +1,32 @@
 import 'package:flutter/material.dart';
 
+import 'player_chrome_background.dart';
+
 /// Which palette is actually applied (after resolving [AppThemeSetting.automatic]).
-enum AppThemePalette { light, dark, grey, player }
+enum AppThemePalette { light, dark, grey, player, playerSoft }
 
 /// User-selectable appearance in Settings.
+///
+/// [light], [dark], and [grey] are no longer shown in Settings but may still be
+/// read from storage until the app migrates them on first launch after upgrade.
 enum AppThemeSetting {
   light,
   dark,
   grey,
 
-  /// Charcoal surfaces, electric blue controls, mint secondary (player-style UI).
+  /// Charcoal surfaces, electric blue controls, mint secondary (Julia).
   player,
+  /// Soft full-art style (Leah).
+  playerSoft,
   automatic,
 }
+
+/// Theme options shown in Settings → Appearance (automatic, Julia, Leah).
+const List<AppThemeSetting> appearanceThemeChoices = <AppThemeSetting>[
+  AppThemeSetting.automatic,
+  AppThemeSetting.player,
+  AppThemeSetting.playerSoft,
+];
 
 extension AppThemeSettingResolve on AppThemeSetting {
   /// [automatic] uses local time: 6:00–19:59 → light, otherwise dark.
@@ -26,6 +40,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
         return AppThemePalette.grey;
       case AppThemeSetting.player:
         return AppThemePalette.player;
+      case AppThemeSetting.playerSoft:
+        return AppThemePalette.playerSoft;
       case AppThemeSetting.automatic:
         final h = localNow.hour;
         return (h >= 6 && h < 20)
@@ -38,7 +54,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
     AppThemeSetting.light => 'Light',
     AppThemeSetting.dark => 'Dark',
     AppThemeSetting.grey => 'Grey',
-    AppThemeSetting.player => 'Player',
+    AppThemeSetting.player => 'Julia',
+    AppThemeSetting.playerSoft => 'Leah',
     AppThemeSetting.automatic => 'Automatic (by time)',
   };
 
@@ -48,6 +65,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
     AppThemeSetting.grey => 'Neutral blue-grey tones',
     AppThemeSetting.player =>
       'Charcoal background, electric blue accents, mint highlights',
+    AppThemeSetting.playerSoft =>
+      'Rose blur background with soft white controls',
     AppThemeSetting.automatic => 'Light during the day, dark at night',
   };
 }
@@ -71,7 +90,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
   /// Main brand / progress / key actions.
   final Color primary;
 
-  /// Secondary positive / saved / chip highlights (mint in Player theme).
+  /// Secondary positive / saved / chip highlights (mint in Julia / Leah).
   final Color accent;
   final Color onScaffold;
   final Color textPrimary;
@@ -125,12 +144,89 @@ class AppPalette extends ThemeExtension<AppPalette> {
     textMuted: Color(0xFF8E8E93),
   );
 
+  /// Soft pink blur style inspired by classic full-art player screens.
+  static const AppPalette playerSoft = AppPalette(
+    scaffoldBackground: Color(0xFF5F4F57),
+    surface: Color(0xFF6B5A63),
+    primary: Color(0xFFFFFFFF),
+    accent: Color(0xFFF4E7EE),
+    onScaffold: Color(0xFFFFFFFF),
+    textPrimary: Color(0xFFFFFFFF),
+    textSecondary: Color(0xFFE7DCE2),
+    textMuted: Color(0xFFC9BBC3),
+  );
+
   static AppPalette forPalette(AppThemePalette p) => switch (p) {
     AppThemePalette.light => AppPalette.light,
     AppThemePalette.dark => AppPalette.dark,
     AppThemePalette.grey => AppPalette.grey,
     AppThemePalette.player => AppPalette.player,
+    AppThemePalette.playerSoft => AppPalette.playerSoft,
   };
+
+  /// Adjusts player / soft-blur palettes for background tone (not accent).
+  static AppPalette applyPlayerChromeBackground({
+    required AppThemePalette paletteKey,
+    required AppPalette base,
+    required PlayerChromeBackgroundKind kind,
+    Color? customScaffold,
+  }) {
+    if (paletteKey != AppThemePalette.player &&
+        paletteKey != AppThemePalette.playerSoft) {
+      return base;
+    }
+    switch (kind) {
+      case PlayerChromeBackgroundKind.dark:
+        return base;
+      case PlayerChromeBackgroundKind.light:
+        if (paletteKey == AppThemePalette.player) {
+          return base.copyWith(
+            scaffoldBackground: const Color(0xFFE8EAEE),
+            surface: const Color(0xFFFFFFFF),
+            textPrimary: const Color(0xFF121212),
+            textSecondary: const Color(0xFF5C6370),
+            textMuted: const Color(0xFF7A8089),
+            onScaffold: const Color(0xFF121212),
+          );
+        }
+        return base.copyWith(
+          scaffoldBackground: const Color(0xFFFAF2F5),
+          surface: const Color(0xFFFFFBFC),
+          textPrimary: const Color(0xFF2A2226),
+          textSecondary: const Color(0xFF5C5458),
+          textMuted: const Color(0xFF7A7276),
+          onScaffold: const Color(0xFF2A2226),
+        );
+      case PlayerChromeBackgroundKind.grey:
+        final g = AppPalette.grey;
+        return base.copyWith(
+          scaffoldBackground: g.scaffoldBackground,
+          surface: g.surface,
+          textPrimary: g.textPrimary,
+          textSecondary: g.textSecondary,
+          textMuted: g.textMuted,
+          onScaffold: g.onScaffold,
+        );
+      case PlayerChromeBackgroundKind.custom:
+        final bg = customScaffold ?? base.scaffoldBackground;
+        final light = bg.computeLuminance() > 0.45;
+        final surface = light
+            ? Color.lerp(bg, Colors.white, 0.14)!
+            : Color.lerp(bg, Colors.black, 0.2)!;
+        return base.copyWith(
+          scaffoldBackground: bg,
+          surface: surface,
+          textPrimary: light ? const Color(0xFF121212) : const Color(0xFFF5F5F7),
+          textSecondary: light
+              ? const Color(0xFF5C6370)
+              : base.textSecondary.withValues(alpha: 0.92),
+          textMuted: light
+              ? const Color(0xFF80868F)
+              : base.textMuted.withValues(alpha: 0.9),
+          onScaffold: light ? const Color(0xFF121212) : const Color(0xFFF5F5F7),
+        );
+    }
+  }
 
   @override
   AppPalette copyWith({
@@ -226,7 +322,9 @@ extension AppThemeContext on BuildContext {
       Theme.of(this).extension<ActiveAppThemePalette>()?.palette ??
       AppThemePalette.dark;
 
-  bool get usesPlayerChrome => appliedThemePalette == AppThemePalette.player;
+  bool get usesPlayerChrome =>
+      appliedThemePalette == AppThemePalette.player ||
+      appliedThemePalette == AppThemePalette.playerSoft;
 }
 
 extension AppThemeSettingPreviewStripe on AppThemeSetting {
@@ -248,20 +346,31 @@ extension AppThemeSettingPreviewStripe on AppThemeSetting {
 }
 
 abstract final class AppTheme {
+  static Brightness _brightnessFor(AppThemePalette palette, AppPalette ext) {
+    return switch (palette) {
+      AppThemePalette.light => Brightness.light,
+      AppThemePalette.dark => Brightness.dark,
+      AppThemePalette.grey => Brightness.dark,
+      AppThemePalette.player ||
+      AppThemePalette.playerSoft =>
+        ext.scaffoldBackground.computeLuminance() > 0.45
+            ? Brightness.light
+            : Brightness.dark,
+    };
+  }
+
   static ThemeData themeFor(
     AppThemePalette palette, {
     required Color controlAccent,
     String? fontFamily,
+    AppPalette? paletteOverride,
   }) {
-    final ext = AppPalette.forPalette(palette);
-    final brightness = switch (palette) {
-      AppThemePalette.light => Brightness.light,
-      AppThemePalette.dark => Brightness.dark,
-      AppThemePalette.grey => Brightness.dark,
-      AppThemePalette.player => Brightness.dark,
-    };
+    final ext = paletteOverride ?? AppPalette.forPalette(palette);
+    final brightness = _brightnessFor(palette, ext);
 
-    final isPlayer = palette == AppThemePalette.player;
+    final isPlayer =
+        palette == AppThemePalette.player ||
+        palette == AppThemePalette.playerSoft;
     final cardRadius = isPlayer ? 20.0 : 12.0;
     final buttonRadius = BorderRadius.circular(isPlayer ? 18 : 12);
 
@@ -276,12 +385,17 @@ abstract final class AppTheme {
         AppControlAccent(color: controlAccent),
       ],
       colorScheme: ColorScheme.fromSeed(
-        seedColor: ext.primary,
+        seedColor: ext.primary.computeLuminance() > 0.92
+            ? const Color(0xFF2563EB)
+            : ext.primary,
         brightness: brightness,
         surface: ext.surface,
         onSurface: ext.textPrimary,
         primary: ext.primary,
-        onPrimary: Colors.white,
+        onPrimary: brightness == Brightness.light &&
+                ext.primary.computeLuminance() > 0.85
+            ? const Color(0xFF1A1A1A)
+            : Colors.white,
         secondary: ext.accent,
         onSecondary: palette == AppThemePalette.light
             ? Colors.white

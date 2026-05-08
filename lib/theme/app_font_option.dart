@@ -2,7 +2,8 @@ enum AppFontOption {
   system,
   roboto,
   serif,
-  monospace;
+  monospace,
+  fraunces;
 
   static AppFontOption parse(String? raw) {
     switch (raw) {
@@ -14,6 +15,8 @@ enum AppFontOption {
         return AppFontOption.serif;
       case 'monospace':
         return AppFontOption.monospace;
+      case 'fraunces':
+        return AppFontOption.fraunces;
       default:
         return AppFontOption.system;
     }
@@ -26,6 +29,7 @@ extension AppFontOptionPresentation on AppFontOption {
     AppFontOption.roboto => 'Roboto',
     AppFontOption.serif => 'Serif',
     AppFontOption.monospace => 'Monospace',
+    AppFontOption.fraunces => 'Fraunces',
   };
 
   String get subtitle => switch (this) {
@@ -33,6 +37,7 @@ extension AppFontOptionPresentation on AppFontOption {
     AppFontOption.roboto => 'Clean sans-serif style',
     AppFontOption.serif => 'Classic serif typography',
     AppFontOption.monospace => 'Fixed-width style',
+    AppFontOption.fraunces => 'Google serif display font',
   };
 
   String? get fontFamily => switch (this) {
@@ -40,5 +45,6 @@ extension AppFontOptionPresentation on AppFontOption {
     AppFontOption.roboto => 'Roboto',
     AppFontOption.serif => 'serif',
     AppFontOption.monospace => 'monospace',
+    AppFontOption.fraunces => null,
   };
 }

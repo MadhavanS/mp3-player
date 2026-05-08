@@ -13,6 +13,7 @@ class TrackAlbumArt extends StatelessWidget {
     required this.track,
     required this.display,
     this.showShadow = true,
+    this.cornerRadius,
   });
 
   final TrackItem track;
@@ -20,6 +21,9 @@ class TrackAlbumArt extends StatelessWidget {
 
   /// When false, skips drop shadow on the artwork (e.g. when wrapped in an outer card).
   final bool showShadow;
+
+  /// When non-null, overrides the default corner radius for this [display] (use `0` for square art).
+  final double? cornerRadius;
 
   double get _size => switch (display) {
     TrackArtDisplay.mini => 48,
@@ -45,9 +49,14 @@ class TrackAlbumArt extends StatelessWidget {
     };
   }
 
+  double _effectiveRadius(BuildContext context) {
+    if (display == TrackArtDisplay.mini) return _radiusFor(context);
+    return cornerRadius ?? _radiusFor(context);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final r = _radiusFor(context);
+    final r = _effectiveRadius(context);
     final bytes = track.albumArtBytes;
     if (bytes != null && bytes.isNotEmpty) {
       final image = Image.memory(
@@ -65,14 +74,15 @@ class TrackAlbumArt extends StatelessWidget {
           child: SizedBox(width: _size, height: _size, child: image),
         );
       }
+      final br = r <= 0 ? BorderRadius.zero : BorderRadius.circular(r);
       return Container(
         width: _size,
         height: _size,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(r),
+          borderRadius: br,
           boxShadow: showShadow ? _imageShadows() : const <BoxShadow>[],
         ),
-        child: ClipRRect(borderRadius: BorderRadius.circular(r), child: image),
+        child: ClipRRect(borderRadius: br, child: image),
       );
     }
     return _gradientDecoration(context);
@@ -97,11 +107,12 @@ class TrackAlbumArt extends StatelessWidget {
   };
 
   Widget _gradientDecoration(BuildContext context) {
-    final r = _radiusFor(context);
+    final r = _effectiveRadius(context);
+    final brNonMini = r <= 0 ? BorderRadius.zero : BorderRadius.circular(r);
     final gradient = BoxDecoration(
       borderRadius: display == TrackArtDisplay.mini
           ? null
-          : BorderRadius.circular(r),
+          : brNonMini,
       shape: display == TrackArtDisplay.mini
           ? BoxShape.circle
           : BoxShape.rectangle,

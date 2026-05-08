@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
+import 'dart:ui' show ImageFilter, Paint, Radius, Rect, RRect;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
@@ -20,6 +21,59 @@ String _formatDuration(Duration d) {
   final m = d.inMinutes;
   final s = d.inSeconds % 60;
   return '$m:${s.toString().padLeft(2, '0')}';
+}
+
+/// Thin vertical tick for the soft-blur seek bar (not a round thumb).
+final class _SoftBlurSeekThumbShape extends SliderComponentShape {
+  const _SoftBlurSeekThumbShape({required this.color});
+
+  final Color color;
+  static const double _w = 3;
+  static const double _h = 14;
+
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) =>
+      const Size(_w, _h);
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final t = enableAnimation.value;
+    final c = Color.lerp(
+      color.withValues(alpha: 0.4),
+      color,
+      t,
+    )!;
+    final rect = Rect.fromCenter(center: center, width: _w, height: _h);
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(0.5));
+    context.canvas.drawRRect(rrect, Paint()..color = c);
+  }
+}
+
+/// Fraunces typography for the soft-blur Now Playing layout.
+TextStyle _softBlurFraunces(
+  Color color, {
+  double fontSize = 20,
+  FontWeight fontWeight = FontWeight.w600,
+}) {
+  return GoogleFonts.fraunces(
+    fontSize: fontSize,
+    fontWeight: fontWeight,
+    color: color,
+    height: 1.25,
+  );
 }
 
 class NowPlayingScreen extends StatefulWidget {
@@ -114,6 +168,58 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 
   void _openTagEditor(PlayerController player) => _showTagSheet(player);
+
+  Future<void> _onSoftBlurTailOverflowSelected(
+    PlayerController player,
+    String value,
+  ) async {
+    if (!value.startsWith('ta:')) return;
+    final action = TrackOverflowAction.values.byName(value.substring(3));
+    await applyTrackOverflowAction(
+      context,
+      player,
+      player.currentIndex,
+      action,
+      playbackOriginTab: player.playbackOriginTab,
+    );
+  }
+
+  List<PopupMenuEntry<String>> _softBlurRestMenuEntries(TrackItem track) {
+    final out = <PopupMenuEntry<String>>[];
+    for (final e in trackOverflowPopupMenuEntries(
+      enableDeleteFromDevice: trackCanDeleteFromDevice(track),
+      enableFavorite: false,
+      isFavorite: false,
+    )) {
+      if (e is PopupMenuItem<TrackOverflowAction>) {
+        final a = e.value;
+        if (a == null) continue;
+        out.add(
+          PopupMenuItem<String>(
+            value: 'ta:${a.name}',
+            child: e.child ?? const SizedBox.shrink(),
+          ),
+        );
+      } else if (e is PopupMenuDivider) {
+        out.add(const PopupMenuDivider());
+      }
+    }
+    return out;
+  }
+
+  /// Play / playlist / delete entries only (edit, fav, site stay as top icon buttons).
+  Widget _softBlurTailOverflowMenu({
+    required PlayerController player,
+    required TrackItem track,
+    required Color actionColor,
+  }) {
+    return PopupMenuButton<String>(
+      tooltip: 'More',
+      icon: Icon(Icons.more_vert_rounded, color: actionColor),
+      itemBuilder: (ctx) => _softBlurRestMenuEntries(track),
+      onSelected: (v) => unawaited(_onSoftBlurTailOverflowSelected(player, v)),
+    );
+  }
 
   void _notifyShuffle(PlayerController player) {
     if (player.playlist.length < 2) return;
@@ -318,6 +424,362 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
+  Widget _softRoundControl({
+    required IconData icon,
+    required VoidCallback? onPressed,
+    required Color color,
+    double size = 56,
+    double iconSize = 28,
+    bool filled = false,
+  }) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: IconButton(
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          backgroundColor: filled ? color.withValues(alpha: 0.18) : null,
+          side: BorderSide(color: color.withValues(alpha: 0.8), width: 1.6),
+          shape: const CircleBorder(),
+        ),
+        iconSize: iconSize,
+        color: color,
+        icon: Icon(icon),
+      ),
+    );
+  }
+
+  Widget _buildSoftBlurVolumeBar(
+    BuildContext context, {
+    required AppPalette pal,
+    required PlayerController player,
+    required double artWidth,
+  }) {
+    final accent = context.controlAccent;
+    return Center(
+      child: SizedBox(
+        width: artWidth,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 4, 0, 4),
+          child: Row(
+            children: [
+              Icon(
+                Icons.volume_down_rounded,
+                color: accent.withValues(alpha: 0.9),
+                size: 20,
+              ),
+              Expanded(
+                child: StreamBuilder<double>(
+                  stream: player.audioPlayer.volumeStream,
+                  initialData: player.audioPlayer.volume,
+                  builder: (context, snap) {
+                    final v = (snap.data ?? 1.0).clamp(0.0, 1.0);
+                    return SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 3,
+                        thumbShape: _SoftBlurSeekThumbShape(color: accent),
+                        overlayShape: SliderComponentShape.noOverlay,
+                        activeTrackColor: accent,
+                        inactiveTrackColor: accent.withValues(alpha: 0.32),
+                        thumbColor: accent,
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: Slider(
+                        padding: EdgeInsets.zero,
+                        value: v,
+                        onChanged: (nv) =>
+                            unawaited(player.audioPlayer.setVolume(nv)),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Icon(
+                Icons.volume_up_rounded,
+                color: accent.withValues(alpha: 0.9),
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSoftBlurTransportRow(
+    BuildContext context, {
+    required AppPalette pal,
+    required PlayerController player,
+    required double artWidth,
+  }) {
+    final accent = context.controlAccent;
+    final muted = pal.onScaffold.withValues(alpha: 0.5);
+    return SizedBox(
+      width: artWidth,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            tooltip: 'Shuffle',
+            onPressed: player.playlist.length < 2
+                ? null
+                : () => _notifyShuffle(player),
+            icon: Icon(
+              Icons.shuffle_rounded,
+              color: player.shuffleEnabled ? accent : muted,
+            ),
+          ),
+          _softRoundControl(
+            icon: Icons.skip_previous_rounded,
+            onPressed: () => player.skipPrevious(),
+            color: accent,
+            size: 58,
+          ),
+          ListenableBuilder(
+            listenable: player,
+            builder: (context, _) => _softRoundControl(
+              icon: player.isPlaying
+                  ? Icons.pause_rounded
+                  : Icons.play_arrow_rounded,
+              onPressed: () => player.togglePlayPause(),
+              color: accent,
+              size: 76,
+              iconSize: 36,
+              filled: true,
+            ),
+          ),
+          ListenableBuilder(
+            listenable: player,
+            builder: (context, _) => _softRoundControl(
+              icon: Icons.skip_next_rounded,
+              onPressed: player.canSkipNext ? () => player.skipNext() : null,
+              color: player.canSkipNext ? accent : accent.withValues(alpha: 0.38),
+              size: 58,
+            ),
+          ),
+          IconButton(
+            tooltip: 'Repeat mode',
+            onPressed: () => _notifyRepeat(player),
+            icon: Icon(
+              player.repeatMode == PlaylistRepeatMode.one
+                  ? Icons.repeat_one_rounded
+                  : Icons.repeat_rounded,
+              color: player.repeatMode == PlaylistRepeatMode.off
+                  ? muted
+                  : accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSoftBlurTopSection(
+    BuildContext context, {
+    required ThemeData theme,
+    required AppPalette pal,
+    required PlayerController player,
+    required TrackItem track,
+  }) {
+    final canEdit = track.filePath != null && track.filePath!.isNotEmpty;
+    final albumName = track.metaLine.trim();
+    final showAlbum = albumName.isNotEmpty && albumName.toLowerCase() != 'mp3';
+    final artistName = track.artist.trim();
+    final showArtist =
+        artistName.isNotEmpty && artistName.toLowerCase() != 'unknown artist';
+    final actionColor = pal.onScaffold.withValues(alpha: 0.92);
+    final accent = context.controlAccent;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final artWidth = constraints.maxWidth.clamp(220.0, 360.0);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: artWidth,
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Collapse',
+                    onPressed: _safeCollapse,
+                    icon: Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: actionColor,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Edit tags & cover',
+                    onPressed: canEdit ? () => _openTagEditor(player) : null,
+                    icon: Icon(
+                      Icons.edit_note_rounded,
+                      color: actionColor,
+                    ),
+                  ),
+                  _favoriteButton(pal, track),
+                  IconButton(
+                    tooltip: 'Clean site-style name',
+                    onPressed: canEdit && !kIsWeb
+                        ? () => showStandaloneSiteRenameDialog(context, track)
+                        : null,
+                    icon: Icon(
+                      Icons.auto_fix_high_outlined,
+                      color: actionColor,
+                    ),
+                  ),
+                  _softBlurTailOverflowMenu(
+                    player: player,
+                    track: track,
+                    actionColor: actionColor,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: artWidth,
+              child: TrackAlbumArt(
+                track: track,
+                display: TrackArtDisplay.full,
+                showShadow: false,
+                cornerRadius: 0,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: artWidth,
+              child: StreamBuilder<Duration>(
+                stream: player.audioPlayer.positionStream,
+                builder: (context, posSnap) {
+                  return StreamBuilder<Duration?>(
+                    stream: player.audioPlayer.durationStream,
+                    builder: (context, durSnap) {
+                      final dur = durSnap.data ?? player.duration;
+                      final pos = posSnap.data ?? player.position;
+                      final totalMs = dur?.inMilliseconds ?? 0;
+                      final posMs = pos.inMilliseconds;
+                      final sliderValue =
+                          _dragPositionFraction ??
+                          (totalMs > 0
+                              ? (posMs / totalMs).clamp(0.0, 1.0)
+                              : 0.0);
+                      return Column(
+                        children: [
+                          SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 3,
+                              thumbShape: _SoftBlurSeekThumbShape(
+                                color: accent,
+                              ),
+                              overlayShape: SliderComponentShape.noOverlay,
+                              activeTrackColor: accent,
+                              inactiveTrackColor:
+                                  accent.withValues(alpha: 0.28),
+                              thumbColor: accent,
+                              padding: EdgeInsets.zero,
+                            ),
+                            child: Slider(
+                              padding: EdgeInsets.zero,
+                              value: sliderValue.clamp(0.0, 1.0),
+                              onChanged: totalMs > 0
+                                  ? (v) => setState(
+                                        () => _dragPositionFraction = v,
+                                      )
+                                  : null,
+                              onChangeEnd: totalMs > 0
+                                  ? (v) {
+                                      player.seek(
+                                        Duration(
+                                          milliseconds:
+                                              (v * totalMs).round(),
+                                        ),
+                                      );
+                                      setState(
+                                        () => _dragPositionFraction = null,
+                                      );
+                                    }
+                                  : null,
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              Text(
+                                _formatDuration(pos),
+                                style: _softBlurFraunces(
+                                  accent.withValues(alpha: 0.95),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                dur != null ? _formatDuration(dur) : '--:--',
+                                style: _softBlurFraunces(
+                                  accent.withValues(alpha: 0.95),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: artWidth,
+              child: _MarqueeText(
+                track.title,
+                textAlign: TextAlign.center,
+                style: _softBlurFraunces(
+                  pal.onScaffold,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            if (showArtist) ...[
+              const SizedBox(height: 6),
+              SizedBox(
+                width: artWidth,
+                child: _MarqueeText(
+                  artistName,
+                  textAlign: TextAlign.center,
+                  style: _softBlurFraunces(
+                    pal.onScaffold.withValues(alpha: 0.88),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+            if (showAlbum) ...[
+              const SizedBox(height: 4),
+              SizedBox(
+                width: artWidth,
+                child: _MarqueeText(
+                  albumName,
+                  textAlign: TextAlign.center,
+                  style: _softBlurFraunces(
+                    pal.onScaffold.withValues(alpha: 0.82),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -336,6 +798,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         }
 
         final playerChrome = context.usesPlayerChrome;
+        final softBlurTheme =
+            context.appliedThemePalette == AppThemePalette.playerSoft;
         final pageBg = playerChrome ? pal.scaffoldBackground : pal.surface;
 
         return ClipRRect(
@@ -366,6 +830,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                   final t = player.currentTrack;
                                   if (t == null) {
                                     return const SizedBox.shrink();
+                                  }
+                                  if (softBlurTheme) {
+                                    return _buildSoftBlurTopSection(
+                                      context,
+                                      theme: theme,
+                                      pal: pal,
+                                      player: player,
+                                      track: t,
+                                    );
                                   }
                                   return Column(
                                     crossAxisAlignment:
@@ -704,27 +1177,92 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               ),
                             ),
                           ),
-                          SliverFillRemaining(
-                            hasScrollBody: false,
-                            child: ListenableBuilder(
-                              listenable: player,
-                              builder: (context, _) {
-                                return _UpNextPanel(
-                                  next: player.upcomingTrack,
-                                  pal: pal,
-                                  theme: theme,
-                                  repeatMode: player.repeatMode,
-                                  queueLength: player.playlist.length,
-                                  playerChrome: playerChrome,
-                                );
-                              },
+                          if (softBlurTheme)
+                            SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: ListenableBuilder(
+                                listenable: player,
+                                builder: (context, _) {
+                                  if (player.currentTrack == null) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  final artWidth =
+                                      (MediaQuery.sizeOf(context).width - 48)
+                                          .clamp(220.0, 360.0);
+                                  return Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      24,
+                                      0,
+                                      24,
+                                      0,
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        const Spacer(flex: 2),
+                                        _buildSoftBlurTransportRow(
+                                          context,
+                                          pal: pal,
+                                          player: player,
+                                          artWidth: artWidth,
+                                        ),
+                                        const SizedBox(height: 36),
+                                        const Spacer(flex: 3),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
-                          ),
+                          if (!softBlurTheme)
+                            SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: ListenableBuilder(
+                                listenable: player,
+                                builder: (context, _) {
+                                  return _UpNextPanel(
+                                    next: player.upcomingTrack,
+                                    pal: pal,
+                                    theme: theme,
+                                    repeatMode: player.repeatMode,
+                                    queueLength: player.playlist.length,
+                                    playerChrome: playerChrome,
+                                  );
+                                },
+                              ),
+                            ),
                         ],
                       ),
                     ),
                   ),
-                  _footerTrackTools(context, pal, player),
+                  if (softBlurTheme)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 28),
+                      child: SafeArea(
+                        top: false,
+                        minimum: const EdgeInsets.only(bottom: 4),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: ListenableBuilder(
+                            listenable: player,
+                            builder: (context, _) {
+                              if (player.currentTrack == null) {
+                                return const SizedBox.shrink();
+                              }
+                              final artWidth =
+                                  (MediaQuery.sizeOf(context).width - 48)
+                                      .clamp(220.0, 360.0);
+                              return _buildSoftBlurVolumeBar(
+                                context,
+                                pal: pal,
+                                player: player,
+                                artWidth: artWidth,
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (!softBlurTheme) _footerTrackTools(context, pal, player),
                 ],
               ),
             ),
@@ -1000,7 +1538,7 @@ class _MarqueeTextState extends State<_MarqueeText> {
   }
 }
 
-/// Player theme: frosted “Up next” row matching hero glass + primary-tinted labels.
+/// Julia (non-Leah): frosted “Up next” row matching hero glass + primary-tinted labels.
 class _UpNextGlassTrackCard extends StatelessWidget {
   const _UpNextGlassTrackCard({
     required this.pal,

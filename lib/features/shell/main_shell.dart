@@ -20,6 +20,7 @@ import '../../services/track_metadata.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/player_chrome_background.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../library/library_files_page.dart';
 import '../library/library_screen.dart';
@@ -41,6 +42,10 @@ class MainShell extends StatefulWidget {
     required this.customAccentColor,
     required this.onAccentColorOptionChanged,
     required this.onCustomAccentColorChanged,
+    required this.playerChromeBackgroundKind,
+    required this.playerChromeCustomBackground,
+    required this.onPlayerChromeBackgroundKindChanged,
+    required this.onPlayerChromeCustomBackgroundChanged,
   });
 
   final AppThemeSetting themeSetting;
@@ -51,6 +56,11 @@ class MainShell extends StatefulWidget {
   final Color customAccentColor;
   final ValueChanged<AppAccentColorOption> onAccentColorOptionChanged;
   final ValueChanged<Color> onCustomAccentColorChanged;
+  final PlayerChromeBackgroundKind playerChromeBackgroundKind;
+  final Color? playerChromeCustomBackground;
+  final ValueChanged<PlayerChromeBackgroundKind>
+      onPlayerChromeBackgroundKindChanged;
+  final ValueChanged<Color> onPlayerChromeCustomBackgroundChanged;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -915,6 +925,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                                   widget.onAccentColorOptionChanged,
                               onCustomAccentColorChanged:
                                   widget.onCustomAccentColorChanged,
+                              playerChromeBackgroundKind:
+                                  widget.playerChromeBackgroundKind,
+                              playerChromeCustomBackground:
+                                  widget.playerChromeCustomBackground,
+                              onPlayerChromeBackgroundKindChanged:
+                                  widget.onPlayerChromeBackgroundKindChanged,
+                              onPlayerChromeCustomBackgroundChanged:
+                                  widget.onPlayerChromeCustomBackgroundChanged,
                             ),
                     ),
                     if (current != null)

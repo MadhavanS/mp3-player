@@ -12,6 +12,7 @@ import '../../services/storage_access.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/player_chrome_background.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -27,6 +28,10 @@ class SettingsScreen extends StatefulWidget {
     required this.customAccentColor,
     required this.onAccentColorOptionChanged,
     required this.onCustomAccentColorChanged,
+    required this.playerChromeBackgroundKind,
+    required this.playerChromeCustomBackground,
+    required this.onPlayerChromeBackgroundKindChanged,
+    required this.onPlayerChromeCustomBackgroundChanged,
   });
 
   final List<String> folderPaths;
@@ -40,6 +45,11 @@ class SettingsScreen extends StatefulWidget {
   final Color customAccentColor;
   final ValueChanged<AppAccentColorOption> onAccentColorOptionChanged;
   final ValueChanged<Color> onCustomAccentColorChanged;
+  final PlayerChromeBackgroundKind playerChromeBackgroundKind;
+  final Color? playerChromeCustomBackground;
+  final ValueChanged<PlayerChromeBackgroundKind>
+      onPlayerChromeBackgroundKindChanged;
+  final ValueChanged<Color> onPlayerChromeCustomBackgroundChanged;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -285,6 +295,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 FilledButton(
                   onPressed: () {
                     widget.onCustomAccentColorChanged(selected);
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _openPlayerChromeBackgroundColorDialog() async {
+    if (!mounted || _busy) return;
+    final pal = context.palette;
+    var selected = widget.playerChromeCustomBackground ?? pal.scaffoldBackground;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSt) {
+            return AlertDialog(
+              backgroundColor: pal.surface,
+              title: Text(
+                'App background color',
+                style: TextStyle(color: pal.textPrimary),
+              ),
+              content: SingleChildScrollView(
+                child: ColorPicker(
+                  pickerColor: selected,
+                  onColorChanged: (c) => setSt(() => selected = c),
+                  enableAlpha: false,
+                  displayThumbColor: true,
+                  paletteType: PaletteType.hsvWithHue,
+                  pickerAreaBorderRadius: const BorderRadius.all(
+                    Radius.circular(12),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(color: pal.textSecondary),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    widget.onPlayerChromeCustomBackgroundChanged(selected);
                     Navigator.pop(ctx);
                   },
                   child: const Text('Apply'),
@@ -558,6 +618,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  AppThemeSetting get _appearanceThemeDropdownValue {
+    final s = widget.themeSetting;
+    return appearanceThemeChoices.contains(s) ? s : AppThemeSetting.automatic;
+  }
+
   Widget _buildAppearanceDetail(ThemeData theme, AppPalette pal) {
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -588,13 +653,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<AppThemeSetting>(
-              value: widget.themeSetting,
+              value: _appearanceThemeDropdownValue,
               isExpanded: true,
               dropdownColor: pal.surface,
               style: TextStyle(color: pal.textPrimary, fontSize: 15),
               iconEnabledColor: pal.onScaffold.withValues(alpha: 0.85),
               items: [
-                for (final s in AppThemeSetting.values)
+                for (final s in appearanceThemeChoices)
                   DropdownMenuItem(value: s, child: Text(s.label)),
               ],
               onChanged: _busy
@@ -612,6 +677,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: pal.onScaffold.withValues(alpha: 0.65),
           ),
         ),
+        if (widget.themeSetting == AppThemeSetting.player ||
+            widget.themeSetting == AppThemeSetting.playerSoft) ...[
+          const SizedBox(height: 20),
+          Text(
+            'Julia & Leah background',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: pal.onScaffold.withValues(alpha: 0.92),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Applies to the whole app when Julia or Leah is selected. '
+            'This is separate from accent color.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.onScaffold.withValues(alpha: 0.65),
+            ),
+          ),
+          const SizedBox(height: 8),
+          InputDecorator(
+            decoration: _appearanceDropdownDecoration(pal).copyWith(
+              labelText: 'Background',
+              labelStyle: TextStyle(
+                color: pal.onScaffold.withValues(alpha: 0.72),
+                fontSize: 13,
+              ),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<PlayerChromeBackgroundKind>(
+                value: widget.playerChromeBackgroundKind,
+                isExpanded: true,
+                dropdownColor: pal.surface,
+                style: TextStyle(color: pal.textPrimary, fontSize: 15),
+                iconEnabledColor: pal.onScaffold.withValues(alpha: 0.85),
+                items: [
+                  for (final k in PlayerChromeBackgroundKind.values)
+                    DropdownMenuItem(value: k, child: Text(k.label)),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (v) {
+                        if (v != null) {
+                          widget.onPlayerChromeBackgroundKindChanged(v);
+                        }
+                      },
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            widget.playerChromeBackgroundKind.subtitle,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.onScaffold.withValues(alpha: 0.65),
+            ),
+          ),
+          if (widget.playerChromeBackgroundKind ==
+              PlayerChromeBackgroundKind.custom) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _busy ? null : _openPlayerChromeBackgroundColorDialog,
+                icon: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: widget.playerChromeCustomBackground ??
+                        pal.scaffoldBackground,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: pal.onScaffold.withValues(alpha: 0.2),
+                    ),
+                  ),
+                ),
+                label: const Text('Choose background color'),
+              ),
+            ),
+          ],
+        ],
         const SizedBox(height: 22),
         Text(
           'Font',

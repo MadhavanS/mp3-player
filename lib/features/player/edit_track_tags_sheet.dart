@@ -270,7 +270,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
               child: Text(tagOnlyFlow ? 'Apply tag edits' : 'Use in editor'),
             ),
             if (!tagOnlyFlow)
-              FilledButton(
+              OutlinedButton(
                 onPressed: () {
                   Navigator.pop(ctx);
                   unawaited(_applySiteRename(suggestion, tagOnlyFlow: false));
@@ -651,30 +651,45 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                 textCapitalization: TextCapitalization.words,
               ),
               const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _saving
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      child: const Text('Cancel'),
+              Builder(
+                builder: (context) {
+                  final outlineStyle = OutlinedButton.styleFrom(
+                    foregroundColor: context.palette.textPrimary,
+                    side: BorderSide(
+                      color: context.palette.textMuted.withValues(alpha: 0.45),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _saving ? null : _save,
-                      child: _saving
-                          ? const SizedBox(
-                              height: 22,
-                              width: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Save'),
-                    ),
-                  ),
-                ],
+                  );
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: outlineStyle,
+                          onPressed: _saving
+                              ? null
+                              : () => Navigator.of(context).pop(),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton(
+                          style: outlineStyle,
+                          onPressed: _saving ? null : _save,
+                          child: _saving
+                              ? SizedBox(
+                                  height: 22,
+                                  width: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: context.controlAccent,
+                                  ),
+                                )
+                              : const Text('Save'),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ],
           ),
