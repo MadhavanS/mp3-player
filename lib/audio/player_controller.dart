@@ -333,6 +333,69 @@ class PlayerController extends ChangeNotifier {
     _sourceNeedsReload = false;
   }
 
+  /// After a disk scan, replace the queue with [tracks] when playback was started from
+  /// the main Songs library (full-library queue). Preserves the current file, playback
+  /// position, playing/paused state, and shuffle mode (rebuilding shuffle so new indices
+  /// are included). No-op when playback was started from another tab (playlist, favourites,
+  /// etc.) so those queues are not replaced by the full library scan.
+  Future<void> tryResyncQueueWithLibraryScan(
+    List<TrackItem> tracks, {
+    required Duration resumePosition,
+    required bool resumePlaying,
+  }) async {
+    final origin = _playbackOriginTab;
+    if (origin != null && origin != LibraryTabId.songs) {
+      return;
+    }
+    if (tracks.isEmpty) {
+      await setPlaylist(
+        [],
+        startIndex: 0,
+        playbackOriginTab: LibraryTabId.songs,
+      );
+      return;
+    }
+
+    final pathPreserve = currentTrack?.filePath?.trim();
+    final keepShuffle = _shuffle && tracks.length > 1;
+    _playlist = List<TrackItem>.from(tracks);
+
+    var newIndex = 0;
+    if (pathPreserve != null && pathPreserve.isNotEmpty) {
+      final ix = _playlist.indexWhere(
+        (t) => (t.filePath ?? '').trim() == pathPreserve,
+      );
+      if (ix >= 0) newIndex = ix;
+    }
+
+    if (keepShuffle) {
+      final cur = newIndex;
+      final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
+      order.remove(cur);
+      _shuffleOrder = [cur, ...order];
+      _shufflePos = 0;
+      _index = cur;
+      _shuffle = true;
+    } else {
+      _resetShuffleState();
+      _index = newIndex;
+    }
+
+    notifyListeners();
+    await _loadCurrent(
+      initialPosition: resumePosition,
+      stopBeforeLoad: false,
+    );
+    _sourceNeedsReload = false;
+    if (resumePlaying) {
+      await _playSafely(context: 'tryResyncQueueWithLibraryScan.play');
+    } else {
+      try {
+        await _player.pause();
+      } catch (_) {}
+    }
+  }
+
   /// Appends [items] to the current queue. If the queue was empty, loads and starts
   /// playback at the first appended item.
   ///

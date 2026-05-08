@@ -515,6 +515,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
       if (preservePlaybackAfterRescan) {
         if (keepCurrentQueue && player.playlist.isNotEmpty) {
+          await player.tryResyncQueueWithLibraryScan(
+            tracks,
+            resumePosition: playbackPosition,
+            resumePlaying: wasPlaying,
+          );
           if (!kIsWeb && mounted) {
             enrichPlaylistTracks(
               tracks: tracks,
