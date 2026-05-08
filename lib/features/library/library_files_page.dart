@@ -23,7 +23,8 @@ class LibraryFilesPage extends StatefulWidget {
     TrackOverflowAction action, {
     LibraryTabId? playbackOriginTab,
     TrackOverflowQueueContext? outsideQueue,
-  }) onOverflow;
+  })
+  onOverflow;
 
   @override
   State<LibraryFilesPage> createState() => _LibraryFilesPageState();
@@ -114,6 +115,10 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
                       controller: _searchController,
                       textInputAction: TextInputAction.search,
                       keyboardType: TextInputType.text,
+                      onSubmitted: (_) =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
+                      onTapOutside: (_) =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: pal.onScaffold,
                         fontSize: 15,
