@@ -71,6 +71,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Timer? _idleRescanTimer;
   bool _backgroundSyncInProgress = false;
   bool _backgroundSyncQueued = false;
+  bool _albumArtWarmupInProgress = false;
+  bool _albumArtWarmupQueued = false;
 
   @override
   void initState() {
@@ -97,6 +99,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _scheduleIdleRescan();
+    }
+    if (state == AppLifecycleState.detached) {
+      final p = _playerRef;
+      if (p != null) {
+        unawaited(p.stopForExternalFileEdit());
+      }
     }
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
@@ -234,8 +242,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         .map((s) => s.track)
         .toList(growable: false);
     if (restoreTracks.isNotEmpty) {
-      await PlaybackSessionStore.restorePlayer(player, restoreTracks);
+      await PlaybackSessionStore.restorePlayer(
+        player,
+        restoreTracks,
+        resumePlaying: false,
+      );
     }
+    _scheduleAlbumArtWarmup(player);
   }
 
   Future<List<ScannedMp3File>> _collectMp3FileStats(List<String> roots) async {
@@ -316,6 +329,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
           .toList(growable: false);
       player.setLibraryCatalog(finalTracks);
+      _scheduleAlbumArtWarmup(player);
 
       if (finalTracks.isNotEmpty) {
         await RecentlyAddedStore.mergeScanPaths(
@@ -327,6 +341,43 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     } catch (e, st) {
       debugPrint('_syncLibraryFromDiskInBackground: $e\n$st');
     }
+  }
+
+  void _scheduleAlbumArtWarmup(PlayerController player) {
+    if (kIsWeb) return;
+    if (_albumArtWarmupInProgress) {
+      _albumArtWarmupQueued = true;
+      return;
+    }
+    _albumArtWarmupInProgress = true;
+    unawaited(() async {
+      try {
+        final tracksNeedingArt = player.metadataLibrary
+            .where((t) {
+              final p = t.filePath;
+              final art = t.albumArtBytes;
+              return p != null && p.isNotEmpty && (art == null || art.isEmpty);
+            })
+            .toList(growable: false);
+        if (tracksNeedingArt.isEmpty) return;
+        await enrichPlaylistTracks(
+          tracks: tracksNeedingArt,
+          batchSize: 3,
+          onTrackUpdated: (path, updated) {
+            player.updateTrackByPath(path, updated);
+            unawaited(SongMetadataCache.saveTracks([updated]));
+          },
+        );
+      } catch (e, st) {
+        debugPrint('_scheduleAlbumArtWarmup: $e\n$st');
+      } finally {
+        _albumArtWarmupInProgress = false;
+        if (_albumArtWarmupQueued) {
+          _albumArtWarmupQueued = false;
+          _scheduleAlbumArtWarmup(player);
+        }
+      }
+    }());
   }
 
   Future<void> _persistSession() async {
@@ -506,6 +557,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         final restored = await PlaybackSessionStore.restorePlayer(
           player,
           tracks,
+          resumePlaying: playAfter,
         );
         if (!mounted) return;
         if (restored) {
@@ -578,11 +630,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       );
       return;
     }
-    await _scanFoldersAndSetPlaylist(
-      _folderPaths,
-      playAfter: false,
-      preservePlaybackAfterRescan: true,
-    );
+    final player = PlayerController.of(context);
+    await _runBackgroundSyncGuarded(player, List<String>.from(_folderPaths));
   }
 
   void _openDrawer() {
@@ -713,7 +762,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                     child: Text(
-                      'MP3 Player',
+                      'MadPlay',
                       style: theme.textTheme.titleLarge?.copyWith(
                         color: context.controlAccent,
                         fontWeight: FontWeight.w700,

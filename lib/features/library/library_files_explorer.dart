@@ -36,11 +36,13 @@ class LibraryFilesExplorer extends StatefulWidget {
     TrackOverflowAction action, {
     LibraryTabId? playbackOriginTab,
     TrackOverflowQueueContext? outsideQueue,
-  }) onOverflow;
+  })
+  onOverflow;
 
   /// After playback starts: on IO, [explicitTrackPathKeys] is the scanned set of `.mp3`
   /// under the open folder (recursive). On web pass `null` — Library keeps full list.
-  final Future<void> Function(Set<String>? explicitTrackPathKeys)? onSongChosenFromExplorer;
+  final Future<void> Function(Set<String>? explicitTrackPathKeys)?
+  onSongChosenFromExplorer;
 
   @override
   State<LibraryFilesExplorer> createState() => LibraryFilesExplorerState();
@@ -80,8 +82,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     String dir,
   ) async {
     final listing = await listFolderChildrenSorted(dir);
-    final mp3 =
-        await sortMp3PathsForFilesExplorer(listing.mp3Paths, _sortMode);
+    final mp3 = await sortMp3PathsForFilesExplorer(listing.mp3Paths, _sortMode);
     return (dirs: listing.dirs, mp3Paths: mp3);
   }
 
@@ -163,8 +164,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     final root = _closestMusicRootPrefix(absolutePath);
     if (root == null) return;
     final rel = p.relative(p.normalize(absolutePath), from: p.normalize(root));
-    final parts =
-        p.split(rel).where((s) => s.isNotEmpty && s != '.').toList();
+    final parts = p.split(rel).where((s) => s.isNotEmpty && s != '.').toList();
 
     final newStack = <String>[root];
     var cursor = root;
@@ -188,10 +188,11 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     final sep = p.separator;
     for (final r in widget.musicRoots) {
       final nr = p.normalize(r).toLowerCase();
-      final rootWithSep =
-          nr.endsWith(sep) ? nr.substring(0, nr.length - 1) : nr;
-      final underThis = normPath == rootWithSep ||
-          normPath.startsWith('$rootWithSep$sep');
+      final rootWithSep = nr.endsWith(sep)
+          ? nr.substring(0, nr.length - 1)
+          : nr;
+      final underThis =
+          normPath == rootWithSep || normPath.startsWith('$rootWithSep$sep');
       if (underThis) {
         if (r.length > bestLen) {
           bestLen = r.length;
@@ -327,8 +328,9 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
       final isLast = i == segs.length - 1;
       items.add(
         TextButton(
-          onPressed:
-              isLast ? null : () => unawaited(_openPathChain(targetPath)),
+          onPressed: isLast
+              ? null
+              : () => unawaited(_openPathChain(targetPath)),
           style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             minimumSize: Size.zero,
@@ -410,6 +412,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
       await player.setPlaylistAndPlay(
         [TrackItem.fromFilePath(filePath)],
         playbackOriginTab: LibraryTabId.songs,
+        keepShuffleMode: true,
       );
       return;
     }
@@ -422,17 +425,16 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     if (cb != null) await cb(keys);
 
     final library = player.metadataLibrary;
-    final tracks = scanned
-        .map((path) {
-          final j = library.indexWhere((t) => t.filePath == path);
-          return j >= 0 ? library[j] : TrackItem.fromFilePath(path);
-        })
-        .toList();
+    final tracks = scanned.map((path) {
+      final j = library.indexWhere((t) => t.filePath == path);
+      return j >= 0 ? library[j] : TrackItem.fromFilePath(path);
+    }).toList();
     final startIndex = tracks.indexWhere((t) => t.filePath == filePath);
     await player.setPlaylistAndPlay(
       tracks,
       startIndex: startIndex >= 0 ? startIndex : 0,
       playbackOriginTab: LibraryTabId.songs,
+      keepShuffleMode: true,
     );
   }
 
@@ -500,8 +502,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
         return Center(
           child: Text(
             'No folder matches',
-            style:
-                theme.textTheme.titleMedium?.copyWith(color: pal.onScaffold),
+            style: theme.textTheme.titleMedium?.copyWith(color: pal.onScaffold),
           ),
         );
       }
@@ -547,13 +548,17 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                 return InkWell(
                   onTap: () => _pushDir(r),
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
                     child: Row(
                       children: [
-                        Icon(Icons.folder_rounded,
-                            size: 36,
-                            color: pal.onScaffold.withValues(alpha: 0.65)),
+                        Icon(
+                          Icons.folder_rounded,
+                          size: 36,
+                          color: pal.onScaffold.withValues(alpha: 0.65),
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
@@ -574,7 +579,9 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                 builder: (_, s) => Text(
                                   s.data ?? '…',
                                   style: theme.textTheme.bodySmall?.copyWith(
-                                    color: pal.textMuted.withValues(alpha: 0.93),
+                                    color: pal.textMuted.withValues(
+                                      alpha: 0.93,
+                                    ),
                                     fontSize: 12,
                                   ),
                                 ),
@@ -582,8 +589,10 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                             ],
                           ),
                         ),
-                        Icon(Icons.more_vert_rounded,
-                            color: pal.textMuted.withValues(alpha: 0.4)),
+                        Icon(
+                          Icons.more_vert_rounded,
+                          color: pal.textMuted.withValues(alpha: 0.4),
+                        ),
                       ],
                     ),
                   ),
@@ -605,8 +614,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
         if (snap.connectionState != ConnectionState.done) {
           return Center(child: CircularProgressIndicator(color: pal.primary));
         }
-        final listing = snap.data ??
-            (dirs: <String>[], mp3Paths: <String>[]);
+        final listing = snap.data ?? (dirs: <String>[], mp3Paths: <String>[]);
 
         final q = widget.query.trim().toLowerCase();
         final dirsFiltered = listing.dirs.where((d) {
@@ -624,8 +632,9 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
         final headerSubtitle = FutureBuilder<int>(
           future: _headerSongsFuture,
           builder: (ctx, s) {
-            final totalSongs =
-                s.connectionState != ConnectionState.done ? null : s.data;
+            final totalSongs = s.connectionState != ConnectionState.done
+                ? null
+                : s.data;
             final text = totalSongs == null
                 ? '…'
                 : '${listing.dirs.length} folders • $totalSongs Songs';
@@ -658,17 +667,16 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                   if (dirsFiltered.isEmpty && mp3sFiltered.isEmpty) {
                     return Center(
                       child: Text(
-                        q.isEmpty
-                            ? 'This folder is empty.'
-                            : 'No matches.',
+                        q.isEmpty ? 'This folder is empty.' : 'No matches.',
                         style: theme.textTheme.bodyLarge?.copyWith(
                           color: pal.textMuted,
                         ),
                       ),
                     );
                   }
-                  final mp3QueueTracks =
-                      mp3sFiltered.map((p) => _displayTrack(player, p)).toList();
+                  final mp3QueueTracks = mp3sFiltered
+                      .map((p) => _displayTrack(player, p))
+                      .toList();
                   return ListView(
                     padding: const EdgeInsets.only(bottom: 20),
                     children: [
@@ -677,13 +685,16 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                           onTap: () => _pushDir(folderPath),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 10),
+                              horizontal: 10,
+                              vertical: 10,
+                            ),
                             child: Row(
                               children: [
-                                Icon(Icons.folder_rounded,
-                                    size: 38,
-                                    color:
-                                        pal.onScaffold.withValues(alpha: 0.62)),
+                                Icon(
+                                  Icons.folder_rounded,
+                                  size: 38,
+                                  color: pal.onScaffold.withValues(alpha: 0.62),
+                                ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
@@ -694,11 +705,11 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                         p.basename(folderPath),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style:
-                                            theme.textTheme.titleMedium?.copyWith(
-                                          color: pal.onScaffold,
-                                          fontSize: 16,
-                                        ),
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                              color: pal.onScaffold,
+                                              fontSize: 16,
+                                            ),
                                       ),
                                       const SizedBox(height: 4),
                                       FutureBuilder<String>(
@@ -707,18 +718,20 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                           s.data ?? '…',
                                           style: theme.textTheme.bodySmall
                                               ?.copyWith(
-                                            color: pal.textMuted
-                                                .withValues(alpha: 0.93),
-                                            fontSize: 12,
-                                          ),
+                                                color: pal.textMuted.withValues(
+                                                  alpha: 0.93,
+                                                ),
+                                                fontSize: 12,
+                                              ),
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
-                                Icon(Icons.more_vert_rounded,
-                                    color:
-                                        pal.textMuted.withValues(alpha: 0.42)),
+                                Icon(
+                                  Icons.more_vert_rounded,
+                                  color: pal.textMuted.withValues(alpha: 0.42),
+                                ),
                               ],
                             ),
                           ),
@@ -727,11 +740,13 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                       ...mp3sFiltered.asMap().entries.map((e) {
                         final rowIx = e.key;
                         final fp = e.value;
-                        final idx = player.playlist
-                            .indexWhere((t) => t.filePath == fp);
+                        final idx = player.playlist.indexWhere(
+                          (t) => t.filePath == fp,
+                        );
                         final t = _displayTrack(player, fp);
                         final cur = player.currentTrack?.filePath;
-                        final sel = cur != null &&
+                        final sel =
+                            cur != null &&
                             fp.isNotEmpty &&
                             canonicalMusicLibraryPathKey(cur) ==
                                 canonicalMusicLibraryPathKey(fp);
@@ -743,7 +758,9 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                             onTap: () => _onTapMp3(context, fp),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 6),
+                                horizontal: 6,
+                                vertical: 6,
+                              ),
                               child: Row(
                                 children: [
                                   TrackAlbumArt(
@@ -762,21 +779,22 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                           overflow: TextOverflow.ellipsis,
                                           style: theme.textTheme.titleMedium
                                               ?.copyWith(
-                                            color: pal.onScaffold,
-                                            fontSize: 15,
-                                          ),
+                                                color: pal.onScaffold,
+                                                fontSize: 15,
+                                              ),
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
                                           '${t.artist} · ${_durationSuffix(player, fp)}',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
-                                          style:
-                                              theme.textTheme.bodySmall?.copyWith(
-                                            color: pal.textMuted
-                                                .withValues(alpha: 0.93),
-                                            fontSize: 12,
-                                          ),
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: pal.textMuted.withValues(
+                                                  alpha: 0.93,
+                                                ),
+                                                fontSize: 12,
+                                              ),
                                         ),
                                       ],
                                     ),
@@ -786,8 +804,9 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                     track: t,
                                     overflowIcon: Icons.more_vert_rounded,
                                     iconSize: 22,
-                                    menuIconColor: pal.onScaffold
-                                        .withValues(alpha: 0.75),
+                                    menuIconColor: pal.onScaffold.withValues(
+                                      alpha: 0.75,
+                                    ),
                                     onSelected: (a) {
                                       unawaited(
                                         widget.onOverflow(
@@ -800,7 +819,8 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                               ? TrackOverflowQueueContext(
                                                   tracks: mp3QueueTracks,
                                                   index: rowIx,
-                                                  playbackOriginTab: LibraryTabId.songs,
+                                                  playbackOriginTab:
+                                                      LibraryTabId.songs,
                                                 )
                                               : null,
                                         ),

@@ -49,30 +49,32 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
 
   void _attachAndroidWidgetProgressTicker() {
     if (!_syncAndroidHomeWidget) return;
-    _androidWidgetPlayerStateSub =
-        _player.audioPlayer.playerStateStream.listen((state) {
-      _androidWidgetProgressTimer?.cancel();
-      if (!mounted || !state.playing) return;
-      _androidWidgetProgressTimer =
-          Timer.periodic(const Duration(seconds: 1), (_) async {
-        if (!mounted || !_player.isPlaying) {
-          _androidWidgetProgressTimer?.cancel();
-          return;
-        }
-        await AndroidHomeWidgetBridge.syncPlaybackProgress(
-          playing: _player.isPlaying,
-          positionMs: _player.position.inMilliseconds,
-          durationMs: _player.duration?.inMilliseconds ?? 0,
+    _androidWidgetPlayerStateSub = _player.audioPlayer.playerStateStream.listen(
+      (state) {
+        _androidWidgetProgressTimer?.cancel();
+        if (!mounted || !state.playing) return;
+        _androidWidgetProgressTimer = Timer.periodic(
+          const Duration(seconds: 1),
+          (_) async {
+            if (!mounted || !_player.isPlaying) {
+              _androidWidgetProgressTimer?.cancel();
+              return;
+            }
+            await AndroidHomeWidgetBridge.syncPlaybackProgress(
+              playing: _player.isPlaying,
+              positionMs: _player.position.inMilliseconds,
+              durationMs: _player.duration?.inMilliseconds ?? 0,
+            );
+          },
         );
-      });
-    });
+      },
+    );
   }
 
   void _scheduleAndroidHomeWidgetSync() {
     if (!_syncAndroidHomeWidget) return;
     _androidWidgetSyncDebounce?.cancel();
-    _androidWidgetSyncDebounce =
-        Timer(const Duration(milliseconds: 280), () {
+    _androidWidgetSyncDebounce = Timer(const Duration(milliseconds: 280), () {
       unawaited(_pushAndroidHomeWidgetState());
     });
   }
@@ -176,12 +178,9 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
       controller: _player,
       child: MaterialApp(
         navigatorKey: appNavigatorKey,
-        title: 'MP3 Player',
+        title: 'MadPlay',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.themeFor(
-          resolved,
-          controlAccent: _resolvedAccent,
-        ),
+        theme: AppTheme.themeFor(resolved, controlAccent: _resolvedAccent),
         home: MainShell(
           themeSetting: _themeSetting,
           onThemeSettingChanged: _setThemeSetting,
