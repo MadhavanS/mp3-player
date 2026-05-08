@@ -557,19 +557,18 @@ class PlayerController extends ChangeNotifier {
       return;
     }
 
-    final order = _effectiveQueueOrder();
-    if (order.isEmpty) {
-      try {
-        await _player.stop();
-      } catch (_) {}
-      notifyListeners();
-      return;
-    }
-
     _isLoadingSource = true;
     try {
       if (_prunePlaylistPathsNotInCatalog() && _playlist.isNotEmpty) {
         notifyListeners();
+      }
+      final order = _effectiveQueueOrder();
+      if (order.isEmpty || _playlist.isEmpty) {
+        try {
+          await _player.stop();
+        } catch (_) {}
+        notifyListeners();
+        return;
       }
       try {
         await _player.stop();
@@ -578,6 +577,14 @@ class PlayerController extends ChangeNotifier {
       var logical = _logicalPlaylistIndex();
       if (!order.contains(logical)) {
         logical = order.first;
+        _index = logical;
+        if (_shuffle) {
+          final spi = _shuffleOrder.indexOf(logical);
+          _shufflePos = spi >= 0 ? spi : 0;
+        }
+      }
+      if (logical < 0 || logical >= _playlist.length) {
+        logical = order.first.clamp(0, _playlist.length - 1);
         _index = logical;
         if (_shuffle) {
           final spi = _shuffleOrder.indexOf(logical);

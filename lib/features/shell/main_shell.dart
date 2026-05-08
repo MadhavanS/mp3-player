@@ -20,6 +20,7 @@ import '../../services/track_metadata.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/action_pill_toast.dart';
 import '../library/library_files_page.dart';
 import '../library/library_screen.dart';
 import '../player/mini_player_bar.dart';
@@ -78,6 +79,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   bool _backgroundSyncQueued = false;
   bool _albumArtWarmupInProgress = false;
   bool _albumArtWarmupQueued = false;
+  bool _refreshInProgress = false;
 
   @override
   void initState() {
@@ -307,7 +309,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         final updated = await Future.wait(
           batch.map((f) async {
             final base = live[f.path] ?? TrackItem.fromFilePath(f.path);
-            final parsed = await readAudioMetadata(base);
+            TrackItem parsed;
+            try {
+              parsed = await readAudioMetadata(base);
+            } catch (e, st) {
+              // Keep library count/path parity with disk even when a file has bad tags.
+              debugPrint('readAudioMetadata fallback for ${f.path}: $e\n$st');
+              parsed = base;
+            }
             return CachedTrackSnapshot(
               track: parsed,
               fileModifiedMs: f.lastModifiedMs,
@@ -627,10 +636,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       preservePlaybackAfterRescan: true,
       keepCurrentQueue: true,
     );
+    if (!mounted) return;
+    ActionPillToast.showUsingRootNavigator(
+      'Library updated',
+      icon: Icons.done_all_rounded,
+      uppercaseLabel: true,
+    );
     _scheduleIdleRescan();
   }
 
   Future<void> _refreshLibraryScan() async {
+    if (_refreshInProgress) return;
     if (_folderPaths.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -638,13 +654,33 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       );
       return;
     }
-    await _scanFoldersAndSetPlaylist(
-      _folderPaths,
-      playAfter: false,
-      preservePlaybackAfterRescan: true,
-      keepCurrentQueue: true,
-      showProgressOverlay: false,
-    );
+    setState(() => _refreshInProgress = true);
+    try {
+      final player = PlayerController.of(context);
+      // Refresh should reflect full library changes immediately (not a stale Files scope).
+      _songsBrowsePathKeysNotifier.value = null;
+      player.setPlaybackPathKeyScope(null, reloadQueue: false);
+      unawaited(PlaybackSessionStore.saveBrowsePathKeys(null));
+      await _scanFoldersAndSetPlaylist(
+        _folderPaths,
+        playAfter: false,
+        preservePlaybackAfterRescan: true,
+        keepCurrentQueue: true,
+        showProgressOverlay: false,
+      );
+      if (!mounted) return;
+      await _runBackgroundSyncGuarded(player, List<String>.from(_folderPaths));
+      if (!mounted) return;
+      ActionPillToast.showUsingRootNavigator(
+        'Refresh completed',
+        icon: Icons.done_all_rounded,
+        uppercaseLabel: true,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _refreshInProgress = false);
+      }
+    }
   }
 
   void _openDrawer() {
@@ -842,7 +878,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                               );
                             },
                             onOpenDrawer: _openDrawer,
-                            onRefreshLibrary: _folderPaths.isEmpty || _scanning
+                            onRefreshLibrary:
+                                _folderPaths.isEmpty ||
+                                    _scanning ||
+                                    _refreshInProgress
                                 ? null
                                 : () {
                                     unawaited(_refreshLibraryScan());

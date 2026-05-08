@@ -402,6 +402,16 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   Future<void> _onTapMp3(BuildContext context, String filePath) async {
     final folderScope = _currentDir;
     if (folderScope == null) return;
+    final scanned = await scanMp3Files(folderScope, recursive: true);
+    await _playFolderTracks(context, scanned: scanned, startFilePath: filePath);
+  }
+
+  Future<void> _playFolderTracks(
+    BuildContext context, {
+    required List<String> scanned,
+    String? startFilePath,
+  }) async {
+    if (scanned.isEmpty) return;
 
     final player = PlayerController.of(context);
     final cb = widget.onSongChosenFromExplorer;
@@ -409,15 +419,23 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     if (kIsWeb) {
       player.setPlaybackPathKeyScope(null, reloadQueue: false);
       if (cb != null) await cb(null);
+      final tracks = scanned
+          .map(TrackItem.fromFilePath)
+          .toList(growable: false);
+      final startIndex = startFilePath == null
+          ? 0
+          : scanned
+                .indexWhere((p0) => p0 == startFilePath)
+                .clamp(0, tracks.length - 1);
       await player.setPlaylistAndPlay(
-        [TrackItem.fromFilePath(filePath)],
+        tracks,
+        startIndex: startIndex,
         playbackOriginTab: LibraryTabId.songs,
         keepShuffleMode: true,
       );
       return;
     }
 
-    final scanned = await scanMp3Files(folderScope, recursive: true);
     final keys = <String>{
       for (final path in scanned) canonicalMusicLibraryPathKey(path),
     }..removeWhere((k) => k.isEmpty);
@@ -425,17 +443,31 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     if (cb != null) await cb(keys);
 
     final library = player.metadataLibrary;
-    final tracks = scanned.map((path) {
-      final j = library.indexWhere((t) => t.filePath == path);
-      return j >= 0 ? library[j] : TrackItem.fromFilePath(path);
-    }).toList();
-    final startIndex = tracks.indexWhere((t) => t.filePath == filePath);
+    final tracks = scanned
+        .map((path) {
+          final j = library.indexWhere((t) => t.filePath == path);
+          return j >= 0 ? library[j] : TrackItem.fromFilePath(path);
+        })
+        .toList(growable: false);
+    final startIndex = startFilePath == null
+        ? 0
+        : tracks
+              .indexWhere((t) => t.filePath == startFilePath)
+              .clamp(0, tracks.length - 1);
     await player.setPlaylistAndPlay(
       tracks,
-      startIndex: startIndex >= 0 ? startIndex : 0,
+      startIndex: startIndex,
       playbackOriginTab: LibraryTabId.songs,
       keepShuffleMode: true,
     );
+  }
+
+  Future<void> _playFolderByPath(
+    BuildContext context,
+    String folderPath,
+  ) async {
+    final scanned = await scanMp3Files(folderPath, recursive: true);
+    await _playFolderTracks(context, scanned: scanned);
   }
 
   String _durationSuffix(PlayerController player, String filePath) {
@@ -589,9 +621,16 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                             ],
                           ),
                         ),
-                        Icon(
-                          Icons.more_vert_rounded,
-                          color: pal.textMuted.withValues(alpha: 0.4),
+                        IconButton(
+                          tooltip: 'Play folder',
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(
+                            Icons.play_circle_fill_rounded,
+                            color: context.controlAccent,
+                            size: 28,
+                          ),
+                          onPressed: () =>
+                              unawaited(_playFolderByPath(context, r)),
                         ),
                       ],
                     ),
@@ -647,196 +686,214 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
           },
         );
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        return Stack(
           children: [
-            _filesHeader(
-              theme: theme,
-              pal: pal,
-              showBack: true,
-              onBack: _goBack,
-              subtitleWidget: headerSubtitle,
-              onHomeRoots: resetToRoots,
-              trailingActions: _sortMenuButton(pal),
-            ),
-            _breadcrumb(theme, pal),
-            Expanded(
-              child: ListenableBuilder(
-                listenable: player,
-                builder: (context, _) {
-                  if (dirsFiltered.isEmpty && mp3sFiltered.isEmpty) {
-                    return Center(
-                      child: Text(
-                        q.isEmpty ? 'This folder is empty.' : 'No matches.',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: pal.textMuted,
-                        ),
-                      ),
-                    );
-                  }
-                  final mp3QueueTracks = mp3sFiltered
-                      .map((p) => _displayTrack(player, p))
-                      .toList();
-                  return ListView(
-                    padding: const EdgeInsets.only(bottom: 20),
-                    children: [
-                      ...dirsFiltered.map(
-                        (folderPath) => InkWell(
-                          onTap: () => _pushDir(folderPath),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 10,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _filesHeader(
+                  theme: theme,
+                  pal: pal,
+                  showBack: true,
+                  onBack: _goBack,
+                  subtitleWidget: headerSubtitle,
+                  onHomeRoots: resetToRoots,
+                  trailingActions: _sortMenuButton(pal),
+                ),
+                _breadcrumb(theme, pal),
+                Expanded(
+                  child: ListenableBuilder(
+                    listenable: player,
+                    builder: (context, _) {
+                      if (dirsFiltered.isEmpty && mp3sFiltered.isEmpty) {
+                        return Center(
+                          child: Text(
+                            q.isEmpty ? 'This folder is empty.' : 'No matches.',
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              color: pal.textMuted,
                             ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.folder_rounded,
-                                  size: 38,
-                                  color: pal.onScaffold.withValues(alpha: 0.62),
+                          ),
+                        );
+                      }
+                      final mp3QueueTracks = mp3sFiltered
+                          .map((p) => _displayTrack(player, p))
+                          .toList();
+                      return ListView(
+                        padding: const EdgeInsets.only(bottom: 92),
+                        children: [
+                          ...dirsFiltered.map(
+                            (folderPath) => InkWell(
+                              onTap: () => _pushDir(folderPath),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        p.basename(folderPath),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: theme.textTheme.titleMedium
-                                            ?.copyWith(
-                                              color: pal.onScaffold,
-                                              fontSize: 16,
-                                            ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.folder_rounded,
+                                      size: 38,
+                                      color: pal.onScaffold.withValues(
+                                        alpha: 0.62,
                                       ),
-                                      const SizedBox(height: 4),
-                                      FutureBuilder<String>(
-                                        future: _folderRowSubtitle(folderPath),
-                                        builder: (_, s) => Text(
-                                          s.data ?? '…',
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                                color: pal.textMuted.withValues(
-                                                  alpha: 0.93,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            p.basename(folderPath),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.titleMedium
+                                                ?.copyWith(
+                                                  color: pal.onScaffold,
+                                                  fontSize: 16,
                                                 ),
-                                                fontSize: 12,
-                                              ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          FutureBuilder<String>(
+                                            future: _folderRowSubtitle(
+                                              folderPath,
+                                            ),
+                                            builder: (_, s) => Text(
+                                              s.data ?? '…',
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                    color: pal.textMuted
+                                                        .withValues(
+                                                          alpha: 0.93,
+                                                        ),
+                                                    fontSize: 12,
+                                                  ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Play folder',
+                                      visualDensity: VisualDensity.compact,
+                                      icon: Icon(
+                                        Icons.play_circle_fill_rounded,
+                                        color: context.controlAccent,
+                                        size: 28,
+                                      ),
+                                      onPressed: () => unawaited(
+                                        _playFolderByPath(context, folderPath),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          ...mp3sFiltered.asMap().entries.map((e) {
+                            final rowIx = e.key;
+                            final fp = e.value;
+                            final idx = player.playlist.indexWhere(
+                              (t) => t.filePath == fp,
+                            );
+                            final t = _displayTrack(player, fp);
+                            final cur = player.currentTrack?.filePath;
+                            final sel =
+                                cur != null &&
+                                fp.isNotEmpty &&
+                                canonicalMusicLibraryPathKey(cur) ==
+                                    canonicalMusicLibraryPathKey(fp);
+                            return Material(
+                              color: sel
+                                  ? pal.onScaffold.withValues(alpha: 0.06)
+                                  : Colors.transparent,
+                              child: InkWell(
+                                onTap: () => _onTapMp3(context, fp),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 6,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      TrackAlbumArt(
+                                        track: t,
+                                        display: TrackArtDisplay.list,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              t.title,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.titleMedium
+                                                  ?.copyWith(
+                                                    color: pal.onScaffold,
+                                                    fontSize: 15,
+                                                  ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              '${t.artist} · ${_durationSuffix(player, fp)}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                    color: pal.textMuted
+                                                        .withValues(
+                                                          alpha: 0.93,
+                                                        ),
+                                                    fontSize: 12,
+                                                  ),
+                                            ),
+                                          ],
                                         ),
+                                      ),
+                                      TrackOverflowMenuWithFavourite(
+                                        pal: pal,
+                                        track: t,
+                                        overflowIcon: Icons.more_vert_rounded,
+                                        iconSize: 22,
+                                        menuIconColor: pal.onScaffold
+                                            .withValues(alpha: 0.75),
+                                        onSelected: (a) {
+                                          unawaited(
+                                            widget.onOverflow(
+                                              context,
+                                              player,
+                                              idx >= 0 ? idx : -1,
+                                              a,
+                                              playbackOriginTab:
+                                                  LibraryTabId.songs,
+                                              outsideQueue: idx < 0
+                                                  ? TrackOverflowQueueContext(
+                                                      tracks: mp3QueueTracks,
+                                                      index: rowIx,
+                                                      playbackOriginTab:
+                                                          LibraryTabId.songs,
+                                                    )
+                                                  : null,
+                                            ),
+                                          );
+                                        },
                                       ),
                                     ],
                                   ),
                                 ),
-                                Icon(
-                                  Icons.more_vert_rounded,
-                                  color: pal.textMuted.withValues(alpha: 0.42),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      ...mp3sFiltered.asMap().entries.map((e) {
-                        final rowIx = e.key;
-                        final fp = e.value;
-                        final idx = player.playlist.indexWhere(
-                          (t) => t.filePath == fp,
-                        );
-                        final t = _displayTrack(player, fp);
-                        final cur = player.currentTrack?.filePath;
-                        final sel =
-                            cur != null &&
-                            fp.isNotEmpty &&
-                            canonicalMusicLibraryPathKey(cur) ==
-                                canonicalMusicLibraryPathKey(fp);
-                        return Material(
-                          color: sel
-                              ? pal.onScaffold.withValues(alpha: 0.06)
-                              : Colors.transparent,
-                          child: InkWell(
-                            onTap: () => _onTapMp3(context, fp),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 6,
                               ),
-                              child: Row(
-                                children: [
-                                  TrackAlbumArt(
-                                    track: t,
-                                    display: TrackArtDisplay.list,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          t.title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.titleMedium
-                                              ?.copyWith(
-                                                color: pal.onScaffold,
-                                                fontSize: 15,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          '${t.artist} · ${_durationSuffix(player, fp)}',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.bodySmall
-                                              ?.copyWith(
-                                                color: pal.textMuted.withValues(
-                                                  alpha: 0.93,
-                                                ),
-                                                fontSize: 12,
-                                              ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  TrackOverflowMenuWithFavourite(
-                                    pal: pal,
-                                    track: t,
-                                    overflowIcon: Icons.more_vert_rounded,
-                                    iconSize: 22,
-                                    menuIconColor: pal.onScaffold.withValues(
-                                      alpha: 0.75,
-                                    ),
-                                    onSelected: (a) {
-                                      unawaited(
-                                        widget.onOverflow(
-                                          context,
-                                          player,
-                                          idx >= 0 ? idx : -1,
-                                          a,
-                                          playbackOriginTab: LibraryTabId.songs,
-                                          outsideQueue: idx < 0
-                                              ? TrackOverflowQueueContext(
-                                                  tracks: mp3QueueTracks,
-                                                  index: rowIx,
-                                                  playbackOriginTab:
-                                                      LibraryTabId.songs,
-                                                )
-                                              : null,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
-                  );
-                },
-              ),
+                            );
+                          }),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
           ],
         );

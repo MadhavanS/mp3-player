@@ -9,6 +9,7 @@ import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/music_library_path_key.dart';
+import '../../services/song_metadata_cache.dart';
 import '../../services/track_file_delete.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
@@ -469,6 +470,7 @@ Future<void> applyTrackOverflowAction(
       }
 
       player.removeFromLibraryCatalogByPath(path);
+      unawaited(SongMetadataCache.deletePaths([path]));
       final queueIx = player.playlist.indexWhere((t) => t.filePath == path);
       if (queueIx >= 0) {
         await player.removePlaylistEntryAt(queueIx);
