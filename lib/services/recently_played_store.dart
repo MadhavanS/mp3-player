@@ -2,36 +2,49 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'recent_list_limits_store.dart';
+
 /// Persists absolute file paths in MRU order (newest first), capped.
 class RecentlyPlayedStore {
   RecentlyPlayedStore._();
 
   static const _key = 'recently_played_paths_v1';
-  static const _maxEntries = 50;
 
   static Future<List<String>> loadPaths() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
-    if (raw == null || raw.isEmpty) return [];
+    if (raw == null || raw.isEmpty) return <String>[];
+    final limit = await RecentListLimitsStore.loadRecentlyPlayedLimit();
     try {
       final decoded = jsonDecode(raw) as List<dynamic>;
-      return decoded.cast<String>();
+      final list = decoded.cast<String>();
+      if (list.length <= limit) return list;
+      final trimmed = list.sublist(0, limit);
+      await prefs.setString(_key, jsonEncode(trimmed));
+      return trimmed;
     } catch (_) {
-      return [];
+      return <String>[];
     }
   }
 
-  /// Records [path] as most recently played; trims list to [_maxEntries].
+  /// Records [path] as most recently played; trims list to the configured limit.
   static Future<void> recordPlay(String path) async {
     if (path.isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     List<String> list = await loadPaths();
+    final limit = await RecentListLimitsStore.loadRecentlyPlayedLimit();
     if (list.isNotEmpty && list.first == path) return;
     list.remove(path);
     list.insert(0, path);
-    if (list.length > _maxEntries) {
-      list = list.sublist(0, _maxEntries);
+    if (list.length > limit) {
+      list = list.sublist(0, limit);
     }
+    await prefs.setString(_key, jsonEncode(list));
+  }
+
+  static Future<void> trimToConfiguredLimit() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = await loadPaths();
     await prefs.setString(_key, jsonEncode(list));
   }
 }

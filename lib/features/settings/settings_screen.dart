@@ -5,6 +5,9 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:path/path.dart' as p;
 
 import '../../services/library_tabs_store.dart';
+import '../../services/recent_list_limits_store.dart';
+import '../../services/recently_added_store.dart';
+import '../../services/recently_played_store.dart';
 import '../../services/storage_access.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
@@ -42,17 +45,31 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-enum _SettingsSection { menu, appearance, musicFolders }
+enum _SettingsSection { menu, appearance, musicFolders, recentLists }
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _busy = false;
   List<LibraryTabRow>? _libraryTabRows;
   _SettingsSection _section = _SettingsSection.menu;
+  late final TextEditingController _recentlyAddedLimitController;
+  late final TextEditingController _recentlyPlayedLimitController;
+  int _recentlyAddedLimit = RecentListLimitsStore.defaultLimit;
+  int _recentlyPlayedLimit = RecentListLimitsStore.defaultLimit;
 
   @override
   void initState() {
     super.initState();
+    _recentlyAddedLimitController = TextEditingController();
+    _recentlyPlayedLimitController = TextEditingController();
     unawaited(_loadLibraryTabRows());
+    unawaited(_loadRecentListLimits());
+  }
+
+  @override
+  void dispose() {
+    _recentlyAddedLimitController.dispose();
+    _recentlyPlayedLimitController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadLibraryTabRows() async {
@@ -64,6 +81,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await LibraryTabsStore.saveConfig(rows);
     final next = await LibraryTabsStore.loadConfig();
     if (mounted) setState(() => _libraryTabRows = next);
+  }
+
+  Future<void> _loadRecentListLimits() async {
+    final added = await RecentListLimitsStore.loadRecentlyAddedLimit();
+    final played = await RecentListLimitsStore.loadRecentlyPlayedLimit();
+    if (!mounted) return;
+    setState(() {
+      _recentlyAddedLimit = added;
+      _recentlyPlayedLimit = played;
+      _recentlyAddedLimitController.text = added.toString();
+      _recentlyPlayedLimitController.text = played.toString();
+    });
+  }
+
+  int? _parseLimitOrNull(String raw) {
+    final v = int.tryParse(raw.trim());
+    if (v == null || v < 1) return null;
+    return v > 500 ? 500 : v;
+  }
+
+  Future<void> _saveRecentListLimit({
+    required bool forRecentlyAdded,
+    required String raw,
+  }) async {
+    final parsed = _parseLimitOrNull(raw);
+    if (parsed == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid number from 1 to 500.')),
+      );
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      if (forRecentlyAdded) {
+        await RecentListLimitsStore.saveRecentlyAddedLimit(parsed);
+        await RecentlyAddedStore.trimToConfiguredLimit();
+      } else {
+        await RecentListLimitsStore.saveRecentlyPlayedLimit(parsed);
+        await RecentlyPlayedStore.trimToConfiguredLimit();
+      }
+      if (!mounted) return;
+      setState(() {
+        if (forRecentlyAdded) {
+          _recentlyAddedLimit = parsed;
+          _recentlyAddedLimitController.text = parsed.toString();
+        } else {
+          _recentlyPlayedLimit = parsed;
+          _recentlyPlayedLimitController.text = parsed.toString();
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            forRecentlyAdded
+                ? 'RecentlyAdded limit updated.'
+                : 'RecentlyPlayed limit updated.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _onLibraryTabsReorder(int oldIndex, int newIndex) {
@@ -323,6 +403,155 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: pal.textMuted.withValues(alpha: 0.75),
           ),
           onTap: () => _goToSection(_SettingsSection.musicFolders),
+        ),
+        Divider(height: 1, color: pal.dividerOnHero),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(vertical: 6),
+          leading: Icon(
+            Icons.history_toggle_off_rounded,
+            color: pal.onScaffold.withValues(alpha: 0.88),
+            size: 28,
+          ),
+          title: Text(
+            'Recent lists',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: pal.onScaffold,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            'RecentlyAdded and RecentlyPlayed count',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.textMuted.withValues(alpha: 0.95),
+            ),
+          ),
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            color: pal.textMuted.withValues(alpha: 0.75),
+          ),
+          onTap: () => _goToSection(_SettingsSection.recentLists),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildRecentListsDetail(ThemeData theme, AppPalette pal) {
+    Widget compactLimitRow({
+      required String title,
+      required TextEditingController controller,
+      required VoidCallback onSave,
+    }) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+        decoration: BoxDecoration(
+          color: pal.surface.withValues(alpha: 0.28),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: pal.dividerOnHero.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.onScaffold.withValues(alpha: 0.95),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 86,
+              child: TextField(
+                controller: controller,
+                enabled: !_busy,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                textInputAction: TextInputAction.done,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: '30',
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  filled: true,
+                  fillColor: pal.surface.withValues(alpha: 0.38),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: pal.dividerOnHero.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: pal.dividerOnHero.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+                onSubmitted: (_) => onSave(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Save',
+              onPressed: _busy ? null : onSave,
+              icon: Icon(
+                Icons.check_circle_rounded,
+                color: context.controlAccent,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      children: [
+        Text(
+          'Control how many songs are shown in RecentlyAdded and RecentlyPlayed. '
+          'If count exceeds this value, oldest entries are removed.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: pal.textSecondary.withValues(alpha: 0.95),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'Default value: 30',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.92),
+          ),
+        ),
+        const SizedBox(height: 12),
+        compactLimitRow(
+          title: 'RecentlyAdded',
+          controller: _recentlyAddedLimitController,
+          onSave: () => unawaited(
+            _saveRecentListLimit(
+              forRecentlyAdded: true,
+              raw: _recentlyAddedLimitController.text,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        compactLimitRow(
+          title: 'RecentlyPlayed',
+          controller: _recentlyPlayedLimitController,
+          onSave: () => unawaited(
+            _saveRecentListLimit(
+              forRecentlyAdded: false,
+              raw: _recentlyPlayedLimitController.text,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Current values: RecentlyAdded $_recentlyAddedLimit, RecentlyPlayed $_recentlyPlayedLimit',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.9),
+          ),
         ),
         const SizedBox(height: 24),
       ],
@@ -715,6 +944,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.menu => 'Settings',
       _SettingsSection.appearance => 'Appearance',
       _SettingsSection.musicFolders => 'Music folders',
+      _SettingsSection.recentLists => 'Recent lists',
     };
 
     return ColoredBox(
@@ -734,6 +964,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       pal,
                     ),
                     _SettingsSection.musicFolders => _buildMusicFoldersDetail(
+                      theme,
+                      pal,
+                    ),
+                    _SettingsSection.recentLists => _buildRecentListsDetail(
                       theme,
                       pal,
                     ),

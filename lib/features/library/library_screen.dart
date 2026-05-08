@@ -12,6 +12,7 @@ import '../../services/favorite_songs_store.dart';
 import '../../services/library_tabs_store.dart';
 import '../../services/library_track_sort.dart';
 import '../../services/music_library_path_key.dart';
+import '../../services/recent_list_limits_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/user_playlists_store.dart';
@@ -137,6 +138,7 @@ class LibraryScreenState extends State<LibraryScreen>
     _tabController.addListener(_onTabChanged);
     LibraryTabsStore.revision.addListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.addListener(_onSongSortStoreRevision);
+    RecentListLimitsStore.revision.addListener(_onRecentLimitsRevision);
     unawaited(FavoriteSongsStore.ensureLoaded());
     unawaited(_reloadSongSortMode());
     unawaited(_syncTabsFromStore());
@@ -185,6 +187,11 @@ class LibraryScreenState extends State<LibraryScreen>
     unawaited(_reloadSongSortMode());
   }
 
+  void _onRecentLimitsRevision() {
+    if (!mounted) return;
+    setState(() => _recentListRevision++);
+  }
+
   void _onTabChanged() {
     if (!mounted) return;
     if (_tabController.indexIsChanging) return;
@@ -210,6 +217,7 @@ class LibraryScreenState extends State<LibraryScreen>
     _recentPlayedScrollController.dispose();
     LibraryTabsStore.revision.removeListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.removeListener(_onSongSortStoreRevision);
+    RecentListLimitsStore.revision.removeListener(_onRecentLimitsRevision);
     super.dispose();
   }
 

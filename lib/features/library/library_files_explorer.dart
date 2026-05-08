@@ -433,6 +433,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
         playbackOriginTab: LibraryTabId.songs,
         keepShuffleMode: true,
       );
+      await player.seek(Duration.zero);
       return;
     }
 
@@ -460,6 +461,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
       playbackOriginTab: LibraryTabId.songs,
       keepShuffleMode: true,
     );
+    await player.seek(Duration.zero);
   }
 
   Future<void> _playFolderByPath(

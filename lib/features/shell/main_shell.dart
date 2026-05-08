@@ -776,7 +776,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (pickedKeys != null) {
       final keys = Set<String>.from(pickedKeys);
       _songsBrowsePathKeysNotifier.value = keys;
-      PlayerController.of(context).setPlaybackPathKeyScope(keys);
+      PlayerController.of(
+        context,
+      ).setPlaybackPathKeyScope(keys, reloadQueue: false);
       unawaited(PlaybackSessionStore.saveBrowsePathKeys(keys));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -797,175 +799,186 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
         final pal = context.palette;
 
-        return Scaffold(
-          key: _scaffoldKey,
-          backgroundColor: pal.scaffoldBackground,
-          drawer: Drawer(
-            backgroundColor: pal.surface,
-            child: SafeArea(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                    child: Text(
-                      'MadPlay',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: context.controlAccent,
-                        fontWeight: FontWeight.w700,
+        return PopScope(
+          canPop: _page == _ShellPage.library,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            if (_page == _ShellPage.settings) {
+              _goLibrary();
+            }
+          },
+          child: Scaffold(
+            key: _scaffoldKey,
+            backgroundColor: pal.scaffoldBackground,
+            drawer: Drawer(
+              backgroundColor: pal.surface,
+              child: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                      child: Text(
+                        'MadPlay',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: context.controlAccent,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.library_music_rounded),
-                    title: const Text('Library'),
-                    selected: _page == _ShellPage.library,
-                    onTap: () {
-                      Navigator.pop(context);
-                      _goLibrary();
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.folder_rounded),
-                    title: const Text('Files'),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _goLibrary();
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (!mounted) return;
-                        unawaited(_openFilesExplorerScreen());
-                      });
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.play_circle_rounded),
-                    title: const Text('Now playing'),
-                    enabled: current != null,
-                    onTap: current == null ? null : _onDrawerNowPlaying,
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.settings_rounded),
-                    title: const Text('Settings'),
-                    selected: _page == _ShellPage.settings,
-                    onTap: () {
-                      Navigator.pop(context);
-                      _goSettings();
-                    },
-                  ),
-                ],
+                    ListTile(
+                      leading: const Icon(Icons.library_music_rounded),
+                      title: const Text('Library'),
+                      selected: _page == _ShellPage.library,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _goLibrary();
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.folder_rounded),
+                      title: const Text('Files'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _goLibrary();
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted) return;
+                          unawaited(_openFilesExplorerScreen());
+                        });
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.play_circle_rounded),
+                      title: const Text('Now playing'),
+                      enabled: current != null,
+                      onTap: current == null ? null : _onDrawerNowPlaying,
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.settings_rounded),
+                      title: const Text('Settings'),
+                      selected: _page == _ShellPage.settings,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _goSettings();
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          body: Stack(
-            children: [
-              Column(
-                children: [
-                  Expanded(
-                    child: _page == _ShellPage.library
-                        ? LibraryScreen(
-                            key: _libraryScreenKey,
-                            folderPaths: _folderPaths,
-                            songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
-                            onClearSongsBrowseFilter: () {
-                              _songsBrowsePathKeysNotifier.value = null;
-                              PlayerController.of(
-                                context,
-                              ).setPlaybackPathKeyScope(null);
-                              unawaited(
-                                PlaybackSessionStore.saveBrowsePathKeys(null),
-                              );
-                            },
-                            onOpenDrawer: _openDrawer,
-                            onRefreshLibrary:
-                                _folderPaths.isEmpty ||
-                                    _scanning ||
-                                    _refreshInProgress
-                                ? null
-                                : () {
-                                    unawaited(_refreshLibraryScan());
-                                  },
-                          )
-                        : SettingsScreen(
-                            folderPaths: _folderPaths,
-                            onFoldersChanged: _onFoldersChanged,
-                            onOpenDrawer: _openDrawer,
-                            themeSetting: widget.themeSetting,
-                            onThemeSettingChanged: widget.onThemeSettingChanged,
-                            fontOption: widget.fontOption,
-                            onFontOptionChanged: widget.onFontOptionChanged,
-                            accentColorOption: widget.accentColorOption,
-                            customAccentColor: widget.customAccentColor,
-                            onAccentColorOptionChanged:
-                                widget.onAccentColorOptionChanged,
-                            onCustomAccentColorChanged:
-                                widget.onCustomAccentColorChanged,
-                          ),
-                  ),
-                  if (current != null)
-                    MiniPlayerBar(controller: player, onTap: _openNowPlaying),
-                ],
-              ),
-              if (_scanning)
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(color: Color(0x59000000)),
-                    child: Center(
-                      child: Material(
-                        color: pal.surface,
-                        elevation: 6,
-                        borderRadius: BorderRadius.circular(16),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(28, 24, 28, 22),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 320),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.library_music_rounded,
-                                  size: 40,
-                                  color: context.controlAccent,
-                                ),
-                                const SizedBox(height: 18),
-                                SizedBox(
-                                  width: 36,
-                                  height: 36,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 3,
+            body: Stack(
+              children: [
+                Column(
+                  children: [
+                    Expanded(
+                      child: _page == _ShellPage.library
+                          ? LibraryScreen(
+                              key: _libraryScreenKey,
+                              folderPaths: _folderPaths,
+                              songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
+                              onClearSongsBrowseFilter: () {
+                                _songsBrowsePathKeysNotifier.value = null;
+                                PlayerController.of(
+                                  context,
+                                ).setPlaybackPathKeyScope(null);
+                                unawaited(
+                                  PlaybackSessionStore.saveBrowsePathKeys(null),
+                                );
+                              },
+                              onOpenDrawer: _openDrawer,
+                              onRefreshLibrary:
+                                  _folderPaths.isEmpty ||
+                                      _scanning ||
+                                      _refreshInProgress
+                                  ? null
+                                  : () {
+                                      unawaited(_refreshLibraryScan());
+                                    },
+                            )
+                          : SettingsScreen(
+                              folderPaths: _folderPaths,
+                              onFoldersChanged: _onFoldersChanged,
+                              onOpenDrawer: _openDrawer,
+                              themeSetting: widget.themeSetting,
+                              onThemeSettingChanged:
+                                  widget.onThemeSettingChanged,
+                              fontOption: widget.fontOption,
+                              onFontOptionChanged: widget.onFontOptionChanged,
+                              accentColorOption: widget.accentColorOption,
+                              customAccentColor: widget.customAccentColor,
+                              onAccentColorOptionChanged:
+                                  widget.onAccentColorOptionChanged,
+                              onCustomAccentColorChanged:
+                                  widget.onCustomAccentColorChanged,
+                            ),
+                    ),
+                    if (current != null)
+                      MiniPlayerBar(controller: player, onTap: _openNowPlaying),
+                  ],
+                ),
+                if (_scanning)
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: const BoxDecoration(color: Color(0x59000000)),
+                      child: Center(
+                        child: Material(
+                          color: pal.surface,
+                          elevation: 6,
+                          borderRadius: BorderRadius.circular(16),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(28, 24, 28, 22),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 320),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.library_music_rounded,
+                                    size: 40,
                                     color: context.controlAccent,
                                   ),
-                                ),
-                                const SizedBox(height: 20),
-                                Text(
-                                  _scanDetectedMp3Count == null
-                                      ? 'Searching for songs…'
-                                      : 'Found $_scanDetectedMp3Count ${_scanDetectedMp3Count == 1 ? 'song' : 'songs'}',
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    color: pal.textPrimary,
-                                    fontWeight: FontWeight.w600,
+                                  const SizedBox(height: 18),
+                                  SizedBox(
+                                    width: 36,
+                                    height: 36,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 3,
+                                      color: context.controlAccent,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _scanDetectedMp3Count == null
-                                      ? 'Scanning your music folders for MP3 files. Large libraries can take a moment.'
-                                      : 'Loading tags and preparing your library…',
-                                  textAlign: TextAlign.center,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: pal.textSecondary,
-                                    height: 1.35,
+                                  const SizedBox(height: 20),
+                                  Text(
+                                    _scanDetectedMp3Count == null
+                                        ? 'Searching for songs…'
+                                        : 'Found $_scanDetectedMp3Count ${_scanDetectedMp3Count == 1 ? 'song' : 'songs'}',
+                                    textAlign: TextAlign.center,
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                          color: pal.textPrimary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _scanDetectedMp3Count == null
+                                        ? 'Scanning your music folders for MP3 files. Large libraries can take a moment.'
+                                        : 'Loading tags and preparing your library…',
+                                    textAlign: TextAlign.center,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: pal.textSecondary,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         );
       },

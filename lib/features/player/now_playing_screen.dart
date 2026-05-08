@@ -822,6 +822,15 @@ class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
     final artistStyle = theme.textTheme.bodyMedium?.copyWith(
       color: _titleColor.withValues(alpha: isDark ? 0.78 : 0.72),
     );
+    final albumStyle = theme.textTheme.bodySmall?.copyWith(
+      color: _titleColor.withValues(alpha: isDark ? 0.66 : 0.62),
+      fontWeight: FontWeight.w500,
+    );
+    final artistName = widget.track.artist.trim();
+    final showArtist =
+        artistName.isNotEmpty && artistName.toLowerCase() != 'unknown artist';
+    final albumName = widget.track.metaLine.trim();
+    final showAlbum = albumName.isNotEmpty && albumName.toLowerCase() != 'mp3';
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 420),
@@ -831,7 +840,8 @@ class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(
-                  alpha: widget.playerChrome ? 0.42 : 0.24),
+                alpha: widget.playerChrome ? 0.42 : 0.24,
+              ),
               blurRadius: widget.playerChrome ? 28 : 20,
               offset: Offset(0, widget.playerChrome ? 12 : 8),
             ),
@@ -857,8 +867,6 @@ class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Center(child: widget.artwork),
-                    const SizedBox(height: 16),
                     Text(
                       widget.track.title,
                       textAlign: TextAlign.center,
@@ -866,14 +874,27 @@ class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
                       overflow: TextOverflow.ellipsis,
                       style: titleStyle,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      widget.track.artist,
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: artistStyle,
-                    ),
+                    const SizedBox(height: 14),
+                    Center(child: widget.artwork),
+                    const SizedBox(height: 12),
+                    if (showArtist)
+                      Text(
+                        artistName,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: artistStyle,
+                      ),
+                    if (showAlbum) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        albumName,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: albumStyle,
+                      ),
+                    ],
                   ],
                 ),
               ),

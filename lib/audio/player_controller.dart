@@ -57,6 +57,9 @@ class PlayerController extends ChangeNotifier {
   PlaylistRepeatMode _repeat = PlaylistRepeatMode.off;
   ProcessingState? _previousProcessing;
   bool _isLoadingSource = false;
+  int? _pendingConcatIndexWhileLoading;
+  bool _sourceNeedsReload = false;
+  List<int> _activeSourceOrder = <int>[];
 
   /// While rebuilding [ConcatenatingAudioSource] for shuffle, [AudioPlayer.stop] makes
   /// `playing` false briefly; UI uses [isPlaying] which ORs this in so play/pause
@@ -267,22 +270,36 @@ class PlayerController extends ChangeNotifier {
 
   int _logicalPlaylistIndex() => _shuffle ? _shuffleOrder[_shufflePos] : _index;
 
-  void _onConcatIndexChanged(int? concatIdx) {
-    if (_isLoadingSource || concatIdx == null) return;
-    if (_playlist.isEmpty) return;
-    final order = _effectiveQueueOrder();
-    if (concatIdx < 0 || concatIdx >= order.length) return;
+  bool _applyConcatIndexChanged(int concatIdx) {
+    if (_playlist.isEmpty) return false;
+    final order = _activeSourceOrder.isNotEmpty
+        ? _activeSourceOrder
+        : _effectiveQueueOrder();
+    if (concatIdx < 0 || concatIdx >= order.length) return false;
     final pl = order[concatIdx];
 
     if (_shuffle) {
-      if (_shufflePos == concatIdx && _index == pl) return;
-      _shufflePos = concatIdx;
+      final nextShufflePos = _shuffleOrder.indexOf(pl);
+      if (nextShufflePos < 0) return false;
+      if (_shufflePos == nextShufflePos && _index == pl) return false;
+      _shufflePos = nextShufflePos;
       _index = pl;
     } else {
-      if (_index == pl) return;
+      if (_index == pl) return false;
       _index = pl;
     }
-    notifyListeners();
+    return true;
+  }
+
+  void _onConcatIndexChanged(int? concatIdx) {
+    if (concatIdx == null) return;
+    if (_isLoadingSource) {
+      _pendingConcatIndexWhileLoading = concatIdx;
+      return;
+    }
+    if (_applyConcatIndexChanged(concatIdx)) {
+      notifyListeners();
+    }
   }
 
   Future<void> setPlaylist(
@@ -313,6 +330,7 @@ class PlayerController extends ChangeNotifier {
     }
     notifyListeners();
     await _loadCurrent();
+    _sourceNeedsReload = false;
   }
 
   /// Appends [items] to the current queue. If the queue was empty, loads and starts
@@ -444,11 +462,17 @@ class PlayerController extends ChangeNotifier {
       }
     }
     if (!changed) return;
+    // The currently loaded audio source still points to old file URIs.
+    _sourceNeedsReload = true;
     final currentPath = currentTrack?.filePath;
     notifyListeners();
-    if (currentPath == oldPath) {
-      unawaited(_loadCurrent());
-    }
+    final resumePos = currentPath == oldPath ? Duration.zero : _player.position;
+    unawaited(
+      _loadCurrent(
+        initialPosition: resumePos,
+        stopBeforeLoad: currentPath == oldPath,
+      ),
+    );
   }
 
   bool _prunePlaylistPathsNotInCatalog() {
@@ -553,6 +577,7 @@ class PlayerController extends ChangeNotifier {
           await _player.stop();
         } catch (_) {}
       }
+      _activeSourceOrder = <int>[];
       notifyListeners();
       return;
     }
@@ -567,6 +592,7 @@ class PlayerController extends ChangeNotifier {
         try {
           await _player.stop();
         } catch (_) {}
+        _activeSourceOrder = <int>[];
         notifyListeners();
         return;
       }
@@ -607,6 +633,7 @@ class PlayerController extends ChangeNotifier {
       }
 
       final children = <AudioSource>[];
+      final loadedOrder = <int>[];
       var initialConcatIndex = 0;
       var concatPos = 0;
       final logicalTrack = logical >= 0 && logical < _playlist.length
@@ -633,6 +660,7 @@ class PlayerController extends ChangeNotifier {
             ),
           ),
         );
+        loadedOrder.add(pi);
         if (pi == logical) {
           initialConcatIndex = concatPos;
         }
@@ -640,16 +668,19 @@ class PlayerController extends ChangeNotifier {
       }
 
       if (children.isEmpty) {
+        _activeSourceOrder = <int>[];
         notifyListeners();
         return;
       }
       initialConcatIndex = initialConcatIndex.clamp(0, children.length - 1);
+      _activeSourceOrder = loadedOrder;
 
       await _player.setAudioSource(
         ConcatenatingAudioSource(useLazyPreparation: true, children: children),
         initialIndex: initialConcatIndex,
         initialPosition: initialPosition,
       );
+      _sourceNeedsReload = false;
     } catch (e, st) {
       debugPrint('Playback load error: $e\n$st');
       if (retryAfterMissingPath) {
@@ -668,6 +699,11 @@ class PlayerController extends ChangeNotifier {
       }
     } finally {
       _isLoadingSource = false;
+      final pending = _pendingConcatIndexWhileLoading;
+      _pendingConcatIndexWhileLoading = null;
+      if (pending != null && _applyConcatIndexChanged(pending)) {
+        notifyListeners();
+      }
     }
     notifyListeners();
   }
@@ -739,6 +775,36 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> seek(Duration position) => _player.seek(position);
 
+  Future<void> _seekToPlaylistIndexFast(
+    int playlistIndex, {
+    required String playContext,
+  }) async {
+    if (_sourceNeedsReload) {
+      await _loadCurrent();
+      _sourceNeedsReload = false;
+      await _playSafely(context: playContext);
+      return;
+    }
+    final order = _activeSourceOrder.isNotEmpty
+        ? _activeSourceOrder
+        : _effectiveQueueOrder();
+    final concatIndex = order.indexOf(playlistIndex);
+    if (concatIndex < 0) {
+      await _loadCurrent();
+      _sourceNeedsReload = false;
+      await _playSafely(context: playContext);
+      return;
+    }
+    try {
+      await _player.seek(Duration.zero, index: concatIndex);
+      await _playSafely(context: playContext);
+    } catch (_) {
+      await _loadCurrent();
+      _sourceNeedsReload = false;
+      await _playSafely(context: playContext);
+    }
+  }
+
   /// Next track; at end pauses unless [PlaylistRepeatMode.all].
   Future<void> skipNext() async {
     if (_playlist.isEmpty) return;
@@ -759,8 +825,10 @@ class PlayerController extends ChangeNotifier {
       }
 
       notifyListeners();
-      await _loadCurrent();
-      await _playSafely(context: 'skipNext.shuffle play');
+      await _seekToPlaylistIndexFast(
+        _shuffleOrder[_shufflePos],
+        playContext: 'skipNext.shuffle play',
+      );
       return;
     }
 
@@ -794,8 +862,7 @@ class PlayerController extends ChangeNotifier {
     }
 
     notifyListeners();
-    await _loadCurrent();
-    await _playSafely(context: 'skipNext.play');
+    await _seekToPlaylistIndexFast(_index, playContext: 'skipNext.play');
   }
 
   Future<void> skipPrevious() async {
@@ -817,8 +884,10 @@ class PlayerController extends ChangeNotifier {
       }
 
       notifyListeners();
-      await _loadCurrent();
-      await _playSafely(context: 'skipPrevious.shuffle play');
+      await _seekToPlaylistIndexFast(
+        _shuffleOrder[_shufflePos],
+        playContext: 'skipPrevious.shuffle play',
+      );
       return;
     }
 
@@ -852,8 +921,7 @@ class PlayerController extends ChangeNotifier {
     }
 
     notifyListeners();
-    await _loadCurrent();
-    await _playSafely(context: 'skipPrevious.play');
+    await _seekToPlaylistIndexFast(_index, playContext: 'skipPrevious.play');
   }
 
   void toggleShuffle() {
@@ -1002,7 +1070,13 @@ class PlayerController extends ChangeNotifier {
   void dispose() {
     _concatIndexSub?.cancel();
     _playerStateSub.cancel();
-    unawaited(_player.dispose());
+    unawaited(() async {
+      try {
+        await _player.dispose();
+      } catch (e, st) {
+        debugPrint('AudioPlayer dispose error: $e\n$st');
+      }
+    }());
     super.dispose();
   }
 }
