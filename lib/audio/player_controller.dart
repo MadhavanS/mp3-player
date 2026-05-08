@@ -290,6 +290,7 @@ class PlayerController extends ChangeNotifier {
     int startIndex = 0,
     LibraryTabId? playbackOriginTab,
     String? playbackOriginUserPlaylistId,
+    bool keepShuffleMode = false,
   }) async {
     if (playbackOriginTab != null) {
       _playbackOriginTab = playbackOriginTab;
@@ -297,9 +298,19 @@ class PlayerController extends ChangeNotifier {
           ? playbackOriginUserPlaylistId
           : null;
     }
+    final preserveShuffle = keepShuffleMode && _shuffle && tracks.length > 1;
     _playlist = List<TrackItem>.from(tracks);
-    _resetShuffleState();
     _index = _playlist.isEmpty ? 0 : startIndex.clamp(0, _playlist.length - 1);
+    if (preserveShuffle) {
+      final cur = _index;
+      final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
+      order.remove(cur);
+      _shuffleOrder = [cur, ...order];
+      _shufflePos = 0;
+      _shuffle = true;
+    } else {
+      _resetShuffleState();
+    }
     notifyListeners();
     await _loadCurrent();
   }
@@ -335,12 +346,14 @@ class PlayerController extends ChangeNotifier {
     int startIndex = 0,
     LibraryTabId? playbackOriginTab,
     String? playbackOriginUserPlaylistId,
+    bool keepShuffleMode = false,
   }) async {
     await setPlaylist(
       tracks,
       startIndex: startIndex,
       playbackOriginTab: playbackOriginTab,
       playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
+      keepShuffleMode: keepShuffleMode,
     );
     await _playSafely(context: 'setPlaylistAndPlay.play');
   }

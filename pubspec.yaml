@@ -59,6 +59,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
   build_runner: ^2.4.13
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -70,6 +71,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "C:/Users/smadh/.cursor/projects/d-Programming-Programs-Flutter-mp3-player/assets/c__Users_smadh_AppData_Roaming_Cursor_User_workspaceStorage_0dbfe92190d87ed8cf776b817604569f_images_WhatsApp_Image_2026-05-08_at_10.36.24-a7aae27c-4a9d-4c8c-98bc-2445bb5be717.png"
 
   # To add assets to your application, add an assets section, like this:
   # assets:

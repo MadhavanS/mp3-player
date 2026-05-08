@@ -25,14 +25,10 @@ enum TrackOverflowAction {
 }
 
 bool trackCanDeleteFromDevice(TrackItem track) =>
-    !kIsWeb &&
-    track.filePath != null &&
-    track.filePath!.isNotEmpty;
+    !kIsWeb && track.filePath != null && track.filePath!.isNotEmpty;
 
 bool trackCanToggleFavorite(TrackItem track) =>
-    !kIsWeb &&
-    track.filePath != null &&
-    track.filePath!.isNotEmpty;
+    !kIsWeb && track.filePath != null && track.filePath!.isNotEmpty;
 
 List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
   required bool enableDeleteFromDevice,
@@ -133,8 +129,7 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
         final favOk = trackCanToggleFavorite(track);
         final isFav = favOk && FavoriteSongsStore.isFavorite(path);
         final accent = context.controlAccent;
-        final iconFg =
-            menuIconColor ?? pal.onScaffold.withValues(alpha: 0.8);
+        final iconFg = menuIconColor ?? pal.onScaffold.withValues(alpha: 0.8);
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -149,11 +144,7 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
               ),
             PopupMenuButton<TrackOverflowAction>(
               tooltip: 'Track options',
-              icon: Icon(
-                overflowIcon,
-                color: iconFg,
-                size: iconSize,
-              ),
+              icon: Icon(overflowIcon, color: iconFg, size: iconSize),
               padding: EdgeInsets.zero,
               onSelected: onSelected,
               itemBuilder: (ctx) => trackOverflowPopupMenuEntries(
@@ -176,11 +167,7 @@ Future<void> _showUserPlaylistPickerAndAdd(
   final raw = filePath.trim();
   if (raw.isEmpty) {
     if (context.mounted) {
-      ActionPillToast.show(
-        context,
-        'No file path',
-        uppercaseLabel: true,
-      );
+      ActionPillToast.show(context, 'No file path', uppercaseLabel: true);
     }
     return;
   }
@@ -200,8 +187,9 @@ Future<void> _showUserPlaylistPickerAndAdd(
     if (id == null) return;
     final added = await UserPlaylistsStore.addPathToPlaylist(id, raw);
     if (added && context.mounted) {
-      await PlayerController.of(context)
-          .syncAddedSongToActiveUserPlaylistQueue(id, raw);
+      await PlayerController.of(
+        context,
+      ).syncAddedSongToActiveUserPlaylistQueue(id, raw);
     }
     if (sheetContext.mounted) Navigator.of(sheetContext).pop();
     if (!context.mounted) return;
@@ -280,11 +268,13 @@ Future<void> _showUserPlaylistPickerAndAdd(
                       onTap: () async {
                         final added =
                             await UserPlaylistsStore.addPathToPlaylist(
-                                pl.id, raw);
+                              pl.id,
+                              raw,
+                            );
                         if (added && context.mounted) {
-                          await PlayerController.of(context)
-                              .syncAddedSongToActiveUserPlaylistQueue(
-                                  pl.id, raw);
+                          await PlayerController.of(
+                            context,
+                          ).syncAddedSongToActiveUserPlaylistQueue(pl.id, raw);
                         }
                         if (ctx.mounted) Navigator.of(ctx).pop();
                         if (!context.mounted) return;
@@ -347,12 +337,14 @@ Future<void> applyTrackOverflowAction(
       await player.setPlaylistAndPlay(
         tracks.sublist(ix),
         playbackOriginTab: tab ?? LibraryTabId.songs,
+        keepShuffleMode: true,
       );
 
     case TrackOverflowAction.playOnlyThis:
       await player.setPlaylistAndPlay(
         [tracks[ix]],
         playbackOriginTab: tab ?? LibraryTabId.songs,
+        keepShuffleMode: true,
       );
 
     case TrackOverflowAction.addToPlaylist:
@@ -411,9 +403,7 @@ Future<void> applyTrackOverflowAction(
       if (context.mounted) {
         ActionPillToast.showUsingRootNavigator(
           nowFav ? 'Favourited' : 'Removed from favourites',
-          icon: nowFav
-              ? Icons.favorite_rounded
-              : Icons.favorite_border_rounded,
+          icon: nowFav ? Icons.favorite_rounded : Icons.favorite_border_rounded,
           uppercaseLabel: true,
         );
       }
@@ -465,9 +455,9 @@ Future<void> applyTrackOverflowAction(
 
       if (err != null) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not delete: $err')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Could not delete: $err')));
         }
         if (targetsCurrent) {
           await player.reloadCurrentSource();
@@ -485,11 +475,7 @@ Future<void> applyTrackOverflowAction(
       }
 
       if (context.mounted) {
-        ActionPillToast.show(
-          context,
-          'Deleted',
-          uppercaseLabel: true,
-        );
+        ActionPillToast.show(context, 'Deleted', uppercaseLabel: true);
       }
   }
 }

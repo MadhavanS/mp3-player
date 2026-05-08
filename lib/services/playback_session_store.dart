@@ -21,8 +21,9 @@ abstract final class PlaybackSessionStore {
 
   static Future<bool> restorePlayer(
     PlayerController player,
-    List<TrackItem> catalogTracks,
-  ) async {
+    List<TrackItem> catalogTracks, {
+    bool resumePlaying = true,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_playbackKey);
     if (raw == null || raw.isEmpty) return false;
@@ -36,7 +37,11 @@ abstract final class PlaybackSessionStore {
     try {
       final restored = _Restore.tryParse(map);
       if (restored == null) return false;
-      return await restored.apply(player, catalogTracks);
+      return await restored.apply(
+        player,
+        catalogTracks,
+        resumePlaying: resumePlaying,
+      );
     } catch (_) {
       return false;
     }
@@ -184,8 +189,11 @@ class _Restore {
 
   Future<bool> apply(
     PlayerController player,
-    List<TrackItem> catalogTracks,
-  ) async {
+    List<TrackItem> catalogTracks, {
+    required bool resumePlaying,
+  }) async {
+    final effectiveResumePlaying = resumePlaying && wasPlaying;
+
     final rebuilt = _rebuildQueue(playlistPaths, catalogTracks);
     if (rebuilt.tracks.isEmpty) return false;
 
@@ -276,7 +284,7 @@ class _Restore {
         originTab: originTab,
         originUserPlaylistId: originUserPlaylistId,
         position: pos,
-        resumePlaying: wasPlaying,
+        resumePlaying: effectiveResumePlaying,
       );
       return true;
     }
@@ -292,7 +300,7 @@ class _Restore {
       originTab: originTab,
       originUserPlaylistId: originUserPlaylistId,
       position: pos,
-      resumePlaying: wasPlaying,
+      resumePlaying: effectiveResumePlaying,
     );
     return true;
   }

@@ -507,6 +507,7 @@ class LibraryScreenState extends State<LibraryScreen>
       startIndex: startIndex.clamp(0, tracks.length - 1),
       playbackOriginTab: playbackOriginTab,
       playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
+      keepShuffleMode: true,
     );
   }
 
