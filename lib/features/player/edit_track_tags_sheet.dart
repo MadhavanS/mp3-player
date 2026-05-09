@@ -350,9 +350,14 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         final alreadyExists = msg.toLowerCase().contains(
           'target already exists',
         );
-        messenger.showSnackBar(
-          SnackBar(content: Text(alreadyExists ? 'Already exists' : msg)),
-        );
+        if (alreadyExists) {
+          ActionPillToast.showUsingRootNavigator(
+            'Already exists',
+            uppercaseLabel: true,
+          );
+        } else {
+          messenger.showSnackBar(SnackBar(content: Text(msg)));
+        }
       }
     } on UnsupportedError catch (e) {
       if (mounted) {

@@ -162,14 +162,14 @@ class AppPalette extends ThemeExtension<AppPalette> {
 
   /// Soft pink blur style inspired by classic full-art player screens.
   static const AppPalette playerSoft = AppPalette(
-    scaffoldBackground: Color(0xFF5F4F57),
-    surface: Color(0xFF6B5A63),
-    primary: Color(0xFFFFFFFF),
-    accent: Color(0xFFF4E7EE),
-    onScaffold: Color(0xFFFFFFFF),
-    textPrimary: Color(0xFFFFFFFF),
-    textSecondary: Color(0xFFE7DCE2),
-    textMuted: Color(0xFFC9BBC3),
+    scaffoldBackground: Color(0xFFF1E7DA),
+    surface: Color(0xFFE8DCCE),
+    primary: Color(0xFF2D241B),
+    accent: Color(0xFFE7B5CC),
+    onScaffold: Color(0xFF2D241B),
+    textPrimary: Color(0xFF2D241B),
+    textSecondary: Color(0xFF5B4E42),
+    textMuted: Color(0xFF8A7A6C),
   );
 
   /// Soft paper grey, near-monochrome surfaces (accent is graphite for chips).

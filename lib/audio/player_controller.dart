@@ -511,6 +511,12 @@ class PlayerController extends ChangeNotifier {
   /// Replace the playlist entry for [oldPath] with [updated] (new path + tags).
   /// Reloads the audio source when the renamed file is currently playing.
   void replaceTrackPath(String oldPath, TrackItem updated) {
+    final currentPathBeforeReplace = currentTrack?.filePath;
+    final isCurrentTrackPathBeingReplaced = currentPathBeforeReplace == oldPath;
+    final resumePlayingAfterReload = isCurrentTrackPathBeingReplaced && isPlaying;
+    final resumePositionAfterReload = isCurrentTrackPathBeingReplaced
+        ? _player.position
+        : Duration.zero;
     var changed = false;
     for (var i = 0; i < _playlist.length; i++) {
       if (_playlist[i].filePath == oldPath) {
@@ -527,15 +533,18 @@ class PlayerController extends ChangeNotifier {
     if (!changed) return;
     // The currently loaded audio source still points to old file URIs.
     _sourceNeedsReload = true;
-    final currentPath = currentTrack?.filePath;
     notifyListeners();
-    final resumePos = currentPath == oldPath ? Duration.zero : _player.position;
-    unawaited(
-      _loadCurrent(
-        initialPosition: resumePos,
-        stopBeforeLoad: currentPath == oldPath,
-      ),
-    );
+    unawaited(() async {
+      await _loadCurrent(
+        initialPosition: isCurrentTrackPathBeingReplaced
+            ? resumePositionAfterReload
+            : _player.position,
+        stopBeforeLoad: isCurrentTrackPathBeingReplaced,
+      );
+      if (resumePlayingAfterReload) {
+        await _playSafely(context: 'replaceTrackPath.resumePlay');
+      }
+    }());
   }
 
   bool _prunePlaylistPathsNotInCatalog() {

@@ -73,7 +73,9 @@ class GlassMiniPlayer extends StatelessWidget {
     final pal = context.palette;
     final playerChrome = context.usesPlayerChrome;
     final accent = context.controlAccent;
+    final palette = context.appliedThemePalette;
     final daisy = context.appliedThemePalette == AppThemePalette.daisy;
+    final leah = palette == AppThemePalette.playerSoft;
 
     final isDark = theme.brightness == Brightness.dark;
     final blurSigma = playerChrome ? 24.0 : 18.0;
@@ -84,6 +86,8 @@ class GlassMiniPlayer extends StatelessWidget {
 
     final borderColor = daisy
         ? const Color(0xFF9A856A).withValues(alpha: 0.55)
+        : leah
+        ? const Color(0xFF8B7A64).withValues(alpha: 0.48)
         : isDark
         ? Colors.white.withValues(alpha: 0.18)
         : Colors.black.withValues(alpha: 0.08);
@@ -93,6 +97,11 @@ class GlassMiniPlayer extends StatelessWidget {
         ? [
             const Color(0xFFE5D8C4).withValues(alpha: 0.94),
             const Color(0xFFD3C0A7).withValues(alpha: 0.92),
+          ]
+        : leah
+        ? [
+            const Color(0xFFF3EBE0).withValues(alpha: 0.94),
+            const Color(0xFFE5DACB).withValues(alpha: 0.9),
           ]
         : isDark
         ? [
@@ -106,31 +115,43 @@ class GlassMiniPlayer extends StatelessWidget {
 
     final titleColor = daisy
         ? const Color(0xFF2B2117)
+        : leah
+        ? const Color(0xFF2D241B)
         : isDark
         ? Colors.white
         : pal.textPrimary;
     final iconColor = daisy
         ? const Color(0xFF2B2117)
+        : leah
+        ? const Color(0xFF2D241B)
         : isDark
         ? Colors.white
         : pal.textPrimary;
     final mutedIcon = daisy
         ? const Color(0xFF2B2117).withValues(alpha: 0.42)
+        : leah
+        ? const Color(0xFF2D241B).withValues(alpha: 0.4)
         : isDark
         ? Colors.white.withValues(alpha: 0.38)
         : pal.textSecondary.withValues(alpha: 0.38);
     final thumbColor = daisy
         ? const Color(0xFF2B2117)
+        : leah
+        ? const Color(0xFF2D241B)
         : isDark
         ? Colors.white
         : pal.textPrimary.withValues(alpha: 0.92);
     final inactiveTrack = daisy
         ? const Color(0xFF2B2117).withValues(alpha: 0.24)
+        : leah
+        ? const Color(0xFF2D241B).withValues(alpha: 0.22)
         : isDark
         ? Colors.white.withValues(alpha: 0.28)
         : pal.textMuted.withValues(alpha: 0.32);
-    final playButtonBg = daisy ? const Color(0xFF151515) : accent;
-    final playButtonFg = daisy ? const Color(0xFFF0E4D2) : Colors.white;
+    final playButtonBg = (daisy || leah) ? const Color(0xFF151515) : accent;
+    final playButtonFg = (daisy || leah)
+        ? const Color(0xFFF0E4D2)
+        : Colors.white;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -166,12 +187,12 @@ class GlassMiniPlayer extends StatelessWidget {
             child: Stack(
               fit: StackFit.passthrough,
               children: [
-                if (daisy)
+                if (daisy || leah)
                   Positioned.fill(
                     child: Opacity(
-                      opacity: 0.5,
+                      opacity: daisy ? 0.5 : 0.44,
                       child: Image.asset(
-                        daisyTextureAssetPath,
+                        daisy ? daisyTextureAssetPath : leahTextureAssetPath,
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                       ),
@@ -326,7 +347,8 @@ class GlassMiniPlayer extends StatelessWidget {
                             return SliderTheme(
                               data: SliderThemeData(
                                 trackHeight: 3,
-                                activeTrackColor: daisy ? iconColor : accent,
+                                activeTrackColor:
+                                    (daisy || leah) ? iconColor : accent,
                                 inactiveTrackColor: inactiveTrack,
                                 thumbColor: thumbColor,
                                 overlayColor:

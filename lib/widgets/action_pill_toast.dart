@@ -36,10 +36,20 @@ abstract final class ActionPillToast {
   static const double _aboveBottomChrome = 88;
 
   static OverlayEntry? _current;
+  static Timer? _dismissTimer;
 
   static void dismiss() {
-    _current?.remove();
+    _dismissTimer?.cancel();
+    _dismissTimer = null;
+    final entry = _current;
     _current = null;
+    if (entry == null) return;
+    if (!entry.mounted) return;
+    try {
+      entry.remove();
+    } catch (_) {
+      // Guard against rare double-remove races during rapid toast replacement.
+    }
   }
 
   static String _effectiveLabel(String message, bool uppercaseLabel) {
@@ -55,6 +65,7 @@ abstract final class ActionPillToast {
     IconData icon = Icons.check_rounded,
     bool uppercaseLabel = false,
     Duration dwell = const Duration(milliseconds: 2400),
+    double? bottomInsetFromSafeArea,
   }) {
     final label = _effectiveLabel(message, uppercaseLabel);
     if (label.isEmpty) return;
@@ -75,7 +86,8 @@ abstract final class ActionPillToast {
     entry = OverlayEntry(
       builder: (ctx) {
         final bottom =
-            MediaQuery.viewPaddingOf(ctx).bottom + _aboveBottomChrome;
+            MediaQuery.viewPaddingOf(ctx).bottom +
+            (bottomInsetFromSafeArea ?? _aboveBottomChrome);
         final textStyle = themeData.textTheme.labelSmall?.copyWith(
           color: pillFg,
           fontWeight: FontWeight.w800,
@@ -140,17 +152,11 @@ abstract final class ActionPillToast {
     overlay.insert(entry);
     _current = entry;
 
-    unawaited(
-      Future<void>.delayed(dwell, () {
-        // [dismiss]/a newer toast may already have removed [entry]; removing twice asserts.
-        if (!entry.mounted) {
-          if (identical(_current, entry)) _current = null;
-          return;
-        }
-        entry.remove();
-        if (identical(_current, entry)) _current = null;
-      }),
-    );
+    _dismissTimer = Timer(dwell, () {
+      // Only the currently visible toast may dismiss itself.
+      if (!identical(_current, entry)) return;
+      dismiss();
+    });
   }
 
   /// After popping a modal, the sheet context is unmounted; use navigator key context.
@@ -159,6 +165,7 @@ abstract final class ActionPillToast {
     IconData icon = Icons.check_rounded,
     bool uppercaseLabel = false,
     Duration dwell = const Duration(milliseconds: 2400),
+    double? bottomInsetFromSafeArea,
   }) {
     final ctx = appNavigatorKey.currentContext;
     if (ctx == null) return;
@@ -168,6 +175,7 @@ abstract final class ActionPillToast {
       icon: icon,
       uppercaseLabel: uppercaseLabel,
       dwell: dwell,
+      bottomInsetFromSafeArea: bottomInsetFromSafeArea,
     );
   }
 }

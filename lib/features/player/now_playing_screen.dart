@@ -23,6 +23,8 @@ const Color _kSilverInk = Color(0xFF0A0A0A);
 const Color _kSilverSeekInactive = Color(0xFFCBC7C1);
 const Color _kSilverTimeGray = Color(0xFFA8A49E);
 const Color _kSilverIconDisabled = Color(0xFFB8B4AE);
+const Color _kLeahPinkActive = Color(0xFF9C3F6E);
+const Color _kLeahPinkSoft = Color(0xFFE7B5CC);
 
 String _formatDuration(Duration d) {
   final m = d.inMinutes;
@@ -238,6 +240,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         player.shuffleEnabled ? 'Shuffle on' : 'Shuffle off',
         icon: Icons.shuffle_rounded,
         uppercaseLabel: true,
+        bottomInsetFromSafeArea: _pillBottomInsetForTheme(context),
       );
     });
   }
@@ -259,58 +262,98 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         msg,
         icon: icon,
         uppercaseLabel: true,
+        bottomInsetFromSafeArea: _pillBottomInsetForTheme(context),
       );
     });
+  }
+
+  double? _pillBottomInsetForTheme(BuildContext context) {
+    if (_isSilverNp(context)) {
+      // Silver now-playing: keep pill closer to the footer (lower position).
+      return 54;
+    }
+    if (context.appliedThemePalette == AppThemePalette.player) {
+      // Julia now-playing: place pill a bit lower.
+      return 64;
+    }
+    if (_isLeahNp(context)) {
+      // Leah now-playing requests pill between seek row and transport controls.
+      return 175;
+    }
+    return null;
   }
 
   Widget _favoriteButton(AppPalette pal, TrackItem cur) {
     final path = cur.filePath ?? '';
     final canFav = path.isNotEmpty;
-    return FutureBuilder<void>(
-      future: FavoriteSongsStore.ensureLoaded(),
-      builder: (context, snap) {
-        final ready = snap.connectionState == ConnectionState.done;
-        return ListenableBuilder(
-          listenable: FavoriteSongsStore.revision,
-          builder: (context, _) {
-            final isFav = canFav && FavoriteSongsStore.isFavorite(path);
-            final silver = _isSilverNp(context);
-            return IconButton(
-              iconSize: silver ? 36 : 28,
-              tooltip: isFav ? 'Remove from favourites' : 'Add to favourites',
-              icon: Icon(
-                isFav
-                    ? (silver ? Icons.favorite : Icons.favorite_rounded)
-                    : (silver
-                          ? Icons.favorite_border
-                          : Icons.favorite_border_rounded),
-                color: !canFav
-                    ? (silver
-                          ? _kSilverIconDisabled.withValues(alpha: 0.55)
-                          : pal.textSecondary.withValues(alpha: 0.35))
-                    : isFav
-                    ? (silver ? _kSilverInk : context.controlAccent)
-                    : (silver
-                          ? _kSilverTimeGray
-                          : pal.textSecondary.withValues(alpha: 0.55)),
-              ),
-              onPressed: !ready || !canFav
-                  ? null
-                  : () async {
-                      final nowFav = await FavoriteSongsStore.toggleFavorite(
-                        path,
-                      );
-                      if (!context.mounted) return;
-                      ActionPillToast.showUsingRootNavigator(
-                        nowFav ? 'Favourited' : 'Removed from favourites',
-                        icon: nowFav
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
-                        uppercaseLabel: true,
-                      );
-                    },
-            );
-          },
+    unawaited(FavoriteSongsStore.ensureLoaded());
+    return ListenableBuilder(
+      listenable: FavoriteSongsStore.revision,
+      builder: (context, _) {
+        final isFav = canFav && FavoriteSongsStore.isFavorite(path);
+        final silver = _isSilverNp(context);
+        final leah = _isLeahNp(context);
+        final julia = context.appliedThemePalette == AppThemePalette.player;
+        final favIcon = isFav
+            ? (silver ? Icons.favorite : Icons.favorite_rounded)
+            : (julia ? Icons.heart_broken : Icons.heart_broken_rounded);
+        return IconButton(
+          iconSize: silver ? 36 : 28,
+          tooltip: isFav ? 'Remove from favourites' : 'Add to favourites',
+          icon: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            switchInCurve: Curves.easeOutBack,
+            switchOutCurve: Curves.easeIn,
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(
+                  scale: Tween<double>(
+                    begin: 0.82,
+                    end: 1.0,
+                  ).animate(animation),
+                  child: child,
+                ),
+              );
+            },
+            child: Icon(
+              favIcon,
+              key: ValueKey<bool>(isFav),
+              color: !canFav
+                  ? (silver
+                        ? _kSilverIconDisabled.withValues(alpha: 0.55)
+                        : (leah
+                              ? _kLeahPinkSoft.withValues(alpha: 0.5)
+                              : pal.textSecondary.withValues(alpha: 0.35)))
+                  : isFav
+                  ? (silver
+                        ? _kSilverInk
+                        : (leah ? _kLeahPinkActive : context.controlAccent))
+                  : (silver
+                        ? _kSilverTimeGray
+                        : (leah
+                              ? _kLeahPinkSoft
+                              : (julia
+                                    ? pal.onScaffold.withValues(alpha: 0.9)
+                                    : pal.textSecondary.withValues(
+                                        alpha: 0.55,
+                                      )))),
+            ),
+          ),
+          onPressed: !canFav
+              ? null
+              : () async {
+                  final nowFav = await FavoriteSongsStore.toggleFavorite(path);
+                  if (!context.mounted) return;
+                  ActionPillToast.showUsingRootNavigator(
+                    nowFav ? 'Favourited' : 'Removed from favourites',
+                    icon: nowFav
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    uppercaseLabel: true,
+                    bottomInsetFromSafeArea: _pillBottomInsetForTheme(context),
+                  );
+                },
         );
       },
     );
@@ -328,6 +371,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         if (cur == null) return const SizedBox.shrink();
 
         final canEdit = cur.filePath != null && cur.filePath!.isNotEmpty;
+        final isJulia = context.appliedThemePalette == AppThemePalette.player;
 
         final footerChrome = context.usesPlayerChrome;
         final navIconColor = footerChrome ? pal.onScaffold : pal.textPrimary;
@@ -414,6 +458,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                     )
                                   : null,
                             ),
+                            if (isJulia) ...[
+                              const SizedBox(width: 2),
+                              _favoriteButton(pal, cur),
+                            ],
                           ],
                         ),
                       ),
@@ -514,11 +562,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   bool _isSilverNp(BuildContext context) =>
       context.appliedThemePalette == AppThemePalette.silver;
 
+  bool _isLeahNp(BuildContext context) =>
+      context.appliedThemePalette == AppThemePalette.playerSoft;
+
   bool _isDaisyNp(BuildContext context) =>
       context.appliedThemePalette == AppThemePalette.daisy;
 
   Color _fullArtSeekAccent(BuildContext context, AppPalette pal) {
     if (_isSilverNp(context)) return _kSilverInk;
+    if (_isLeahNp(context)) return _kLeahPinkActive;
     return context.controlAccent;
   }
 
@@ -576,6 +628,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         letterSpacing: 0.2,
       );
     }
+    if (_isLeahNp(context)) {
+      return theme.textTheme.labelSmall!.copyWith(
+        color: _kLeahPinkActive,
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.2,
+      );
+    }
     return _softBlurFraunces(
       accent.withValues(alpha: 0.95),
       fontSize: 12,
@@ -593,6 +653,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         color: pal.textPrimary,
         fontWeight: FontWeight.w600,
         fontSize: 24,
+        height: 1.25,
+      );
+    }
+    if (_isLeahNp(context)) {
+      return theme.textTheme.headlineSmall!.copyWith(
+        color: _kLeahPinkActive,
+        fontWeight: FontWeight.w700,
+        fontSize: 28,
         height: 1.25,
       );
     }
@@ -617,6 +685,13 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         fontSize: fontSize + 1,
       );
     }
+    if (_isLeahNp(context)) {
+      return theme.textTheme.titleMedium!.copyWith(
+        color: _kLeahPinkActive.withValues(alpha: 0.94),
+        fontWeight: FontWeight.w600,
+        fontSize: fontSize,
+      );
+    }
     return _softBlurFraunces(
       pal.onScaffold.withValues(alpha: onScaffoldAlpha),
       fontSize: fontSize,
@@ -631,6 +706,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     required double artWidth,
   }) {
     final accent = _fullArtSeekAccent(context, pal);
+    final iconTint = _isLeahNp(context)
+        ? _kLeahPinkSoft
+        : accent.withValues(alpha: 0.9);
     return Center(
       child: SizedBox(
         width: artWidth,
@@ -640,7 +718,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             children: [
               Icon(
                 Icons.volume_down_outlined,
-                color: accent.withValues(alpha: 0.9),
+                color: iconTint,
                 size: _isSilverNp(context) ? 34 : 23,
               ),
               const SizedBox(width: 12),
@@ -670,7 +748,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               const SizedBox(width: 12),
               Icon(
                 Icons.volume_up_outlined,
-                color: accent.withValues(alpha: 0.9),
+                color: iconTint,
                 size: _isSilverNp(context) ? 34 : 23,
               ),
             ],
@@ -774,7 +852,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }) {
     final accent = _fullArtSeekAccent(context, pal);
     final silver = _isSilverNp(context);
-    final muted = silver ? _kSilverTimeGray : pal.onScaffold.withValues(alpha: 0.5);
+    final leah = _isLeahNp(context);
+    final muted = silver
+        ? _kSilverTimeGray
+        : (leah ? _kLeahPinkSoft : pal.onScaffold.withValues(alpha: 0.5));
     final shuffleOff = silver ? _kSilverIconDisabled : muted;
     if (silver) {
       return SizedBox(
@@ -877,13 +958,16 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     final showArtist =
         artistName.isNotEmpty && artistName.toLowerCase() != 'unknown artist';
     final silver = _isSilverNp(context);
+    final leah = _isLeahNp(context);
     final actionColor = silver
         ? _kSilverInk
-        : pal.onScaffold.withValues(alpha: 0.92);
+        : (leah ? _kLeahPinkSoft : pal.onScaffold.withValues(alpha: 0.92));
     final accent = _fullArtSeekAccent(context, pal);
     final artWidth = _fullArtHeroWidth(context);
     final topIconEnabled = silver ? _kSilverInk : actionColor;
-    final topIconDisabled = silver ? _kSilverIconDisabled : pal.textSecondary;
+    final topIconDisabled = silver
+        ? _kSilverIconDisabled
+        : (leah ? _kLeahPinkSoft.withValues(alpha: 0.6) : pal.textSecondary);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,

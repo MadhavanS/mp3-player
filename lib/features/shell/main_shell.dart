@@ -89,6 +89,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   bool _backgroundSyncQueued = false;
   bool _albumArtWarmupInProgress = false;
   bool _albumArtWarmupQueued = false;
+  Timer? _albumArtWarmupRetryTimer;
   bool _refreshInProgress = false;
 
   @override
@@ -369,6 +370,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   void _scheduleAlbumArtWarmup(PlayerController player) {
     if (kIsWeb) return;
+    // Avoid metadata/cover extraction bursts while audio is actively playing.
+    // On some devices this causes decoder backpressure (pipelineFull/drop spam).
+    if (player.isPlaying) {
+      _albumArtWarmupQueued = true;
+      _albumArtWarmupRetryTimer?.cancel();
+      _albumArtWarmupRetryTimer = Timer(const Duration(seconds: 12), () {
+        if (!mounted) return;
+        _scheduleAlbumArtWarmup(player);
+      });
+      return;
+    }
     if (_albumArtWarmupInProgress) {
       _albumArtWarmupQueued = true;
       return;
@@ -386,7 +398,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         if (tracksNeedingArt.isEmpty) return;
         await enrichPlaylistTracks(
           tracks: tracksNeedingArt,
-          batchSize: 3,
+          batchSize: 1,
+          interBatchDelay: const Duration(milliseconds: 20),
           onTrackUpdated: (path, updated) {
             player.updateTrackByPath(path, updated);
             unawaited(SongMetadataCache.saveTracks([updated]));
@@ -422,6 +435,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _idleRescanTimer?.cancel();
+    _albumArtWarmupRetryTimer?.cancel();
     unawaited(_persistSession());
     _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
     _songsBrowsePathKeysNotifier.dispose();

@@ -8,6 +8,7 @@ Future<void> enrichPlaylistTracks({
   required List<TrackItem> tracks,
   required void Function(String path, TrackItem updated) onTrackUpdated,
   int batchSize = 4,
+  Duration interBatchDelay = const Duration(milliseconds: 12),
 }) async {
   final withPath =
       tracks.where((t) => t.filePath != null && t.filePath!.isNotEmpty).toList();
@@ -18,5 +19,9 @@ Future<void> enrichPlaylistTracks({
       final path = t.filePath!;
       onTrackUpdated(path, updated);
     }));
+    final hasMore = i + batchSize < withPath.length;
+    if (hasMore && interBatchDelay > Duration.zero) {
+      await Future<void>.delayed(interBatchDelay);
+    }
   }
 }

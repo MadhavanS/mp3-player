@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'local_file_present.dart';
+import 'music_library_path_key.dart';
 
 /// Persists absolute file paths marked as favourites (newest first).
 class FavoriteSongsStore {
@@ -44,7 +45,14 @@ class FavoriteSongsStore {
 
   static bool isFavorite(String path) {
     if (path.isEmpty) return false;
-    return _paths.contains(path);
+    return _paths.any((p) => _samePath(p, path));
+  }
+
+  static bool _samePath(String a, String b) {
+    final ka = canonicalMusicLibraryPathKey(a);
+    final kb = canonicalMusicLibraryPathKey(b);
+    if (ka.isNotEmpty && kb.isNotEmpty) return ka == kb;
+    return a == b;
   }
 
   /// Returns `true` if the path is a favourite after this call.
@@ -52,11 +60,11 @@ class FavoriteSongsStore {
     if (path.isEmpty) return false;
     await ensureLoaded();
     final prefs = await SharedPreferences.getInstance();
-    final wasFavorite = _paths.contains(path);
+    final wasFavorite = _paths.any((p) => _samePath(p, path));
+    _paths.removeWhere((p) => _samePath(p, path));
     if (wasFavorite) {
-      _paths.remove(path);
+      // Removed above.
     } else {
-      _paths.remove(path);
       _paths.insert(0, path);
     }
     await prefs.setString(_key, jsonEncode(_paths));

@@ -194,9 +194,14 @@ Future<void> _applySiteRenameStandalone(
     if (!context.mounted) return;
     final msg = e.toString();
     final alreadyExists = msg.toLowerCase().contains('target already exists');
-    messenger?.showSnackBar(
-      SnackBar(content: Text(alreadyExists ? 'Already exists' : msg)),
-    );
+    if (alreadyExists) {
+      ActionPillToast.showUsingRootNavigator(
+        'Already exists',
+        uppercaseLabel: true,
+      );
+    } else {
+      messenger?.showSnackBar(SnackBar(content: Text(msg)));
+    }
   } on UnsupportedError catch (e) {
     if (!context.mounted) return;
     messenger?.showSnackBar(

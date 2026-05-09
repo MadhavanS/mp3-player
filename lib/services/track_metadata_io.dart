@@ -5,6 +5,14 @@ import 'package:flutter/foundation.dart';
 
 import '../models/track_item.dart';
 
+final Set<String> _metadataWarnedPaths = <String>{};
+
+void _logMetadataSkipOnce(String path, Object error) {
+  if (_metadataWarnedPaths.add(path)) {
+    debugPrint('readAudioMetadata: skipped unsupported metadata for "$path" ($error)');
+  }
+}
+
 TrackItem _trackFromMp3Metadata(TrackItem base, Mp3Metadata mp3) {
   Uint8List? art;
   if (mp3.pictures.isNotEmpty) {
@@ -57,6 +65,9 @@ Future<TrackItem> readAudioMetadata(TrackItem base) async {
           final mp3 = MP3Parser(fetchImage: true).parse(raf);
           return _trackFromMp3Metadata(base, mp3);
         }
+        // Avoid noisy fallback exceptions for unsupported MP3 variants.
+        _logMetadataSkipOnce(path, 'NoMetadataParserException');
+        return base;
       } finally {
         // [MP3Parser.parse] closes [raf] when it runs; avoid double-close.
         try {
@@ -92,8 +103,8 @@ Future<TrackItem> readAudioMetadata(TrackItem base) async {
       replaceGenreFromFile: true,
       replaceAlbumArtFromFile: true,
     );
-  } catch (e, st) {
-    debugPrint('readAudioMetadata: $e\n$st');
+  } catch (e) {
+    _logMetadataSkipOnce(path, e);
     return base;
   }
 }
