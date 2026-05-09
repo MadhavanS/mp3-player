@@ -67,11 +67,17 @@ class UserPlaylistsStore {
     final n = name.trim();
     if (n.isEmpty) return null;
     final list = await loadAll();
+    final normalized = _normalizePlaylistName(n);
+    final exists = list.any((e) => _normalizePlaylistName(e.name) == normalized);
+    if (exists) return null;
     final id = 'pl_${DateTime.now().millisecondsSinceEpoch}';
     list.insert(0, UserPlaylistEntry(id: id, name: n, paths: []));
     await _save(list);
     return id;
   }
+
+  static String _normalizePlaylistName(String name) =>
+      name.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
   static Future<void> deletePlaylist(String id) async {
     final list = await loadAll();

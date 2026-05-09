@@ -580,9 +580,21 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _showCreatePlaylistDialog(BuildContext context) async {
-    final name = await showCreatePlaylistNameDialog(context);
+    final existing = await UserPlaylistsStore.loadAll();
+    if (!context.mounted) return;
+    final name = await showCreatePlaylistNameDialogWithExistingNames(
+      context,
+      existingNames: existing.map((e) => e.name).toSet(),
+    );
     if (!context.mounted || name == null || name.trim().isEmpty) return;
-    await UserPlaylistsStore.createPlaylist(name.trim());
+    final created = await UserPlaylistsStore.createPlaylist(name.trim());
+    if (created == null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Playlist name already exists. Please rename it.'),
+        ),
+      );
+    }
   }
 
   List<UserPlaylistEntry> _filterPlaylistsBySearch(

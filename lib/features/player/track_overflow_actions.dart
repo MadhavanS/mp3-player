@@ -181,12 +181,24 @@ Future<void> _showUserPlaylistPickerAndAdd(
   final theme = Theme.of(context);
 
   Future<void> createNewAndAdd(BuildContext sheetContext) async {
-    final name = await showCreatePlaylistNameDialog(context);
+    final name = await showCreatePlaylistNameDialogWithExistingNames(
+      context,
+      existingNames: playlists.map((p) => p.name).toSet(),
+    );
     if (!sheetContext.mounted) return;
     if (name == null || name.trim().isEmpty) return;
     final trimmed = name.trim();
     final id = await UserPlaylistsStore.createPlaylist(trimmed);
-    if (id == null) return;
+    if (id == null) {
+      if (context.mounted) {
+        ActionPillToast.show(
+          context,
+          'Playlist name already exists. Please rename it.',
+          uppercaseLabel: true,
+        );
+      }
+      return;
+    }
     final added = await UserPlaylistsStore.addPathToPlaylist(id, raw);
     if (added && context.mounted) {
       await PlayerController.of(

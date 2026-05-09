@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/track_item.dart';
 import '../theme/app_theme.dart';
+import 'daisy_background.dart';
 
 /// Where to show artwork: mini player, library row, full hero, compact now-playing.
 enum TrackArtDisplay { mini, list, full, nowPlaying }
@@ -55,6 +56,9 @@ class TrackAlbumArt extends StatelessWidget {
   }
 
   Widget _noArtPlaceholder(BuildContext context) {
+    if (context.appliedThemePalette == AppThemePalette.daisy) {
+      return _daisyPlaceholderDecoration(context);
+    }
     if (context.appliedThemePalette == AppThemePalette.silver) {
       return _silverPlaceholderDecoration(context);
     }
@@ -234,5 +238,72 @@ class TrackAlbumArt extends StatelessWidget {
     );
 
     return Container(width: _size, height: _size, decoration: gradient);
+  }
+
+  Widget _daisyPlaceholderDecoration(BuildContext context) {
+    final r = _effectiveRadius(context);
+    final br = r <= 0 ? BorderRadius.zero : BorderRadius.circular(r);
+    final isMini = display == TrackArtDisplay.mini;
+    final shape = isMini ? BoxShape.circle : BoxShape.rectangle;
+    final outline = Border.all(
+      color: const Color(0xFF2B2117).withValues(alpha: 0.9),
+      width: 1.5,
+    );
+
+    final List<BoxShadow> boxShadows = showShadow
+        ? switch (display) {
+            TrackArtDisplay.mini => [
+                BoxShadow(
+                  color: const Color(0xFF2B2117).withValues(alpha: 0.16),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            TrackArtDisplay.list => const [],
+            TrackArtDisplay.full => [
+                BoxShadow(
+                  color: const Color(0xFF2B2117).withValues(alpha: 0.14),
+                  blurRadius: 22,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            TrackArtDisplay.nowPlaying => [
+                BoxShadow(
+                  color: const Color(0xFF2B2117).withValues(alpha: 0.11),
+                  blurRadius: 14,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+          }
+        : const <BoxShadow>[];
+
+    final shell = BoxDecoration(
+      shape: shape,
+      borderRadius: isMini ? null : br,
+      border: outline,
+      gradient: const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Color(0xFFE5D8C4), Color(0xFFD3C0A7)],
+      ),
+      boxShadow: boxShadows,
+    );
+
+    return Container(
+      width: _size,
+      height: _size,
+      decoration: shell,
+      child: ClipRRect(
+        borderRadius: isMini ? BorderRadius.circular(_size) : br,
+        child: Opacity(
+          opacity: 0.56,
+          child: Image.asset(
+            daisyTextureAssetPath,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
   }
 }

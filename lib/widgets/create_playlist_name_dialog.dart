@@ -15,6 +15,23 @@ Future<String?> showCreatePlaylistNameDialog(BuildContext context) {
     builder: (_) => _CreatePlaylistNameDialogContent(
       pal: pal,
       textTheme: textTheme,
+      existingNames: const <String>{},
+    ),
+  );
+}
+
+Future<String?> showCreatePlaylistNameDialogWithExistingNames(
+  BuildContext context, {
+  required Set<String> existingNames,
+}) {
+  final pal = context.palette;
+  final textTheme = Theme.of(context).textTheme;
+  return showDialog<String>(
+    context: context,
+    builder: (_) => _CreatePlaylistNameDialogContent(
+      pal: pal,
+      textTheme: textTheme,
+      existingNames: existingNames,
     ),
   );
 }
@@ -23,10 +40,12 @@ class _CreatePlaylistNameDialogContent extends StatefulWidget {
   const _CreatePlaylistNameDialogContent({
     required this.pal,
     required this.textTheme,
+    required this.existingNames,
   });
 
   final AppPalette pal;
   final TextTheme textTheme;
+  final Set<String> existingNames;
 
   @override
   State<_CreatePlaylistNameDialogContent> createState() =>
@@ -36,6 +55,26 @@ class _CreatePlaylistNameDialogContent extends StatefulWidget {
 class _CreatePlaylistNameDialogContentState
     extends State<_CreatePlaylistNameDialogContent> {
   late final TextEditingController _controller;
+  String? _errorText;
+
+  String _normalized(String name) =>
+      name.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  void _submit() {
+    final t = _controller.text.trim();
+    if (t.isEmpty) return;
+    final normalized = _normalized(t);
+    final duplicates = widget.existingNames.any(
+      (n) => _normalized(n) == normalized,
+    );
+    if (duplicates) {
+      setState(() {
+        _errorText = 'Playlist name already exists. Please rename it.';
+      });
+      return;
+    }
+    Navigator.of(context).pop(t);
+  }
 
   @override
   void initState() {
@@ -67,6 +106,7 @@ class _CreatePlaylistNameDialogContentState
         textCapitalization: TextCapitalization.sentences,
         decoration: InputDecoration(
           hintText: 'Playlist name',
+          errorText: _errorText,
           hintStyle: theme.bodyMedium?.copyWith(
             color: pal.textMuted,
           ),
@@ -83,8 +123,7 @@ class _CreatePlaylistNameDialogContentState
           ),
         ),
         onSubmitted: (v) {
-          final t = v.trim();
-          if (t.isNotEmpty) Navigator.of(context).pop(t);
+          _submit();
         },
       ),
       actions: [
@@ -93,10 +132,7 @@ class _CreatePlaylistNameDialogContentState
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: () {
-            final t = _controller.text.trim();
-            if (t.isNotEmpty) Navigator.of(context).pop(t);
-          },
+          onPressed: _submit,
           child: const Text('OK'),
         ),
       ],

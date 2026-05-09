@@ -374,9 +374,32 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                   ? () => _openTagEditor(player)
                                   : null,
                             ),
-                            _favoriteButton(pal, cur),
                             IconButton(
-                              tooltip: 'Clean site-style name',
+                              tooltip: 'Add to playlist',
+                              iconSize: 28,
+                              icon: Icon(
+                                Icons.playlist_add_rounded,
+                                color: canEdit
+                                    ? context.controlAccent
+                                    : pal.textSecondary.withValues(alpha: 0.45),
+                              ),
+                              onPressed: canEdit
+                                  ? () {
+                                      unawaited(
+                                        applyTrackOverflowAction(
+                                          context,
+                                          player,
+                                          player.currentIndex,
+                                          TrackOverflowAction.addToPlaylist,
+                                          playbackOriginTab:
+                                              player.playbackOriginTab,
+                                        ),
+                                      );
+                                    }
+                                  : null,
+                            ),
+                            IconButton(
+                              tooltip: 'Auto update tags',
                               iconSize: 28,
                               icon: Icon(
                                 Icons.auto_fix_high_outlined,
@@ -1243,6 +1266,69 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
+  Widget _buildDaisyFooterTools(
+    BuildContext context, {
+    required AppPalette pal,
+    required PlayerController player,
+    required TrackItem track,
+    required double width,
+  }) {
+    final canEdit = track.filePath != null && track.filePath!.isNotEmpty;
+    final enabledColor = const Color(0xFF2B2117);
+    final disabledColor = pal.textSecondary.withValues(alpha: 0.45);
+    return SizedBox(
+      width: width,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            tooltip: 'Edit tags & cover',
+            iconSize: 28,
+            icon: Icon(
+              Icons.edit_note_rounded,
+              color: canEdit ? enabledColor : disabledColor,
+            ),
+            onPressed: canEdit ? () => _openTagEditor(player) : null,
+          ),
+          const SizedBox(width: 10),
+          IconButton(
+            tooltip: 'Add to playlist',
+            iconSize: 28,
+            icon: Icon(
+              Icons.playlist_add_rounded,
+              color: canEdit ? enabledColor : disabledColor,
+            ),
+            onPressed: canEdit
+                ? () {
+                    unawaited(
+                      applyTrackOverflowAction(
+                        context,
+                        player,
+                        player.currentIndex,
+                        TrackOverflowAction.addToPlaylist,
+                        playbackOriginTab: player.playbackOriginTab,
+                      ),
+                    );
+                  }
+                : null,
+          ),
+          const SizedBox(width: 10),
+          IconButton(
+            tooltip: 'Auto update tags',
+            iconSize: 28,
+            icon: Icon(
+              Icons.auto_fix_high_outlined,
+              color: canEdit ? enabledColor : disabledColor,
+            ),
+            onPressed: canEdit && !kIsWeb
+                ? () => showStandaloneSiteRenameDialog(context, track)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1666,6 +1752,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                     if (daisyNp) {
                                       final bottomInset =
                                           MediaQuery.viewPaddingOf(context).bottom;
+                                      final t = player.currentTrack;
                                       return Padding(
                                         padding: const EdgeInsets.fromLTRB(
                                           24,
@@ -1680,6 +1767,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                               player,
                                               artWidth,
                                             ),
+                                            const SizedBox(height: 20),
+                                            if (t != null)
+                                              _buildDaisyFooterTools(
+                                                context,
+                                                pal: pal,
+                                                player: player,
+                                                track: t,
+                                                width: artWidth,
+                                              ),
                                             const Spacer(),
                                             SizedBox(height: 16 + bottomInset),
                                           ],
