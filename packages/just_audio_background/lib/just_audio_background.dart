@@ -153,6 +153,7 @@ class _JustAudioBackgroundPlugin extends JustAudioPlatform {
   @override
   Future<DisposeAllPlayersResponse> disposeAllPlayers(
       DisposeAllPlayersRequest request) async {
+    _playerId = null;
     final player = _player;
     _player = null;
     await player?.release();
@@ -189,6 +190,12 @@ class _JustAudioPlayer extends AudioPlayerPlatform {
 
   Future<void> release() async {
     await _audioHandler.stop();
+  }
+
+  @override
+  Future<DisposeResponse> dispose(DisposeRequest request) async {
+    await release();
+    return DisposeResponse();
   }
 
   @override
@@ -715,8 +722,11 @@ class _PlayerAudioHandler extends BaseAudioHandler
           processingState: ProcessingStateMessage.idle,
         );
         _broadcastState();
-        _playerCompleter = _ValueCompleter<AudioPlayerPlatform>();
-        await _platform.disposePlayer(DisposePlayerRequest(id: player.id));
+        try {
+          await _platform.disposePlayer(DisposePlayerRequest(id: player.id));
+        } finally {
+          _playerCompleter = _ValueCompleter<AudioPlayerPlatform>();
+        }
       });
 
   Duration get currentPosition {

@@ -13,7 +13,8 @@ Future<void> main() async {
       androidNotificationChannelName: 'Now playing',
       androidNotificationChannelDescription:
           'Playback controls while the app is in the background.',
-      androidNotificationIcon: 'drawable/ic_stat_music',
+      // PNG mipmaps are reliable as FGS small icons; vectors can fail on some OEMs.
+      androidNotificationIcon: 'mipmap/ic_launcher',
       androidNotificationOngoing: true,
       androidStopForegroundOnPause: true,
       preloadArtwork: true,

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep drawables loaded only via getIdentifier (audio_service / Flutter prefs); otherwise
+     release shrink can strip them and notifications crash with "no valid small icon". -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_music,@drawable/audio_service_play_arrow,@drawable/audio_service_pause,@drawable/audio_service_stop,@drawable/audio_service_skip_next,@drawable/audio_service_skip_previous,@drawable/audio_service_fast_forward,@drawable/audio_service_fast_rewind" />

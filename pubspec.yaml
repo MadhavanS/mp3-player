@@ -75,6 +75,11 @@ flutter:
   assets:
     - assets/c__Users_smadh_AppData_Roaming_Cursor_User_workspaceStorage_0dbfe92190d87ed8cf776b817604569f_images_image-9647ab36-e7ec-435e-afe7-d85d50b88632.png
     - assets/c__Users_smadh_AppData_Roaming_Cursor_User_workspaceStorage_0dbfe92190d87ed8cf776b817604569f_images_image-f44a8fb3-4799-4ae6-8d61-ac2e01f71443.png
+    # Bundled for offline use; google_fonts matches names like EduNSWACTCursive-Regular.ttf
+    - assets/fonts/EduNSWACTCursive-Regular.ttf
+    - assets/fonts/EduNSWACTCursive-Medium.ttf
+    - assets/fonts/EduNSWACTCursive-SemiBold.ttf
+    - assets/fonts/EduNSWACTCursive-Bold.ttf
 
 flutter_launcher_icons:
   android: true
