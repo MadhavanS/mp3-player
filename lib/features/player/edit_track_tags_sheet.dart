@@ -28,6 +28,33 @@ String _mimeFromFileName(String name) {
   return 'image/jpeg';
 }
 
+/// Shown when tag save / site-rename write fails — root overlay so it is visible
+/// above the bottom sheet and matches success [ActionPillToast] behavior.
+void _showTagEditFailureToast(String message) {
+  var text = message.trim();
+  if (text.isEmpty) return;
+  const maxLen = 200;
+  if (text.length > maxLen) {
+    text = '${text.substring(0, maxLen - 1)}…';
+  }
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    ActionPillToast.showUsingRootNavigator(
+      text,
+      icon: Icons.error_outline_rounded,
+      uppercaseLabel: false,
+      dwell: const Duration(milliseconds: 4200),
+    );
+  });
+}
+
+String _oneLineError(Object e) {
+  var s = e.toString().trim();
+  if (s.startsWith('Exception: ')) {
+    s = s.substring('Exception: '.length).trim();
+  }
+  return s;
+}
+
 class EditTrackTagsSheet extends StatefulWidget {
   const EditTrackTagsSheet({super.key, required this.track});
 
@@ -259,13 +286,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                 _album.text = suggestion.suggestedAlbum;
                 _genre.text = suggestion.suggestedGenre;
                 Navigator.pop(ctx);
-                messenger.showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Filled the form — tap Save to write the file.',
-                    ),
-                  ),
-                );
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  ActionPillToast.showUsingRootNavigator(
+                    'Suggested tags in editor — tap Save to write',
+                    icon: Icons.edit_note_rounded,
+                    uppercaseLabel: false,
+                  );
+                });
               },
               child: Text(tagOnlyFlow ? 'Apply tag edits' : 'Use in editor'),
             ),
@@ -304,16 +331,19 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     if (!mounted) return;
 
     final player = PlayerController.of(context);
-    final messenger = ScaffoldMessenger.of(context);
 
     setState(() => _saving = true);
 
+    final wasPlaying = player.isPlaying;
+    final resumePos = player.position;
+    var stoppedForEdit = false;
+    var saveSucceeded = false;
+
     try {
-      final wasPlaying = player.isPlaying;
-      final resumePos = player.position;
       final isCurrent = player.isCurrentTrackFilePath(path);
       if (isCurrent) {
         await player.stopForExternalFileEdit();
+        stoppedForEdit = true;
       }
 
       var newPath = path;
@@ -345,7 +375,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       } else {
         player.updateTrackByPath(path, refreshed);
         if (isCurrent) {
-          await player.reloadCurrentSource(
+          player.reloadCurrentSourceUnawaited(
             initialPosition: resumePos,
             resumePlaying: wasPlaying,
           );
@@ -353,6 +383,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       }
       unawaited(SongMetadataCache.saveTracks([refreshed]));
 
+      saveSucceeded = true;
       if (mounted) {
         Navigator.of(context).pop();
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -369,31 +400,54 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           'target already exists',
         );
         if (alreadyExists) {
-          ActionPillToast.showUsingRootNavigator(
-            'Already exists',
-            uppercaseLabel: true,
-          );
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            ActionPillToast.showUsingRootNavigator(
+              renameTargetExistsUserMessage(e),
+              icon: Icons.warning_amber_rounded,
+              uppercaseLabel: false,
+              dwell: const Duration(milliseconds: 4200),
+            );
+          });
         } else {
-          messenger.showSnackBar(SnackBar(content: Text(msg)));
+          final detail = e.message.trim();
+          _showTagEditFailureToast(
+            detail.isNotEmpty
+                ? 'Could not update file — $detail'
+                : 'Could not update file.',
+          );
         }
       }
     } on UnsupportedError catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(e.message ?? 'Not supported.')),
+        final detail = (e.message ?? '').trim();
+        _showTagEditFailureToast(
+          detail.isNotEmpty
+              ? 'This change is not supported — $detail'
+              : 'This change is not supported for this file.',
         );
       }
     } on FileSystemException catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('Could not update file. (${e.message})')),
+        final os = e.message.trim();
+        _showTagEditFailureToast(
+          os.isNotEmpty
+              ? 'Could not write the file — $os. On Android, enable All files access for this app if needed.'
+              : 'Could not write the file — check permissions (All files access on Android).',
         );
       }
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
+        _showTagEditFailureToast(
+          'Could not update file — ${_oneLineError(e)}',
+        );
       }
     } finally {
+      if (stoppedForEdit && !saveSucceeded) {
+        player.reloadCurrentSourceUnawaited(
+          initialPosition: resumePos,
+          resumePlaying: wasPlaying,
+        );
+      }
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -415,19 +469,22 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     }
 
     final player = PlayerController.of(context);
-    final messenger = ScaffoldMessenger.of(context);
 
     if (!await ensureCanWriteLibraryFiles(context)) {
       return;
     }
 
     setState(() => _saving = true);
+    final wasPlaying = player.isPlaying;
+    final resumePos = player.position;
+    var stoppedForEdit = false;
+    var saveSucceeded = false;
+
     try {
-      final wasPlaying = player.isPlaying;
-      final resumePos = player.position;
       final isCurrent = player.isCurrentTrackFilePath(path);
       if (isCurrent) {
         await player.stopForExternalFileEdit();
+        stoppedForEdit = true;
       }
 
       final desiredBasename = sanitizeRenameBasename(_fileName.text);
@@ -460,12 +517,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       } else {
         player.updateTrackByPath(path, refreshed);
         if (isCurrent) {
-          await player.reloadCurrentSource(
+          player.reloadCurrentSourceUnawaited(
             initialPosition: resumePos,
             resumePlaying: wasPlaying,
           );
         }
       }
+      saveSucceeded = true;
       if (mounted) {
         Navigator.of(context).pop();
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -478,27 +536,59 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       unawaited(SongMetadataCache.saveTracks([refreshed]));
     } on UnsupportedError catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text(e.message ?? 'Not supported.')),
+        final detail = (e.message ?? '').trim();
+        _showTagEditFailureToast(
+          detail.isNotEmpty
+              ? 'Tags could not be saved — $detail'
+              : 'Tags could not be saved — this format or change is not supported.',
         );
       }
     } on FileSystemException catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not write the file. On Android, enable "All files access" for this app. (${e.message})',
-            ),
-          ),
+        final os = e.message.trim();
+        _showTagEditFailureToast(
+          os.isNotEmpty
+              ? 'Could not write the file — $os. On Android, enable All files access for this app if needed.'
+              : 'Could not write the file — check permissions (All files access on Android).',
         );
+      }
+    } on StateError catch (e) {
+      if (mounted) {
+        final msg = e.toString();
+        final alreadyExists = msg.toLowerCase().contains(
+          'target already exists',
+        );
+        if (alreadyExists) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            ActionPillToast.showUsingRootNavigator(
+              renameTargetExistsUserMessage(e),
+              icon: Icons.warning_amber_rounded,
+              uppercaseLabel: false,
+              dwell: const Duration(milliseconds: 4200),
+            );
+          });
+        } else {
+          final detail = e.message.trim();
+          _showTagEditFailureToast(
+            detail.isNotEmpty
+                ? 'Could not save tags — $detail'
+                : 'Could not save tags.',
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('Could not save tags: $e')),
+        _showTagEditFailureToast(
+          'Could not save tags — ${_oneLineError(e)}',
         );
       }
     } finally {
+      if (stoppedForEdit && !saveSucceeded) {
+        player.reloadCurrentSourceUnawaited(
+          initialPosition: resumePos,
+          resumePlaying: wasPlaying,
+        );
+      }
       if (mounted) setState(() => _saving = false);
     }
   }

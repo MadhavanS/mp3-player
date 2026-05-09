@@ -677,7 +677,15 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Removes one queue entry and keeps playback coherent. Shuffle is turned off.
-  Future<void> removePlaylistEntryAt(int i) async {
+  ///
+  /// When the removed row was the current track, pass [resumePlayingIfCurrentRemoved]
+  /// if playback had been active (e.g. delete-while-playing) so the next queue item
+  /// loads and starts — callers often [stopForExternalFileEdit] first, so the
+  /// player is no longer “playing” when this runs.
+  Future<void> removePlaylistEntryAt(
+    int i, {
+    bool resumePlayingIfCurrentRemoved = false,
+  }) async {
     if (_playlist.isEmpty || i < 0 || i >= _playlist.length) return;
 
     if (_shuffle) {
@@ -708,6 +716,11 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
     if (isCurrent) {
       await _loadCurrent();
+      if (resumePlayingIfCurrentRemoved) {
+        await _resumePlaybackAfterLoad(
+          context: 'removePlaylistEntryAt.resume',
+        );
+      }
     } else {
       await _loadCurrent(initialPosition: _player.position);
     }
@@ -942,6 +955,24 @@ class PlayerController extends ChangeNotifier {
     if (resumePlaying) {
       await _resumePlaybackAfterLoad(context: 'reloadCurrentSource.play');
     }
+  }
+
+  /// Same as [reloadCurrentSource] but does not block — for UI flows (tag sheets)
+  /// where awaiting lazy [setAudioSource] prep can strand the sheet on “saving”.
+  void reloadCurrentSourceUnawaited({
+    Duration? initialPosition,
+    bool resumePlaying = false,
+  }) {
+    unawaited(() async {
+      try {
+        await reloadCurrentSource(
+          initialPosition: initialPosition,
+          resumePlaying: resumePlaying,
+        );
+      } catch (e, st) {
+        debugPrint('reloadCurrentSourceUnawaited: $e\n$st');
+      }
+    }());
   }
 
   /// Release the open audio file so another process (or this app) can rewrite it.

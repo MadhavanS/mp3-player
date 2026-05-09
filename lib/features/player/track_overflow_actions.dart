@@ -405,7 +405,12 @@ Future<void> applyTrackOverflowAction(
           }
         }
         if (queueIx >= 0) {
-          await player.removePlaylistEntryAt(queueIx);
+          final wasPlaying = player.isPlaying;
+          final removingCurrent = queueIx == player.currentIndex;
+          await player.removePlaylistEntryAt(
+            queueIx,
+            resumePlayingIfCurrentRemoved: wasPlaying && removingCurrent,
+          );
         }
       }
 
@@ -486,7 +491,10 @@ Future<void> applyTrackOverflowAction(
       unawaited(SongMetadataCache.deletePaths([path]));
       final queueIx = player.playlist.indexWhere((t) => t.filePath == path);
       if (queueIx >= 0) {
-        await player.removePlaylistEntryAt(queueIx);
+        await player.removePlaylistEntryAt(
+          queueIx,
+          resumePlayingIfCurrentRemoved: wasPlaying && targetsCurrent,
+        );
       }
 
       if (context.mounted) {

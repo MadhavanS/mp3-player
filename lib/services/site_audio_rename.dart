@@ -770,3 +770,16 @@ Future<String> renameMp3File(
   await old.rename(newPath);
   return normNew;
 }
+
+/// User-visible text for [StateError] from [renameMp3File] when the target name is taken.
+String renameTargetExistsUserMessage(StateError e) {
+  final m = e.message;
+  const prefix = 'Target already exists:';
+  if (m.startsWith(prefix)) {
+    final file = m.substring(prefix.length).trim();
+    return file.isEmpty
+        ? 'That MP3 name is already used in this folder.'
+        : '$file is already in this folder — rename or remove the other file first.';
+  }
+  return m.isEmpty ? 'Could not rename file.' : m;
+}

@@ -156,12 +156,16 @@ Future<void> _applySiteRenameStandalone(
   final player = PlayerController.of(context);
   final messenger = ScaffoldMessenger.maybeOf(context);
 
+  final wasPlaying = player.isPlaying;
+  final resumePos = player.position;
+  var stoppedForEdit = false;
+  var saveSucceeded = false;
+
   try {
-    final wasPlaying = player.isPlaying;
-    final resumePos = player.position;
     final isCurrent = player.isCurrentTrackFilePath(originalPath);
     if (isCurrent) {
       await player.stopForExternalFileEdit();
+      stoppedForEdit = true;
     }
 
     var newPath = originalPath;
@@ -194,7 +198,7 @@ Future<void> _applySiteRenameStandalone(
     } else {
       player.updateTrackByPath(originalPath, refreshed);
       if (isCurrent) {
-        await player.reloadCurrentSource(
+        player.reloadCurrentSourceUnawaited(
           initialPosition: resumePos,
           resumePlaying: wasPlaying,
         );
@@ -202,6 +206,7 @@ Future<void> _applySiteRenameStandalone(
     }
     unawaited(SongMetadataCache.saveTracks([refreshed]));
 
+    saveSucceeded = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ActionPillToast.showUsingRootNavigator(
         'File updated',
@@ -214,8 +219,8 @@ Future<void> _applySiteRenameStandalone(
     final alreadyExists = msg.toLowerCase().contains('target already exists');
     if (alreadyExists) {
       ActionPillToast.showUsingRootNavigator(
-        'Already exists',
-        uppercaseLabel: true,
+        renameTargetExistsUserMessage(e),
+        uppercaseLabel: false,
       );
     } else {
       messenger?.showSnackBar(SnackBar(content: Text(msg)));
@@ -233,5 +238,12 @@ Future<void> _applySiteRenameStandalone(
   } catch (e) {
     if (!context.mounted) return;
     messenger?.showSnackBar(SnackBar(content: Text('Error: $e')));
+  } finally {
+    if (stoppedForEdit && !saveSucceeded) {
+      player.reloadCurrentSourceUnawaited(
+        initialPosition: resumePos,
+        resumePlaying: wasPlaying,
+      );
+    }
   }
 }
