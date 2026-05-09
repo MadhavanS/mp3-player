@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../audio/player_controller.dart';
 import '../theme/app_theme.dart';
+import 'daisy_background.dart';
 import 'track_album_art.dart';
 
 /// Pill thumb on the seek bar (reference-style).
@@ -72,6 +73,7 @@ class GlassMiniPlayer extends StatelessWidget {
     final pal = context.palette;
     final playerChrome = context.usesPlayerChrome;
     final accent = context.controlAccent;
+    final daisy = context.appliedThemePalette == AppThemePalette.daisy;
 
     final isDark = theme.brightness == Brightness.dark;
     final blurSigma = playerChrome ? 24.0 : 18.0;
@@ -80,12 +82,19 @@ class GlassMiniPlayer extends StatelessWidget {
       top: Radius.circular(topCornerRadius),
     );
 
-    final borderColor = isDark
+    final borderColor = daisy
+        ? const Color(0xFF9A856A).withValues(alpha: 0.55)
+        : isDark
         ? Colors.white.withValues(alpha: 0.18)
         : Colors.black.withValues(alpha: 0.08);
 
     /// Dark reference: charcoal tint over blur; light: bright frosted sheet.
-    final List<Color> glassGradient = isDark
+    final List<Color> glassGradient = daisy
+        ? [
+            const Color(0xFFE5D8C4).withValues(alpha: 0.94),
+            const Color(0xFFD3C0A7).withValues(alpha: 0.92),
+          ]
+        : isDark
         ? [
             const Color(0xA0181818),
             const Color(0xC0222222),
@@ -95,22 +104,42 @@ class GlassMiniPlayer extends StatelessWidget {
             Colors.white.withValues(alpha: 0.66),
           ];
 
-    final titleColor =
-        isDark ? Colors.white : pal.textPrimary;
-    final iconColor = isDark ? Colors.white : pal.textPrimary;
-    final mutedIcon =
-        isDark ? Colors.white.withValues(alpha: 0.38) : pal.textSecondary.withValues(alpha: 0.38);
-    final thumbColor =
-        isDark ? Colors.white : pal.textPrimary.withValues(alpha: 0.92);
-    final inactiveTrack =
-        isDark ? Colors.white.withValues(alpha: 0.28) : pal.textMuted.withValues(alpha: 0.32);
+    final titleColor = daisy
+        ? const Color(0xFF2B2117)
+        : isDark
+        ? Colors.white
+        : pal.textPrimary;
+    final iconColor = daisy
+        ? const Color(0xFF2B2117)
+        : isDark
+        ? Colors.white
+        : pal.textPrimary;
+    final mutedIcon = daisy
+        ? const Color(0xFF2B2117).withValues(alpha: 0.42)
+        : isDark
+        ? Colors.white.withValues(alpha: 0.38)
+        : pal.textSecondary.withValues(alpha: 0.38);
+    final thumbColor = daisy
+        ? const Color(0xFF2B2117)
+        : isDark
+        ? Colors.white
+        : pal.textPrimary.withValues(alpha: 0.92);
+    final inactiveTrack = daisy
+        ? const Color(0xFF2B2117).withValues(alpha: 0.24)
+        : isDark
+        ? Colors.white.withValues(alpha: 0.28)
+        : pal.textMuted.withValues(alpha: 0.32);
+    final playButtonBg = daisy ? const Color(0xFF151515) : accent;
+    final playButtonFg = daisy ? const Color(0xFFF0E4D2) : Colors.white;
 
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: borderRadius,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: playerChrome ? 0.36 : 0.22),
+            color: (daisy ? const Color(0xFF2A2118) : Colors.black).withValues(
+              alpha: playerChrome ? 0.34 : 0.22,
+            ),
             blurRadius: playerChrome ? 24 : 16,
             offset: const Offset(0, -6),
           ),
@@ -134,11 +163,25 @@ class GlassMiniPlayer extends StatelessWidget {
                 colors: glassGradient,
               ),
             ),
-            child: Material(
-              color: Colors.transparent,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+            child: Stack(
+              fit: StackFit.passthrough,
+              children: [
+                if (daisy)
+                  Positioned.fill(
+                    child: Opacity(
+                      opacity: 0.5,
+                      child: Image.asset(
+                        daisyTextureAssetPath,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+                Material(
+                  color: Colors.transparent,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                   InkWell(
                     onTap: onTap,
                     borderRadius: borderRadius.copyWith(
@@ -211,7 +254,7 @@ class GlassMiniPlayer extends StatelessWidget {
                                 width: 48,
                                 height: 48,
                                 child: Material(
-                                  color: accent,
+                                  color: playButtonBg,
                                   shape: const CircleBorder(),
                                   clipBehavior: Clip.antiAlias,
                                   child: InkWell(
@@ -222,7 +265,7 @@ class GlassMiniPlayer extends StatelessWidget {
                                       playing
                                           ? Icons.pause_rounded
                                           : Icons.play_arrow_rounded,
-                                      color: Colors.white,
+                                      color: playButtonFg,
                                       size: 30,
                                       semanticLabel: playing
                                           ? 'Pause'
@@ -283,7 +326,7 @@ class GlassMiniPlayer extends StatelessWidget {
                             return SliderTheme(
                               data: SliderThemeData(
                                 trackHeight: 3,
-                                activeTrackColor: accent,
+                                activeTrackColor: daisy ? iconColor : accent,
                                 inactiveTrackColor: inactiveTrack,
                                 thumbColor: thumbColor,
                                 overlayColor:
@@ -319,8 +362,10 @@ class GlassMiniPlayer extends StatelessWidget {
                       },
                     ),
                   ),
-                ],
-              ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ),

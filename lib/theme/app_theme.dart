@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'player_chrome_background.dart';
 
 /// Which palette is actually applied (after resolving [AppThemeSetting.automatic]).
-enum AppThemePalette { light, dark, grey, player, playerSoft, silver }
+enum AppThemePalette { light, dark, grey, player, playerSoft, silver, daisy }
 
 /// User-selectable appearance in Settings.
 ///
@@ -20,6 +20,8 @@ enum AppThemeSetting {
   playerSoft,
   /// Light paper-grey, monochrome full-art Now Playing (Silver).
   silver,
+  /// Beige paper + grain inspired full-art player (Daisy).
+  daisy,
   automatic,
 }
 
@@ -29,6 +31,7 @@ const List<AppThemeSetting> appearanceThemeChoices = <AppThemeSetting>[
   AppThemeSetting.player,
   AppThemeSetting.playerSoft,
   AppThemeSetting.silver,
+  AppThemeSetting.daisy,
 ];
 
 extension AppThemeSettingResolve on AppThemeSetting {
@@ -47,6 +50,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
         return AppThemePalette.playerSoft;
       case AppThemeSetting.silver:
         return AppThemePalette.silver;
+      case AppThemeSetting.daisy:
+        return AppThemePalette.daisy;
       case AppThemeSetting.automatic:
         final h = localNow.hour;
         return (h >= 6 && h < 20)
@@ -62,6 +67,7 @@ extension AppThemeSettingResolve on AppThemeSetting {
     AppThemeSetting.player => 'Julia',
     AppThemeSetting.playerSoft => 'Leah',
     AppThemeSetting.silver => 'Silver',
+    AppThemeSetting.daisy => 'Daisy',
     AppThemeSetting.automatic => 'Automatic (by time)',
   };
 
@@ -75,6 +81,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
       'Rose blur background with soft white controls',
     AppThemeSetting.silver =>
       'Soft paper-grey surfaces and monochrome full-art player',
+    AppThemeSetting.daisy =>
+      'Warm beige textured look with black player controls',
     AppThemeSetting.automatic => 'Light during the day, dark at night',
   };
 }
@@ -176,6 +184,18 @@ class AppPalette extends ThemeExtension<AppPalette> {
     textMuted: Color(0xFF9E9A94),
   );
 
+  /// Warm paper-beige palette for the Daisy player style.
+  static const AppPalette daisy = AppPalette(
+    scaffoldBackground: Color(0xFFC7B79D),
+    surface: Color(0xFFD3C5AB),
+    primary: Color(0xFF151515),
+    accent: Color(0xFF151515),
+    onScaffold: Color(0xFF151515),
+    textPrimary: Color(0xFF151515),
+    textSecondary: Color(0xFF3A342B),
+    textMuted: Color(0xFF665E52),
+  );
+
   /// Line under Settings → Background when “Default” is selected.
   static String chromeBackgroundKindDetail(
     PlayerChromeBackgroundKind kind,
@@ -191,6 +211,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
         'Soft rose-blur in-house scaffold and surfaces.',
       AppThemeSetting.silver =>
         'Warm gray paper in-house scaffold and surfaces.',
+      AppThemeSetting.daisy =>
+        'Warm paper-beige in-house scaffold and surfaces.',
       _ => kind.subtitle,
     };
   }
@@ -211,6 +233,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
         textMuted: const Color(0xFF7E7A74),
         onScaffold: const Color(0xFF0A0A0A),
       ),
+      AppThemePalette.daisy => AppPalette.daisy,
       _ => base,
     };
   }
@@ -222,6 +245,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     AppThemePalette.player => AppPalette.player,
     AppThemePalette.playerSoft => AppPalette.playerSoft,
     AppThemePalette.silver => AppPalette.silver,
+    AppThemePalette.daisy => AppPalette.daisy,
   };
 
   /// Adjusts player / soft-blur palettes for background tone (not accent).
@@ -233,7 +257,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
   }) {
     if (paletteKey != AppThemePalette.player &&
         paletteKey != AppThemePalette.playerSoft &&
-        paletteKey != AppThemePalette.silver) {
+        paletteKey != AppThemePalette.silver &&
+        paletteKey != AppThemePalette.daisy) {
       return base;
     }
     switch (kind) {
@@ -248,6 +273,16 @@ class AppPalette extends ThemeExtension<AppPalette> {
             textSecondary: const Color(0xFF54524E),
             textMuted: const Color(0xFF8A8680),
             onScaffold: const Color(0xFF0A0A0A),
+          );
+        }
+        if (paletteKey == AppThemePalette.daisy) {
+          return base.copyWith(
+            scaffoldBackground: const Color(0xFFBDAE96),
+            surface: const Color(0xFFC9BBA2),
+            textPrimary: const Color(0xFF141414),
+            textSecondary: const Color(0xFF373127),
+            textMuted: const Color(0xFF615949),
+            onScaffold: const Color(0xFF141414),
           );
         }
         return base;
@@ -270,6 +305,16 @@ class AppPalette extends ThemeExtension<AppPalette> {
             textSecondary: const Color(0xFF565450),
             textMuted: const Color(0xFF9C9892),
             onScaffold: const Color(0xFF0A0A0A),
+          );
+        }
+        if (paletteKey == AppThemePalette.daisy) {
+          return base.copyWith(
+            scaffoldBackground: const Color(0xFFD8CCB7),
+            surface: const Color(0xFFE4D9C6),
+            textPrimary: const Color(0xFF131313),
+            textSecondary: const Color(0xFF3E372D),
+            textMuted: const Color(0xFF6A6152),
+            onScaffold: const Color(0xFF131313),
           );
         }
         return base.copyWith(
@@ -408,12 +453,14 @@ extension AppThemeContext on BuildContext {
   bool get usesPlayerChrome =>
       appliedThemePalette == AppThemePalette.player ||
       appliedThemePalette == AppThemePalette.playerSoft ||
-      appliedThemePalette == AppThemePalette.silver;
+      appliedThemePalette == AppThemePalette.silver ||
+      appliedThemePalette == AppThemePalette.daisy;
 
   /// Leah- or Silver-style full-art Now Playing (not Julia).
   bool get usesFullArtNowPlayingLayout =>
       appliedThemePalette == AppThemePalette.playerSoft ||
-      appliedThemePalette == AppThemePalette.silver;
+      appliedThemePalette == AppThemePalette.silver ||
+      appliedThemePalette == AppThemePalette.daisy;
 }
 
 extension AppThemeSettingPreviewStripe on AppThemeSetting {
@@ -442,7 +489,8 @@ abstract final class AppTheme {
       AppThemePalette.grey => Brightness.dark,
       AppThemePalette.player ||
       AppThemePalette.playerSoft ||
-      AppThemePalette.silver =>
+      AppThemePalette.silver ||
+      AppThemePalette.daisy =>
         ext.scaffoldBackground.computeLuminance() > 0.45
             ? Brightness.light
             : Brightness.dark,
@@ -460,7 +508,9 @@ abstract final class AppTheme {
 
     final isPlayer = palette == AppThemePalette.player ||
         palette == AppThemePalette.playerSoft ||
-        palette == AppThemePalette.silver;
+        palette == AppThemePalette.silver ||
+        palette == AppThemePalette.daisy;
+    final isDaisy = palette == AppThemePalette.daisy;
     final cardRadius = isPlayer ? 20.0 : 12.0;
     final buttonRadius = BorderRadius.circular(isPlayer ? 18 : 12);
 
@@ -520,6 +570,23 @@ abstract final class AppTheme {
       tabBarTheme: TabBarThemeData(
         indicatorColor: ext.onScaffold,
         dividerColor: ext.onScaffold.withValues(alpha: 0.12),
+      ),
+      popupMenuTheme: PopupMenuThemeData(
+        color: isDaisy ? const Color(0xFFE5D8C4) : ext.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            color: isDaisy
+                ? const Color(0xFF2B2117).withValues(alpha: 0.72)
+                : ext.onScaffold.withValues(alpha: 0.14),
+            width: isDaisy ? 1.2 : 1,
+          ),
+        ),
+        textStyle: TextStyle(
+          color: isDaisy ? const Color(0xFF2B2117) : ext.textPrimary,
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+        ),
       ),
       textTheme: TextTheme(
         titleLarge: TextStyle(

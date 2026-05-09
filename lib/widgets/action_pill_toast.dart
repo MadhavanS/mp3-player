@@ -17,6 +17,9 @@ abstract final class ActionPillToast {
     if (applied == AppThemePalette.silver) {
       return (bg: const Color(0xFFC8C8C8), fg: const Color(0xFF0A0A0A));
     }
+    if (applied == AppThemePalette.daisy) {
+      return (bg: const Color(0xFFCAB89E), fg: const Color(0xFF0A0A0A));
+    }
     final bg = context.controlAccent;
     if (applied == AppThemePalette.playerSoft) {
       return (bg: bg, fg: const Color(0xFF0A0A0A));

@@ -17,6 +17,7 @@ import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/daisy_background.dart';
 import '../../widgets/track_album_art.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
@@ -1195,8 +1196,8 @@ class LibraryScreenState extends State<LibraryScreen>
             final pal = context.palette;
             final hint = _searchHintForTab(_currentLibraryTabId);
 
-            return ColoredBox(
-              color: pal.scaffoldBackground,
+            return DaisyBackground(
+              baseColor: pal.scaffoldBackground,
               child: SafeArea(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,

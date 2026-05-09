@@ -195,7 +195,8 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     var base = AppPalette.forPalette(resolved);
     if (resolved == AppThemePalette.player ||
         resolved == AppThemePalette.playerSoft ||
-        resolved == AppThemePalette.silver) {
+        resolved == AppThemePalette.silver ||
+        resolved == AppThemePalette.daisy) {
       base = AppPalette.applyPlayerChromeBackground(
         paletteKey: resolved,
         base: base,
@@ -248,7 +249,8 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     final paletteOverride =
         (resolved == AppThemePalette.player ||
             resolved == AppThemePalette.playerSoft ||
-            resolved == AppThemePalette.silver)
+            resolved == AppThemePalette.silver ||
+            resolved == AppThemePalette.daisy)
         ? _materialPaletteFor(resolved)
         : null;
     var theme = AppTheme.themeFor(

@@ -11,6 +11,7 @@ import '../../services/favorite_songs_store.dart';
 import '../../theme/album_art_title_color.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
+import '../../widgets/daisy_background.dart';
 import '../../widgets/track_album_art.dart';
 import 'edit_track_tags_sheet.dart';
 import 'mini_player_bar.dart';
@@ -489,6 +490,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 
   bool _isSilverNp(BuildContext context) =>
       context.appliedThemePalette == AppThemePalette.silver;
+
+  bool _isDaisyNp(BuildContext context) =>
+      context.appliedThemePalette == AppThemePalette.daisy;
 
   Color _fullArtSeekAccent(BuildContext context, AppPalette pal) {
     if (_isSilverNp(context)) return _kSilverInk;
@@ -1038,6 +1042,207 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
+  Widget _buildDaisyTopSection(
+    BuildContext context, {
+    required ThemeData theme,
+    required AppPalette pal,
+    required PlayerController player,
+    required TrackItem track,
+  }) {
+    final artWidth = _fullArtHeroWidth(context);
+    final accent = const Color(0xFF2B2117);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: artWidth,
+          height: artWidth,
+          child: FittedBox(
+            fit: BoxFit.contain,
+            child: TrackAlbumArt(
+              track: track,
+              display: TrackArtDisplay.full,
+              showShadow: false,
+              cornerRadius: 0,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: artWidth,
+          child: Row(
+            children: [
+              _favoriteButton(pal, track),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MarqueeText(
+                  track.title,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: accent,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              PopupMenuButton<String>(
+                tooltip: 'More',
+                icon: Icon(
+                  Icons.more_horiz_rounded,
+                  color: accent,
+                ),
+                itemBuilder: (_) => _softBlurRestMenuEntries(track),
+                onSelected: (v) =>
+                    unawaited(_onSoftBlurTailOverflowSelected(player, v)),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: artWidth,
+          child: StreamBuilder<Duration>(
+            stream: player.audioPlayer.positionStream,
+            builder: (context, posSnap) {
+              return StreamBuilder<Duration?>(
+                stream: player.audioPlayer.durationStream,
+                builder: (context, durSnap) {
+                  final dur = durSnap.data ?? player.duration;
+                  final pos = posSnap.data ?? player.position;
+                  final totalMs = dur?.inMilliseconds ?? 0;
+                  final posMs = pos.inMilliseconds;
+                  final sliderValue = _dragPositionFraction ??
+                      (totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0);
+                  return Column(
+                    children: [
+                      SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 2,
+                          thumbShape:
+                              const RoundSliderThumbShape(enabledThumbRadius: 5),
+                          overlayShape: SliderComponentShape.noOverlay,
+                          activeTrackColor: accent,
+                          inactiveTrackColor: accent.withValues(alpha: 0.35),
+                          thumbColor: accent,
+                          padding: EdgeInsets.zero,
+                        ),
+                        child: Slider(
+                          value: sliderValue.clamp(0.0, 1.0),
+                          onChanged: totalMs > 0
+                              ? (v) => setState(() => _dragPositionFraction = v)
+                              : null,
+                          onChangeEnd: totalMs > 0
+                              ? (v) {
+                                  player.seek(
+                                    Duration(milliseconds: (v * totalMs).round()),
+                                  );
+                                  setState(() => _dragPositionFraction = null);
+                                }
+                              : null,
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Text(
+                            _formatDuration(pos),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: accent,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            dur != null ? _formatDuration(dur) : '--:--',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: accent,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 18),
+      ],
+    );
+  }
+
+  Widget _buildDaisyTransportRow(PlayerController player, double width) {
+    const icon = Color(0xFF2B2117);
+    return SizedBox(
+      width: width,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            tooltip: 'Shuffle',
+            iconSize: 26,
+            onPressed: player.playlist.length < 2 ? null : () => _notifyShuffle(player),
+            icon: Icon(
+              Icons.shuffle_rounded,
+              color: player.playlist.length < 2
+                  ? icon.withValues(alpha: 0.45)
+                  : (player.shuffleEnabled ? icon : icon.withValues(alpha: 0.7)),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Previous track',
+            iconSize: 34,
+            onPressed: () => player.skipPrevious(),
+            icon: const Icon(Icons.skip_previous_rounded, color: icon),
+          ),
+          ListenableBuilder(
+            listenable: player,
+            builder: (context, _) => IconButton(
+              tooltip: player.isPlaying ? 'Pause' : 'Play',
+              iconSize: 44,
+              style: IconButton.styleFrom(
+                backgroundColor: const Color(0x00000000),
+                side: const BorderSide(color: icon, width: 1.2),
+                fixedSize: const Size(84, 84),
+              ),
+              onPressed: () => player.togglePlayPause(),
+              icon: Icon(
+                player.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                color: icon,
+              ),
+            ),
+          ),
+          ListenableBuilder(
+            listenable: player,
+            builder: (context, _) => IconButton(
+              tooltip: player.canSkipNext ? 'Next track' : 'End of playlist',
+              iconSize: 34,
+              onPressed: player.canSkipNext ? () => player.skipNext() : null,
+              icon: Icon(
+                Icons.skip_next_rounded,
+                color: player.canSkipNext ? icon : icon.withValues(alpha: 0.45),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Repeat mode',
+            iconSize: 26,
+            onPressed: () => _notifyRepeat(player),
+            icon: Icon(
+              player.repeatMode == PlaylistRepeatMode.one
+                  ? Icons.repeat_one_rounded
+                  : Icons.repeat_rounded,
+              color: player.repeatMode == PlaylistRepeatMode.off
+                  ? icon.withValues(alpha: 0.7)
+                  : icon,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1057,6 +1262,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 
         final playerChrome = context.usesPlayerChrome;
         final fullArtNp = context.usesFullArtNowPlayingLayout;
+        final daisyNp = _isDaisyNp(context);
         final pageBg = playerChrome ? pal.scaffoldBackground : pal.surface;
 
         return ClipRRect(
@@ -1071,8 +1277,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Expanded(
-                    child: ColoredBox(
-                      color: pageBg,
+                    child: DaisyBackground(
+                      baseColor: pageBg,
                       child: NotificationListener<ScrollNotification>(
                         onNotification: _onScrollForDismiss,
                         child: CustomScrollView(
@@ -1089,6 +1295,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                     final t = player.currentTrack;
                                     if (t == null) {
                                       return const SizedBox.shrink();
+                                    }
+                                    if (daisyNp) {
+                                      return _buildDaisyTopSection(
+                                        context,
+                                        theme: theme,
+                                        pal: pal,
+                                        player: player,
+                                        track: t,
+                                      );
                                     }
                                     if (fullArtNp) {
                                       return _buildSoftBlurTopSection(
@@ -1448,6 +1663,29 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                       return const SizedBox.shrink();
                                     }
                                     final artWidth = _fullArtHeroWidth(context);
+                                    if (daisyNp) {
+                                      final bottomInset =
+                                          MediaQuery.viewPaddingOf(context).bottom;
+                                      return Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          24,
+                                          0,
+                                          24,
+                                          0,
+                                        ),
+                                        child: Column(
+                                          children: [
+                                            const SizedBox(height: 18),
+                                            _buildDaisyTransportRow(
+                                              player,
+                                              artWidth,
+                                            ),
+                                            const Spacer(),
+                                            SizedBox(height: 16 + bottomInset),
+                                          ],
+                                        ),
+                                      );
+                                    }
                                     final silverNp =
                                         context.appliedThemePalette ==
                                         AppThemePalette.silver;

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/daisy_background.dart';
 import '../player/track_overflow_actions.dart';
 import 'library_files_explorer.dart';
 
@@ -95,49 +96,52 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
 
     return Scaffold(
       backgroundColor: pal.scaffoldBackground,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 4, 12, 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    tooltip: 'Close',
-                    color: pal.onScaffold,
-                    onPressed: () => Navigator.of(context).maybePop(),
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      textInputAction: TextInputAction.search,
-                      keyboardType: TextInputType.text,
-                      onSubmitted: (_) =>
-                          FocusManager.instance.primaryFocus?.unfocus(),
-                      onTapOutside: (_) =>
-                          FocusManager.instance.primaryFocus?.unfocus(),
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: pal.onScaffold,
-                        fontSize: 15,
-                      ),
-                      decoration: _searchDecoration(pal, theme),
+      body: DaisyBackground(
+        baseColor: pal.scaffoldBackground,
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 12, 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_rounded),
+                      tooltip: 'Close',
+                      color: pal.onScaffold,
+                      onPressed: () => Navigator.of(context).maybePop(),
                     ),
-                  ),
-                ],
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        textInputAction: TextInputAction.search,
+                        keyboardType: TextInputType.text,
+                        onSubmitted: (_) =>
+                            FocusManager.instance.primaryFocus?.unfocus(),
+                        onTapOutside: (_) =>
+                            FocusManager.instance.primaryFocus?.unfocus(),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: pal.onScaffold,
+                          fontSize: 15,
+                        ),
+                        decoration: _searchDecoration(pal, theme),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Expanded(
-              child: LibraryFilesExplorer(
-                musicRoots: widget.musicRoots,
-                query: q,
-                onOverflow: widget.onOverflow,
-                onSongChosenFromExplorer: _onSongChosenFromExplorer,
+              Expanded(
+                child: LibraryFilesExplorer(
+                  musicRoots: widget.musicRoots,
+                  query: q,
+                  onOverflow: widget.onOverflow,
+                  onSongChosenFromExplorer: _onSongChosenFromExplorer,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

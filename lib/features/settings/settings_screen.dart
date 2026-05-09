@@ -13,6 +13,7 @@ import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/player_chrome_background.dart';
+import '../../widgets/daisy_background.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -680,7 +681,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         if (widget.themeSetting == AppThemeSetting.player ||
             widget.themeSetting == AppThemeSetting.playerSoft ||
-            widget.themeSetting == AppThemeSetting.silver) ...[
+            widget.themeSetting == AppThemeSetting.silver ||
+            widget.themeSetting == AppThemeSetting.daisy) ...[
           const SizedBox(height: 20),
           Text(
             'Background',
@@ -1101,8 +1103,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.recentLists => 'Recent lists',
     };
 
-    return ColoredBox(
-      color: pal.scaffoldBackground,
+    return DaisyBackground(
+      baseColor: pal.scaffoldBackground,
       child: SafeArea(
         child: Stack(
           children: [
