@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'app_theme.dart';
+
 /// User-selectable accent for play controls, toasts, sliders, and list highlights.
 enum AppAccentColorOption {
-  /// Classic blue — default for this app.
+  /// Follows the active theme (Julia/Leah/Silver each has its own default).
+  themeDefault,
   blue,
   electricBlue,
   teal,
@@ -17,6 +20,8 @@ enum AppAccentColorOption {
 
   static AppAccentColorOption parse(String? raw) {
     switch (raw) {
+      case 'themeDefault':
+        return AppAccentColorOption.themeDefault;
       case 'blue':
         return AppAccentColorOption.blue;
       case 'electricBlue':
@@ -36,13 +41,36 @@ enum AppAccentColorOption {
       case 'custom':
         return AppAccentColorOption.custom;
       default:
-        return AppAccentColorOption.blue;
+        return AppAccentColorOption.themeDefault;
     }
   }
 }
 
 extension AppAccentColorOptionResolve on AppAccentColorOption {
+  static Color defaultColorForPalette(AppThemePalette palette) {
+    return switch (palette) {
+      AppThemePalette.player => const Color(0xFF0B84FF),
+      AppThemePalette.playerSoft => const Color(0xFFEC4899),
+      AppThemePalette.silver => const Color(0xFFC8C8C8),
+      AppThemePalette.light => const Color(0xFF2563EB),
+      AppThemePalette.dark => const Color(0xFF79B8FF),
+      AppThemePalette.grey => const Color(0xFF38BDF8),
+    };
+  }
+
+  Color resolveColorForPalette(
+    AppThemePalette palette, {
+    required Color customColor,
+  }) {
+    return switch (this) {
+      AppAccentColorOption.themeDefault => defaultColorForPalette(palette),
+      AppAccentColorOption.custom => customColor,
+      _ => swatchColor,
+    };
+  }
+
   Color get swatchColor => switch (this) {
+        AppAccentColorOption.themeDefault => const Color(0xFF2563EB),
         AppAccentColorOption.blue => const Color(0xFF2563EB),
         AppAccentColorOption.electricBlue => const Color(0xFF0B84FF),
         AppAccentColorOption.teal => const Color(0xFF14B8A6),
@@ -55,6 +83,7 @@ extension AppAccentColorOptionResolve on AppAccentColorOption {
       };
 
   String get label => switch (this) {
+        AppAccentColorOption.themeDefault => 'Default (by theme)',
         AppAccentColorOption.blue => 'Blue',
         AppAccentColorOption.electricBlue => 'Electric blue',
         AppAccentColorOption.teal => 'Teal',
@@ -67,6 +96,8 @@ extension AppAccentColorOptionResolve on AppAccentColorOption {
       };
 
   String get subtitle => switch (this) {
+        AppAccentColorOption.themeDefault =>
+          'Uses each theme default (Julia blue, Leah pink, Silver neutral)',
         AppAccentColorOption.blue => 'Default — buttons, pills, highlights',
         AppAccentColorOption.electricBlue => 'Bright iOS-style blue',
         AppAccentColorOption.teal => 'Cool cyan-green',

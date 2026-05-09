@@ -31,7 +31,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   late final PlayerController _player = PlayerController();
   AppThemeSetting _themeSetting = AppThemeSetting.automatic;
   AppFontOption _fontOption = AppFontOption.system;
-  AppAccentColorOption _accentOption = AppAccentColorOption.blue;
+  AppAccentColorOption _accentOption = AppAccentColorOption.themeDefault;
   Color _customAccentColor = AppAccentColorOption.blue.swatchColor;
   PlayerChromeBackgroundKind _playerChromeBackgroundKind =
       PlayerChromeBackgroundKind.themeDefault;
@@ -226,9 +226,10 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     _scheduleAndroidHomeWidgetSync();
   }
 
-  Color get _resolvedAccent => _accentOption == AppAccentColorOption.custom
-      ? _customAccentColor
-      : _accentOption.swatchColor;
+  Color get _resolvedAccent => _accentOption.resolveColorForPalette(
+    _themeSetting.paletteAt(_themeClock),
+    customColor: _customAccentColor,
+  );
 
   @override
   void dispose() {

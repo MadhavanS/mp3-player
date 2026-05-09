@@ -2,14 +2,31 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 /// Root [Navigator] — assign to [MaterialApp.navigatorKey] so overlays can show
 /// after modal routes ([showModalBottomSheet], dialogs) dispose their context.
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 /// Short pill near the bottom of the screen, above bottom chrome (mini player, now playing
-/// footer) — neutral gray pill, black label and icon.
+/// footer) with theme-aware default colors.
 /// Replaces overlapping previous pill if invoked again immediately.
 abstract final class ActionPillToast {
+  static ({Color bg, Color fg}) _pillColorsFor(BuildContext context) {
+    final applied = context.appliedThemePalette;
+    if (applied == AppThemePalette.silver) {
+      return (bg: const Color(0xFFC8C8C8), fg: const Color(0xFF0A0A0A));
+    }
+    final bg = context.controlAccent;
+    if (applied == AppThemePalette.playerSoft) {
+      return (bg: bg, fg: const Color(0xFF0A0A0A));
+    }
+    final fg = bg.computeLuminance() > 0.45
+        ? const Color(0xFF0A0A0A)
+        : Colors.white;
+    return (bg: bg, fg: fg);
+  }
+
   ActionPillToast._();
 
   /// Clears typical bottom bars (now playing tools row, collapsed-player strip) plus a gap.
@@ -45,8 +62,9 @@ abstract final class ActionPillToast {
     if (overlay == null) return;
 
     final themeData = Theme.of(context);
-    const pillBg = Color(0xFFC8C8C8);
-    const pillFg = Color(0xFF0A0A0A);
+    final colors = _pillColorsFor(context);
+    final pillBg = colors.bg;
+    final pillFg = colors.fg;
 
     dismiss();
 

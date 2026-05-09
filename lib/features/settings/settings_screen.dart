@@ -624,6 +624,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildAppearanceDetail(ThemeData theme, AppPalette pal) {
+    final activePalette = context.appliedThemePalette;
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       children: [
@@ -840,7 +841,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             decoration: BoxDecoration(
                               color: o == AppAccentColorOption.custom
                                   ? widget.customAccentColor
-                                  : o.swatchColor,
+                                  : o.resolveColorForPalette(
+                                      activePalette,
+                                      customColor: widget.customAccentColor,
+                                    ),
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
                                 color: pal.onScaffold.withValues(alpha: 0.15),
@@ -875,7 +879,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           decoration: BoxDecoration(
                             color: o == AppAccentColorOption.custom
                                 ? widget.customAccentColor
-                                : o.swatchColor,
+                                : o.resolveColorForPalette(
+                                    activePalette,
+                                    customColor: widget.customAccentColor,
+                                  ),
                             borderRadius: BorderRadius.circular(4),
                             border: Border.all(
                               color: pal.onScaffold.withValues(alpha: 0.15),
