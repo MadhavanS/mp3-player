@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'player_chrome_background.dart';
 
 /// Which palette is actually applied (after resolving [AppThemeSetting.automatic]).
-enum AppThemePalette { light, dark, grey, player, playerSoft }
+enum AppThemePalette { light, dark, grey, player, playerSoft, silver }
 
 /// User-selectable appearance in Settings.
 ///
@@ -18,14 +18,17 @@ enum AppThemeSetting {
   player,
   /// Soft full-art style (Leah).
   playerSoft,
+  /// Light paper-grey, monochrome full-art Now Playing (Silver).
+  silver,
   automatic,
 }
 
-/// Theme options shown in Settings → Appearance (automatic, Julia, Leah).
+/// Theme options shown in Settings → Appearance (automatic, Julia, Leah, Silver).
 const List<AppThemeSetting> appearanceThemeChoices = <AppThemeSetting>[
   AppThemeSetting.automatic,
   AppThemeSetting.player,
   AppThemeSetting.playerSoft,
+  AppThemeSetting.silver,
 ];
 
 extension AppThemeSettingResolve on AppThemeSetting {
@@ -42,6 +45,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
         return AppThemePalette.player;
       case AppThemeSetting.playerSoft:
         return AppThemePalette.playerSoft;
+      case AppThemeSetting.silver:
+        return AppThemePalette.silver;
       case AppThemeSetting.automatic:
         final h = localNow.hour;
         return (h >= 6 && h < 20)
@@ -56,6 +61,7 @@ extension AppThemeSettingResolve on AppThemeSetting {
     AppThemeSetting.grey => 'Grey',
     AppThemeSetting.player => 'Julia',
     AppThemeSetting.playerSoft => 'Leah',
+    AppThemeSetting.silver => 'Silver',
     AppThemeSetting.automatic => 'Automatic (by time)',
   };
 
@@ -67,6 +73,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
       'Charcoal background, electric blue accents, mint highlights',
     AppThemeSetting.playerSoft =>
       'Rose blur background with soft white controls',
+    AppThemeSetting.silver =>
+      'Soft paper-grey surfaces and monochrome full-art player',
     AppThemeSetting.automatic => 'Light during the day, dark at night',
   };
 }
@@ -156,12 +164,64 @@ class AppPalette extends ThemeExtension<AppPalette> {
     textMuted: Color(0xFFC9BBC3),
   );
 
+  /// Soft paper grey, near-monochrome surfaces (accent is graphite for chips).
+  static const AppPalette silver = AppPalette(
+    scaffoldBackground: Color(0xFFD8D4CA),
+    surface: Color(0xFFE4E0D6),
+    primary: Color(0xFF0A0A0A),
+    accent: Color(0xFF3A3A3A),
+    onScaffold: Color(0xFF0A0A0A),
+    textPrimary: Color(0xFF0A0A0A),
+    textSecondary: Color(0xFF5A5854),
+    textMuted: Color(0xFF9E9A94),
+  );
+
+  /// Line under Settings → background (Default varies by Julia / Leah / Silver).
+  static String chromeBackgroundKindDetail(
+    PlayerChromeBackgroundKind kind,
+    AppThemeSetting themeSetting,
+  ) {
+    if (kind != PlayerChromeBackgroundKind.themeDefault) {
+      return kind.subtitle;
+    }
+    return switch (themeSetting) {
+      AppThemeSetting.player =>
+        'In-house charcoal and surfaces tuned for Julia.',
+      AppThemeSetting.playerSoft =>
+        'In-house rose-blur look tuned for Leah.',
+      AppThemeSetting.silver =>
+        'In-house warm gray paper tuned for Silver.',
+      _ => kind.subtitle,
+    };
+  }
+
+  /// In-house “Default” background for each chrome theme palette.
+  static AppPalette _chromeThemeDefaultPalette(
+    AppThemePalette paletteKey,
+    AppPalette base,
+  ) {
+    return switch (paletteKey) {
+      AppThemePalette.player => AppPalette.player,
+      AppThemePalette.playerSoft => AppPalette.playerSoft,
+      AppThemePalette.silver => base.copyWith(
+        scaffoldBackground: const Color(0xFFC8C4BC),
+        surface: const Color(0xFFD5D1C8),
+        textPrimary: const Color(0xFF0A0A0A),
+        textSecondary: const Color(0xFF4A4844),
+        textMuted: const Color(0xFF7E7A74),
+        onScaffold: const Color(0xFF0A0A0A),
+      ),
+      _ => base,
+    };
+  }
+
   static AppPalette forPalette(AppThemePalette p) => switch (p) {
     AppThemePalette.light => AppPalette.light,
     AppThemePalette.dark => AppPalette.dark,
     AppThemePalette.grey => AppPalette.grey,
     AppThemePalette.player => AppPalette.player,
     AppThemePalette.playerSoft => AppPalette.playerSoft,
+    AppThemePalette.silver => AppPalette.silver,
   };
 
   /// Adjusts player / soft-blur palettes for background tone (not accent).
@@ -172,11 +232,24 @@ class AppPalette extends ThemeExtension<AppPalette> {
     Color? customScaffold,
   }) {
     if (paletteKey != AppThemePalette.player &&
-        paletteKey != AppThemePalette.playerSoft) {
+        paletteKey != AppThemePalette.playerSoft &&
+        paletteKey != AppThemePalette.silver) {
       return base;
     }
     switch (kind) {
+      case PlayerChromeBackgroundKind.themeDefault:
+        return _chromeThemeDefaultPalette(paletteKey, base);
       case PlayerChromeBackgroundKind.dark:
+        if (paletteKey == AppThemePalette.silver) {
+          return base.copyWith(
+            scaffoldBackground: const Color(0xFFD8D4CD),
+            surface: const Color(0xFFE0DDD6),
+            textPrimary: const Color(0xFF0A0A0A),
+            textSecondary: const Color(0xFF54524E),
+            textMuted: const Color(0xFF8A8680),
+            onScaffold: const Color(0xFF0A0A0A),
+          );
+        }
         return base;
       case PlayerChromeBackgroundKind.light:
         if (paletteKey == AppThemePalette.player) {
@@ -187,6 +260,16 @@ class AppPalette extends ThemeExtension<AppPalette> {
             textSecondary: const Color(0xFF5C6370),
             textMuted: const Color(0xFF7A8089),
             onScaffold: const Color(0xFF121212),
+          );
+        }
+        if (paletteKey == AppThemePalette.silver) {
+          return base.copyWith(
+            scaffoldBackground: const Color(0xFFEFEDE8),
+            surface: const Color(0xFFF7F5F1),
+            textPrimary: const Color(0xFF0A0A0A),
+            textSecondary: const Color(0xFF565450),
+            textMuted: const Color(0xFF9C9892),
+            onScaffold: const Color(0xFF0A0A0A),
           );
         }
         return base.copyWith(
@@ -324,7 +407,13 @@ extension AppThemeContext on BuildContext {
 
   bool get usesPlayerChrome =>
       appliedThemePalette == AppThemePalette.player ||
-      appliedThemePalette == AppThemePalette.playerSoft;
+      appliedThemePalette == AppThemePalette.playerSoft ||
+      appliedThemePalette == AppThemePalette.silver;
+
+  /// Leah- or Silver-style full-art Now Playing (not Julia).
+  bool get usesFullArtNowPlayingLayout =>
+      appliedThemePalette == AppThemePalette.playerSoft ||
+      appliedThemePalette == AppThemePalette.silver;
 }
 
 extension AppThemeSettingPreviewStripe on AppThemeSetting {
@@ -352,7 +441,8 @@ abstract final class AppTheme {
       AppThemePalette.dark => Brightness.dark,
       AppThemePalette.grey => Brightness.dark,
       AppThemePalette.player ||
-      AppThemePalette.playerSoft =>
+      AppThemePalette.playerSoft ||
+      AppThemePalette.silver =>
         ext.scaffoldBackground.computeLuminance() > 0.45
             ? Brightness.light
             : Brightness.dark,
@@ -368,9 +458,9 @@ abstract final class AppTheme {
     final ext = paletteOverride ?? AppPalette.forPalette(palette);
     final brightness = _brightnessFor(palette, ext);
 
-    final isPlayer =
-        palette == AppThemePalette.player ||
-        palette == AppThemePalette.playerSoft;
+    final isPlayer = palette == AppThemePalette.player ||
+        palette == AppThemePalette.playerSoft ||
+        palette == AppThemePalette.silver;
     final cardRadius = isPlayer ? 20.0 : 12.0;
     final buttonRadius = BorderRadius.circular(isPlayer ? 18 : 12);
 

@@ -34,7 +34,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   AppAccentColorOption _accentOption = AppAccentColorOption.blue;
   Color _customAccentColor = AppAccentColorOption.blue.swatchColor;
   PlayerChromeBackgroundKind _playerChromeBackgroundKind =
-      PlayerChromeBackgroundKind.dark;
+      PlayerChromeBackgroundKind.themeDefault;
   Color? _playerChromeCustomBackground;
   DateTime _themeClock = DateTime.now();
   Timer? _themeTimer;
@@ -194,7 +194,8 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   AppPalette _materialPaletteFor(AppThemePalette resolved) {
     var base = AppPalette.forPalette(resolved);
     if (resolved == AppThemePalette.player ||
-        resolved == AppThemePalette.playerSoft) {
+        resolved == AppThemePalette.playerSoft ||
+        resolved == AppThemePalette.silver) {
       base = AppPalette.applyPlayerChromeBackground(
         paletteKey: resolved,
         base: base,
@@ -245,7 +246,8 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
     final resolved = _themeSetting.paletteAt(_themeClock);
     final paletteOverride =
         (resolved == AppThemePalette.player ||
-            resolved == AppThemePalette.playerSoft)
+            resolved == AppThemePalette.playerSoft ||
+            resolved == AppThemePalette.silver)
         ? _materialPaletteFor(resolved)
         : null;
     var theme = AppTheme.themeFor(

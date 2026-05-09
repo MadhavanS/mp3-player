@@ -678,10 +678,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         if (widget.themeSetting == AppThemeSetting.player ||
-            widget.themeSetting == AppThemeSetting.playerSoft) ...[
+            widget.themeSetting == AppThemeSetting.playerSoft ||
+            widget.themeSetting == AppThemeSetting.silver) ...[
           const SizedBox(height: 20),
           Text(
-            'Julia & Leah background',
+            'Julia, Leah & Silver background',
             style: theme.textTheme.titleSmall?.copyWith(
               color: pal.onScaffold.withValues(alpha: 0.92),
               fontWeight: FontWeight.w600,
@@ -689,7 +690,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Applies to the whole app when Julia or Leah is selected. '
+            'Applies to the whole app when Julia, Leah, or Silver is selected. '
             'This is separate from accent color.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: pal.onScaffold.withValues(alpha: 0.65),
@@ -727,7 +728,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            widget.playerChromeBackgroundKind.subtitle,
+            AppPalette.chromeBackgroundKindDetail(
+              widget.playerChromeBackgroundKind,
+              widget.themeSetting,
+            ),
             style: theme.textTheme.bodySmall?.copyWith(
               color: pal.onScaffold.withValues(alpha: 0.65),
             ),

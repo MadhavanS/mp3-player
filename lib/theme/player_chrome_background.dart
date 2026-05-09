@@ -1,6 +1,9 @@
-/// Background tone for Julia ([AppThemePalette.player]) and Leah
-/// ([AppThemePalette.playerSoft]); separate from accent color.
+/// Background tone for Julia ([AppThemePalette.player]), Leah
+/// ([AppThemePalette.playerSoft]), and Silver ([AppThemePalette.silver]); separate
+/// from accent color.
 enum PlayerChromeBackgroundKind {
+  /// In-house palette tuned per theme (e.g. gray paper for Silver).
+  themeDefault,
   dark,
   light,
   grey,
@@ -8,6 +11,10 @@ enum PlayerChromeBackgroundKind {
 
   static PlayerChromeBackgroundKind parse(String? raw) {
     switch (raw) {
+      case 'themeDefault':
+        return PlayerChromeBackgroundKind.themeDefault;
+      case 'dark':
+        return PlayerChromeBackgroundKind.dark;
       case 'light':
         return PlayerChromeBackgroundKind.light;
       case 'grey':
@@ -15,11 +22,12 @@ enum PlayerChromeBackgroundKind {
       case 'custom':
         return PlayerChromeBackgroundKind.custom;
       default:
-        return PlayerChromeBackgroundKind.dark;
+        return PlayerChromeBackgroundKind.themeDefault;
     }
   }
 
   String get label => switch (this) {
+        PlayerChromeBackgroundKind.themeDefault => 'Default',
         PlayerChromeBackgroundKind.dark => 'Dark',
         PlayerChromeBackgroundKind.light => 'Light',
         PlayerChromeBackgroundKind.grey => 'Grey',
@@ -27,9 +35,12 @@ enum PlayerChromeBackgroundKind {
       };
 
   String get subtitle => switch (this) {
-        PlayerChromeBackgroundKind.dark => 'Default theme backgrounds',
+        PlayerChromeBackgroundKind.themeDefault =>
+          'Designed for the active theme (see hint below).',
+        PlayerChromeBackgroundKind.dark => 'Stronger contrast for this theme',
         PlayerChromeBackgroundKind.light => 'Bright surfaces and dark text',
         PlayerChromeBackgroundKind.grey => 'Neutral blue-grey surfaces',
-        PlayerChromeBackgroundKind.custom => 'Pick a background color for the app',
+        PlayerChromeBackgroundKind.custom =>
+          'Pick a background color for the app',
       };
 }
