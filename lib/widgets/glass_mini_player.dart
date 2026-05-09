@@ -82,7 +82,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
     final accent = context.controlAccent;
     final palette = context.appliedThemePalette;
     final daisy = context.appliedThemePalette == AppThemePalette.daisy;
-    final leah = palette == AppThemePalette.playerSoft;
+    final leah = palette == AppThemePalette.leah;
 
     final isDark = theme.brightness == Brightness.dark;
     final blurSigma = playerChrome ? 24.0 : 18.0;

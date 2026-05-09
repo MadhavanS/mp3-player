@@ -17,7 +17,7 @@ class DaisyBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.appliedThemePalette;
     final daisy = palette == AppThemePalette.daisy;
-    final leah = palette == AppThemePalette.playerSoft;
+    final leah = palette == AppThemePalette.leah;
     if (!daisy && !leah) {
       return ColoredBox(color: baseColor, child: child);
     }

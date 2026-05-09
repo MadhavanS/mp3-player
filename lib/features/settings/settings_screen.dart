@@ -679,8 +679,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: pal.onScaffold.withValues(alpha: 0.65),
           ),
         ),
-        if (widget.themeSetting == AppThemeSetting.player ||
-            widget.themeSetting == AppThemeSetting.playerSoft ||
+        if (widget.themeSetting == AppThemeSetting.julia ||
+            widget.themeSetting == AppThemeSetting.leah ||
             widget.themeSetting == AppThemeSetting.silver ||
             widget.themeSetting == AppThemeSetting.daisy) ...[
           const SizedBox(height: 20),

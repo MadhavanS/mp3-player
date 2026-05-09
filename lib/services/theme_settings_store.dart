@@ -19,10 +19,15 @@ abstract final class ThemeSettingsStore {
         return AppThemeSetting.dark;
       case 'grey':
         return AppThemeSetting.grey;
+      case 'julia':
+        return AppThemeSetting.julia;
+      case 'leah':
+        return AppThemeSetting.leah;
+      // Legacy persisted names (before enum rename).
       case 'player':
-        return AppThemeSetting.player;
+        return AppThemeSetting.julia;
       case 'playerSoft':
-        return AppThemeSetting.playerSoft;
+        return AppThemeSetting.leah;
       case 'silver':
         return AppThemeSetting.silver;
       case 'daisy':

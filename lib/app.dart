@@ -128,7 +128,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
       migratedPrefs = true;
     }
     if (s == AppThemeSetting.grey) {
-      s = AppThemeSetting.player;
+      s = AppThemeSetting.julia;
       chromeBgKind = PlayerChromeBackgroundKind.grey;
       migratedPrefs = true;
     }
@@ -193,8 +193,8 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
 
   AppPalette _materialPaletteFor(AppThemePalette resolved) {
     var base = AppPalette.forPalette(resolved);
-    if (resolved == AppThemePalette.player ||
-        resolved == AppThemePalette.playerSoft ||
+    if (resolved == AppThemePalette.julia ||
+        resolved == AppThemePalette.leah ||
         resolved == AppThemePalette.silver ||
         resolved == AppThemePalette.daisy) {
       base = AppPalette.applyPlayerChromeBackground(
@@ -247,8 +247,8 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   Widget build(BuildContext context) {
     final resolved = _themeSetting.paletteAt(_themeClock);
     final paletteOverride =
-        (resolved == AppThemePalette.player ||
-            resolved == AppThemePalette.playerSoft ||
+        (resolved == AppThemePalette.julia ||
+            resolved == AppThemePalette.leah ||
             resolved == AppThemePalette.silver ||
             resolved == AppThemePalette.daisy)
         ? _materialPaletteFor(resolved)

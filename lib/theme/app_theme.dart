@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'player_chrome_background.dart';
 
 /// Which palette is actually applied (after resolving [AppThemeSetting.automatic]).
-enum AppThemePalette { light, dark, grey, player, playerSoft, silver, daisy }
+enum AppThemePalette { light, dark, grey, julia, leah, silver, daisy }
 
 /// User-selectable appearance in Settings.
 ///
@@ -15,9 +15,9 @@ enum AppThemeSetting {
   grey,
 
   /// Charcoal surfaces, electric blue controls, mint secondary (Julia).
-  player,
+  julia,
   /// Soft full-art style (Leah).
-  playerSoft,
+  leah,
   /// Light paper-grey, monochrome full-art Now Playing (Silver).
   silver,
   /// Beige paper + grain inspired full-art player (Daisy).
@@ -28,8 +28,8 @@ enum AppThemeSetting {
 /// Theme options shown in Settings → Appearance (automatic, Julia, Leah, Silver).
 const List<AppThemeSetting> appearanceThemeChoices = <AppThemeSetting>[
   AppThemeSetting.automatic,
-  AppThemeSetting.player,
-  AppThemeSetting.playerSoft,
+  AppThemeSetting.julia,
+  AppThemeSetting.leah,
   AppThemeSetting.silver,
   AppThemeSetting.daisy,
 ];
@@ -44,10 +44,10 @@ extension AppThemeSettingResolve on AppThemeSetting {
         return AppThemePalette.dark;
       case AppThemeSetting.grey:
         return AppThemePalette.grey;
-      case AppThemeSetting.player:
-        return AppThemePalette.player;
-      case AppThemeSetting.playerSoft:
-        return AppThemePalette.playerSoft;
+      case AppThemeSetting.julia:
+        return AppThemePalette.julia;
+      case AppThemeSetting.leah:
+        return AppThemePalette.leah;
       case AppThemeSetting.silver:
         return AppThemePalette.silver;
       case AppThemeSetting.daisy:
@@ -64,8 +64,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
     AppThemeSetting.light => 'Light',
     AppThemeSetting.dark => 'Dark',
     AppThemeSetting.grey => 'Grey',
-    AppThemeSetting.player => 'Julia',
-    AppThemeSetting.playerSoft => 'Leah',
+    AppThemeSetting.julia => 'Julia',
+    AppThemeSetting.leah => 'Leah',
     AppThemeSetting.silver => 'Silver',
     AppThemeSetting.daisy => 'Daisy',
     AppThemeSetting.automatic => 'Automatic (by time)',
@@ -75,9 +75,9 @@ extension AppThemeSettingResolve on AppThemeSetting {
     AppThemeSetting.light => 'Navy header and white surfaces',
     AppThemeSetting.dark => 'Dim surfaces and cool accents',
     AppThemeSetting.grey => 'Neutral blue-grey tones',
-    AppThemeSetting.player =>
+    AppThemeSetting.julia =>
       'Charcoal background, electric blue accents, mint highlights',
-    AppThemeSetting.playerSoft =>
+    AppThemeSetting.leah =>
       'Rose blur background with soft white controls',
     AppThemeSetting.silver =>
       'Soft paper-grey surfaces and monochrome full-art player',
@@ -148,8 +148,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
     textMuted: Color(0xFF94A3B8),
   );
 
-  /// Inspired by dark music-player UIs: deep charcoal, electric blue, mint chips.
-  static const AppPalette player = AppPalette(
+  /// Inspired by dark music-player UIs: deep charcoal, electric blue, mint chips (Julia).
+  static const AppPalette julia = AppPalette(
     scaffoldBackground: Color(0xFF121212),
     surface: Color(0xFF1E1E1E),
     primary: Color(0xFF0B84FF),
@@ -160,8 +160,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
     textMuted: Color(0xFF8E8E93),
   );
 
-  /// Soft pink blur style inspired by classic full-art player screens.
-  static const AppPalette playerSoft = AppPalette(
+  /// Soft pink blur style inspired by classic full-art player screens (Leah).
+  static const AppPalette leah = AppPalette(
     scaffoldBackground: Color(0xFFF1E7DA),
     surface: Color(0xFFE8DCCE),
     primary: Color(0xFF2D241B),
@@ -205,9 +205,9 @@ class AppPalette extends ThemeExtension<AppPalette> {
       return kind.subtitle;
     }
     return switch (themeSetting) {
-      AppThemeSetting.player =>
+      AppThemeSetting.julia =>
         'Charcoal-inspired in-house scaffold and surfaces.',
-      AppThemeSetting.playerSoft =>
+      AppThemeSetting.leah =>
         'Soft rose-blur in-house scaffold and surfaces.',
       AppThemeSetting.silver =>
         'Warm gray paper in-house scaffold and surfaces.',
@@ -223,8 +223,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
     AppPalette base,
   ) {
     return switch (paletteKey) {
-      AppThemePalette.player => AppPalette.player,
-      AppThemePalette.playerSoft => AppPalette.playerSoft,
+      AppThemePalette.julia => AppPalette.julia,
+      AppThemePalette.leah => AppPalette.leah,
       AppThemePalette.silver => base.copyWith(
         scaffoldBackground: const Color(0xFFC8C4BC),
         surface: const Color(0xFFD5D1C8),
@@ -242,21 +242,21 @@ class AppPalette extends ThemeExtension<AppPalette> {
     AppThemePalette.light => AppPalette.light,
     AppThemePalette.dark => AppPalette.dark,
     AppThemePalette.grey => AppPalette.grey,
-    AppThemePalette.player => AppPalette.player,
-    AppThemePalette.playerSoft => AppPalette.playerSoft,
+    AppThemePalette.julia => AppPalette.julia,
+    AppThemePalette.leah => AppPalette.leah,
     AppThemePalette.silver => AppPalette.silver,
     AppThemePalette.daisy => AppPalette.daisy,
   };
 
-  /// Adjusts player / soft-blur palettes for background tone (not accent).
+  /// Adjusts Julia / Leah / Silver / Daisy palettes for background tone (not accent).
   static AppPalette applyPlayerChromeBackground({
     required AppThemePalette paletteKey,
     required AppPalette base,
     required PlayerChromeBackgroundKind kind,
     Color? customScaffold,
   }) {
-    if (paletteKey != AppThemePalette.player &&
-        paletteKey != AppThemePalette.playerSoft &&
+    if (paletteKey != AppThemePalette.julia &&
+        paletteKey != AppThemePalette.leah &&
         paletteKey != AppThemePalette.silver &&
         paletteKey != AppThemePalette.daisy) {
       return base;
@@ -287,7 +287,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
         }
         return base;
       case PlayerChromeBackgroundKind.light:
-        if (paletteKey == AppThemePalette.player) {
+        if (paletteKey == AppThemePalette.julia) {
           return base.copyWith(
             scaffoldBackground: const Color(0xFFE8EAEE),
             surface: const Color(0xFFFFFFFF),
@@ -451,14 +451,14 @@ extension AppThemeContext on BuildContext {
       AppThemePalette.dark;
 
   bool get usesPlayerChrome =>
-      appliedThemePalette == AppThemePalette.player ||
-      appliedThemePalette == AppThemePalette.playerSoft ||
+      appliedThemePalette == AppThemePalette.julia ||
+      appliedThemePalette == AppThemePalette.leah ||
       appliedThemePalette == AppThemePalette.silver ||
       appliedThemePalette == AppThemePalette.daisy;
 
   /// Leah- or Silver-style full-art Now Playing (not Julia).
   bool get usesFullArtNowPlayingLayout =>
-      appliedThemePalette == AppThemePalette.playerSoft ||
+      appliedThemePalette == AppThemePalette.leah ||
       appliedThemePalette == AppThemePalette.silver ||
       appliedThemePalette == AppThemePalette.daisy;
 }
@@ -487,8 +487,8 @@ abstract final class AppTheme {
       AppThemePalette.light => Brightness.light,
       AppThemePalette.dark => Brightness.dark,
       AppThemePalette.grey => Brightness.dark,
-      AppThemePalette.player ||
-      AppThemePalette.playerSoft ||
+      AppThemePalette.julia ||
+      AppThemePalette.leah ||
       AppThemePalette.silver ||
       AppThemePalette.daisy =>
         ext.scaffoldBackground.computeLuminance() > 0.45
@@ -506,13 +506,14 @@ abstract final class AppTheme {
     final ext = paletteOverride ?? AppPalette.forPalette(palette);
     final brightness = _brightnessFor(palette, ext);
 
-    final isPlayer = palette == AppThemePalette.player ||
-        palette == AppThemePalette.playerSoft ||
+    final isMusicChromePalette = palette == AppThemePalette.julia ||
+        palette == AppThemePalette.leah ||
         palette == AppThemePalette.silver ||
         palette == AppThemePalette.daisy;
     final isDaisy = palette == AppThemePalette.daisy;
-    final cardRadius = isPlayer ? 20.0 : 12.0;
-    final buttonRadius = BorderRadius.circular(isPlayer ? 18 : 12);
+    final cardRadius = isMusicChromePalette ? 20.0 : 12.0;
+    final buttonRadius =
+        BorderRadius.circular(isMusicChromePalette ? 18 : 12);
 
     return ThemeData(
       useMaterial3: true,
@@ -565,7 +566,7 @@ abstract final class AppTheme {
         inactiveTrackColor: ext.textMuted.withValues(alpha: 0.35),
         thumbColor: controlAccent,
         overlayColor: controlAccent.withValues(alpha: 0.12),
-        trackHeight: isPlayer ? 4 : 3,
+        trackHeight: isMusicChromePalette ? 4 : 3,
       ),
       tabBarTheme: TabBarThemeData(
         indicatorColor: ext.onScaffold,

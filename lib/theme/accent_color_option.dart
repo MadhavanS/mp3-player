@@ -49,8 +49,8 @@ enum AppAccentColorOption {
 extension AppAccentColorOptionResolve on AppAccentColorOption {
   static Color defaultColorForPalette(AppThemePalette palette) {
     return switch (palette) {
-      AppThemePalette.player => const Color(0xFF0B84FF),
-      AppThemePalette.playerSoft => const Color(0xFFEC4899),
+      AppThemePalette.julia => const Color(0xFF0B84FF),
+      AppThemePalette.leah => const Color(0xFFEC4899),
       AppThemePalette.silver => const Color(0xFFC8C8C8),
       AppThemePalette.daisy => const Color(0xFF151515),
       AppThemePalette.light => const Color(0xFF2563EB),

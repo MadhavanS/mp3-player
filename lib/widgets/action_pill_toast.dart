@@ -21,7 +21,7 @@ abstract final class ActionPillToast {
       return (bg: const Color(0xFFCAB89E), fg: const Color(0xFF0A0A0A));
     }
     final bg = context.controlAccent;
-    if (applied == AppThemePalette.playerSoft) {
+    if (applied == AppThemePalette.leah) {
       return (bg: bg, fg: const Color(0xFF0A0A0A));
     }
     final fg = bg.computeLuminance() > 0.45
@@ -33,7 +33,25 @@ abstract final class ActionPillToast {
   ActionPillToast._();
 
   /// Clears typical bottom bars (now playing tools row, collapsed-player strip) plus a gap.
+  /// Used for themes that do not use a tighter pill offset (see [_themeAwareBottomInset]).
   static const double _aboveBottomChrome = 88;
+
+  /// Same vertical offset as shuffle / repeat / favourite pills on Now Playing.
+  static double _themeAwareBottomInset(BuildContext context) {
+    switch (context.appliedThemePalette) {
+      case AppThemePalette.silver:
+        return 54;
+      case AppThemePalette.julia:
+        return 64;
+      case AppThemePalette.leah:
+        return 175;
+      case AppThemePalette.light:
+      case AppThemePalette.dark:
+      case AppThemePalette.grey:
+      case AppThemePalette.daisy:
+        return _aboveBottomChrome;
+    }
+  }
 
   static OverlayEntry? _current;
   static Timer? _dismissTimer;
@@ -87,7 +105,7 @@ abstract final class ActionPillToast {
       builder: (ctx) {
         final bottom =
             MediaQuery.viewPaddingOf(ctx).bottom +
-            (bottomInsetFromSafeArea ?? _aboveBottomChrome);
+            (bottomInsetFromSafeArea ?? _themeAwareBottomInset(context));
         final textStyle = themeData.textTheme.labelSmall?.copyWith(
           color: pillFg,
           fontWeight: FontWeight.w800,

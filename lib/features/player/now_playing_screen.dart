@@ -225,7 +225,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         player.shuffleEnabled ? 'Shuffle on' : 'Shuffle off',
         icon: Icons.shuffle_rounded,
         uppercaseLabel: true,
-        bottomInsetFromSafeArea: _pillBottomInsetForTheme(context),
       );
     });
   }
@@ -247,25 +246,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         msg,
         icon: icon,
         uppercaseLabel: true,
-        bottomInsetFromSafeArea: _pillBottomInsetForTheme(context),
       );
     });
-  }
-
-  double? _pillBottomInsetForTheme(BuildContext context) {
-    if (_isSilverNp(context)) {
-      // Silver now-playing: keep pill closer to the footer (lower position).
-      return 54;
-    }
-    if (context.appliedThemePalette == AppThemePalette.player) {
-      // Julia now-playing: place pill a bit lower.
-      return 64;
-    }
-    if (_isLeahNp(context)) {
-      // Leah now-playing requests pill between seek row and transport controls.
-      return 175;
-    }
-    return null;
   }
 
   Widget _favoriteButton(AppPalette pal, TrackItem cur) {
@@ -278,7 +260,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         final isFav = canFav && FavoriteSongsStore.isFavorite(path);
         final silver = _isSilverNp(context);
         final leah = _isLeahNp(context);
-        final julia = context.appliedThemePalette == AppThemePalette.player;
+        final julia = context.appliedThemePalette == AppThemePalette.julia;
         final favIcon = isFav
             ? (silver ? Icons.favorite : Icons.favorite_rounded)
             : (julia ? Icons.heart_broken : Icons.heart_broken_rounded);
@@ -336,7 +318,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         ? Icons.favorite_rounded
                         : Icons.favorite_border_rounded,
                     uppercaseLabel: true,
-                    bottomInsetFromSafeArea: _pillBottomInsetForTheme(context),
                   );
                 },
         );
@@ -356,7 +337,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         if (cur == null) return const SizedBox.shrink();
 
         final canEdit = cur.filePath != null && cur.filePath!.isNotEmpty;
-        final isJulia = context.appliedThemePalette == AppThemePalette.player;
+        final isJulia = context.appliedThemePalette == AppThemePalette.julia;
 
         final footerChrome = context.usesPlayerChrome;
         final navIconColor = footerChrome ? pal.onScaffold : pal.textPrimary;
@@ -548,7 +529,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       context.appliedThemePalette == AppThemePalette.silver;
 
   bool _isLeahNp(BuildContext context) =>
-      context.appliedThemePalette == AppThemePalette.playerSoft;
+      context.appliedThemePalette == AppThemePalette.leah;
 
   bool _isDaisyNp(BuildContext context) =>
       context.appliedThemePalette == AppThemePalette.daisy;
