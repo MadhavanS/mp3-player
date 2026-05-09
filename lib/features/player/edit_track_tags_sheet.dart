@@ -309,6 +309,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     setState(() => _saving = true);
 
     try {
+      final wasPlaying = player.isPlaying;
+      final resumePos = player.position;
+      final isCurrent = player.isCurrentTrackFilePath(path);
+      if (isCurrent) {
+        await player.stopForExternalFileEdit();
+      }
+
       var newPath = path;
       if (!tagOnlyFlow && suggestion.filenameChanged) {
         newPath = await renameMp3File(path, suggestion.newBasenameWithoutExt);
@@ -328,10 +335,21 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       final base = TrackItem.fromFilePath(newPath);
       final refreshed = await readAudioMetadata(base);
       if (!tagOnlyFlow && suggestion.filenameChanged) {
-        player.replaceTrackPath(path, refreshed);
+        player.replaceTrackPath(
+          path,
+          refreshed,
+          resumePosition: isCurrent ? resumePos : null,
+          resumePlaying: isCurrent ? wasPlaying : null,
+        );
         unawaited(SongMetadataCache.deletePaths([path]));
       } else {
         player.updateTrackByPath(path, refreshed);
+        if (isCurrent) {
+          await player.reloadCurrentSource(
+            initialPosition: resumePos,
+            resumePlaying: wasPlaying,
+          );
+        }
       }
       unawaited(SongMetadataCache.saveTracks([refreshed]));
 
@@ -405,6 +423,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
     setState(() => _saving = true);
     try {
+      final wasPlaying = player.isPlaying;
+      final resumePos = player.position;
+      final isCurrent = player.isCurrentTrackFilePath(path);
+      if (isCurrent) {
+        await player.stopForExternalFileEdit();
+      }
+
       final desiredBasename = sanitizeRenameBasename(_fileName.text);
       var targetPath = path;
       final currentBasename = p.basenameWithoutExtension(path);
@@ -425,10 +450,21 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         TrackItem.fromFilePath(targetPath),
       );
       if (targetPath != path) {
-        player.replaceTrackPath(path, refreshed);
+        player.replaceTrackPath(
+          path,
+          refreshed,
+          resumePosition: isCurrent ? resumePos : null,
+          resumePlaying: isCurrent ? wasPlaying : null,
+        );
         unawaited(SongMetadataCache.deletePaths([path]));
       } else {
         player.updateTrackByPath(path, refreshed);
+        if (isCurrent) {
+          await player.reloadCurrentSource(
+            initialPosition: resumePos,
+            resumePlaying: wasPlaying,
+          );
+        }
       }
       if (mounted) {
         Navigator.of(context).pop();

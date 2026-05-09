@@ -263,6 +263,10 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
       theme = theme.copyWith(
         textTheme: GoogleFonts.frauncesTextTheme(theme.textTheme),
       );
+    } else if (_fontOption == AppFontOption.eduNswActHandCursive) {
+      theme = theme.copyWith(
+        textTheme: GoogleFonts.eduNswActCursiveTextTheme(theme.textTheme),
+      );
     }
     return PlayerControllerScope(
       controller: _player,

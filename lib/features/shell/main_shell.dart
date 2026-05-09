@@ -346,7 +346,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         final partial = scanned
             .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
             .toList(growable: false);
-        player.setLibraryCatalog(partial);
+        player.setLibraryCatalog(
+          partial,
+          notify: CatalogNotifyMode.throttled,
+        );
       }
 
       if (!mounted) return;
@@ -401,7 +404,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           batchSize: 1,
           interBatchDelay: const Duration(milliseconds: 20),
           onTrackUpdated: (path, updated) {
-            player.updateTrackByPath(path, updated);
+            player.updateTrackByPath(
+              path,
+              updated,
+              notify: CatalogNotifyMode.throttled,
+            );
             unawaited(SongMetadataCache.saveTracks([updated]));
           },
         );
@@ -548,7 +555,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             enrichPlaylistTracks(
               tracks: tracks,
               onTrackUpdated: (path, updated) {
-                player.updateTrackByPath(path, updated);
+                player.updateTrackByPath(
+                  path,
+                  updated,
+                  notify: CatalogNotifyMode.throttled,
+                );
                 unawaited(SongMetadataCache.saveTracks([updated]));
               },
             ).catchError((Object e, StackTrace st) {
@@ -587,7 +598,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           enrichPlaylistTracks(
             tracks: tracks,
             onTrackUpdated: (path, updated) {
-              player.updateTrackByPath(path, updated);
+              player.updateTrackByPath(
+                path,
+                updated,
+                notify: CatalogNotifyMode.throttled,
+              );
               unawaited(SongMetadataCache.saveTracks([updated]));
             },
           ).catchError((Object e, StackTrace st) {
@@ -610,7 +625,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             enrichPlaylistTracks(
               tracks: tracks,
               onTrackUpdated: (path, updated) {
-                player.updateTrackByPath(path, updated);
+                player.updateTrackByPath(
+                  path,
+                  updated,
+                  notify: CatalogNotifyMode.throttled,
+                );
                 unawaited(SongMetadataCache.saveTracks([updated]));
               },
             ).catchError((Object e, StackTrace st) {
@@ -636,7 +655,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         enrichPlaylistTracks(
           tracks: tracks,
           onTrackUpdated: (path, updated) {
-            player.updateTrackByPath(path, updated);
+            player.updateTrackByPath(
+              path,
+              updated,
+              notify: CatalogNotifyMode.throttled,
+            );
             unawaited(SongMetadataCache.saveTracks([updated]));
           },
         ).catchError((Object e, StackTrace st) {

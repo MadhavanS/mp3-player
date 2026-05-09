@@ -3,7 +3,6 @@ import 'dart:ui' show ImageFilter, Paint, Radius, Rect, RRect;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
@@ -64,20 +63,6 @@ final class _SoftBlurSeekThumbShape extends SliderComponentShape {
     final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(0.5));
     context.canvas.drawRRect(rrect, Paint()..color = c);
   }
-}
-
-/// Fraunces typography for the soft-blur Now Playing layout.
-TextStyle _softBlurFraunces(
-  Color color, {
-  double fontSize = 20,
-  FontWeight fontWeight = FontWeight.w600,
-}) {
-  return GoogleFonts.fraunces(
-    fontSize: fontSize,
-    fontWeight: fontWeight,
-    color: color,
-    height: 1.25,
-  );
 }
 
 class NowPlayingScreen extends StatefulWidget {
@@ -568,6 +553,18 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   bool _isDaisyNp(BuildContext context) =>
       context.appliedThemePalette == AppThemePalette.daisy;
 
+  /// Daisy full-art controls sit on warm paper. Inactive toggles (shuffle/repeat
+  /// off) must read clearly softer than ink — blend toward [AppPalette.surface],
+  /// not only [textMuted], or they still look “on” in screenshots.
+  ({Color active, Color off, Color disabled}) _daisyNpIconStates(
+    AppPalette pal,
+  ) {
+    const active = Color(0xFF2B2117);
+    final off = Color.lerp(pal.textMuted, pal.surface, 0.46)!;
+    final disabled = Color.lerp(pal.textMuted, pal.surface, 0.72)!;
+    return (active: active, off: off, disabled: disabled);
+  }
+
   Color _fullArtSeekAccent(BuildContext context, AppPalette pal) {
     if (_isSilverNp(context)) return _kSilverInk;
     if (_isLeahNp(context)) return _kLeahPinkActive;
@@ -636,10 +633,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         letterSpacing: 0.2,
       );
     }
-    return _softBlurFraunces(
-      accent.withValues(alpha: 0.95),
+    return theme.textTheme.labelSmall!.copyWith(
+      color: accent.withValues(alpha: 0.95),
       fontSize: 12,
       fontWeight: FontWeight.w500,
+      height: 1.25,
     );
   }
 
@@ -664,10 +662,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         height: 1.25,
       );
     }
-    return _softBlurFraunces(
-      pal.onScaffold,
+    return theme.textTheme.headlineSmall!.copyWith(
+      color: pal.onScaffold,
       fontSize: 28,
       fontWeight: FontWeight.w700,
+      height: 1.25,
     );
   }
 
@@ -692,10 +691,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         fontSize: fontSize,
       );
     }
-    return _softBlurFraunces(
-      pal.onScaffold.withValues(alpha: onScaffoldAlpha),
+    return theme.textTheme.titleMedium!.copyWith(
+      color: pal.onScaffold.withValues(alpha: onScaffoldAlpha),
       fontSize: fontSize,
       fontWeight: FontWeight.w500,
+      height: 1.25,
     );
   }
 
@@ -1194,10 +1194,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               const SizedBox(width: 8),
               PopupMenuButton<String>(
                 tooltip: 'More',
-                icon: Icon(
-                  Icons.more_horiz_rounded,
-                  color: accent,
-                ),
+                icon: Icon(Icons.more_horiz_rounded, color: accent),
                 itemBuilder: (_) => _softBlurRestMenuEntries(track),
                 onSelected: (v) =>
                     unawaited(_onSoftBlurTailOverflowSelected(player, v)),
@@ -1218,15 +1215,17 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   final pos = posSnap.data ?? player.position;
                   final totalMs = dur?.inMilliseconds ?? 0;
                   final posMs = pos.inMilliseconds;
-                  final sliderValue = _dragPositionFraction ??
+                  final sliderValue =
+                      _dragPositionFraction ??
                       (totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0);
                   return Column(
                     children: [
                       SliderTheme(
                         data: SliderTheme.of(context).copyWith(
                           trackHeight: 2,
-                          thumbShape:
-                              const RoundSliderThumbShape(enabledThumbRadius: 5),
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 5,
+                          ),
                           overlayShape: SliderComponentShape.noOverlay,
                           activeTrackColor: accent,
                           inactiveTrackColor: accent.withValues(alpha: 0.35),
@@ -1241,7 +1240,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                           onChangeEnd: totalMs > 0
                               ? (v) {
                                   player.seek(
-                                    Duration(milliseconds: (v * totalMs).round()),
+                                    Duration(
+                                      milliseconds: (v * totalMs).round(),
+                                    ),
                                   );
                                   setState(() => _dragPositionFraction = null);
                                 }
@@ -1279,8 +1280,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
-  Widget _buildDaisyTransportRow(PlayerController player, double width) {
-    const icon = Color(0xFF2B2117);
+  Widget _buildDaisyTransportRow(
+    PlayerController player,
+    double width,
+    AppPalette pal,
+  ) {
+    final ink = _daisyNpIconStates(pal);
     return SizedBox(
       width: width,
       child: Row(
@@ -1289,19 +1294,21 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           IconButton(
             tooltip: 'Shuffle',
             iconSize: 26,
-            onPressed: player.playlist.length < 2 ? null : () => _notifyShuffle(player),
+            onPressed: player.playlist.length < 2
+                ? null
+                : () => _notifyShuffle(player),
             icon: Icon(
               Icons.shuffle_rounded,
               color: player.playlist.length < 2
-                  ? icon.withValues(alpha: 0.45)
-                  : (player.shuffleEnabled ? icon : icon.withValues(alpha: 0.7)),
+                  ? ink.disabled
+                  : (player.shuffleEnabled ? ink.active : ink.off),
             ),
           ),
           IconButton(
             tooltip: 'Previous track',
             iconSize: 34,
             onPressed: () => player.skipPrevious(),
-            icon: const Icon(Icons.skip_previous_rounded, color: icon),
+            icon: Icon(Icons.skip_previous_rounded, color: ink.active),
           ),
           ListenableBuilder(
             listenable: player,
@@ -1310,13 +1317,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               iconSize: 44,
               style: IconButton.styleFrom(
                 backgroundColor: const Color(0x00000000),
-                side: const BorderSide(color: icon, width: 1.2),
+                side: BorderSide(color: ink.active, width: 1.2),
                 fixedSize: const Size(84, 84),
               ),
               onPressed: () => player.togglePlayPause(),
               icon: Icon(
-                player.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                color: icon,
+                player.isPlaying
+                    ? Icons.pause_rounded
+                    : Icons.play_arrow_rounded,
+                color: ink.active,
               ),
             ),
           ),
@@ -1328,7 +1337,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               onPressed: player.canSkipNext ? () => player.skipNext() : null,
               icon: Icon(
                 Icons.skip_next_rounded,
-                color: player.canSkipNext ? icon : icon.withValues(alpha: 0.45),
+                color: player.canSkipNext ? ink.active : ink.disabled,
               ),
             ),
           ),
@@ -1341,8 +1350,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   ? Icons.repeat_one_rounded
                   : Icons.repeat_rounded,
               color: player.repeatMode == PlaylistRepeatMode.off
-                  ? icon.withValues(alpha: 0.7)
-                  : icon,
+                  ? ink.off
+                  : ink.active,
             ),
           ),
         ],
@@ -1358,8 +1367,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     required double width,
   }) {
     final canEdit = track.filePath != null && track.filePath!.isNotEmpty;
-    final enabledColor = const Color(0xFF2B2117);
-    final disabledColor = pal.textSecondary.withValues(alpha: 0.45);
+    final ink = _daisyNpIconStates(pal);
     return SizedBox(
       width: width,
       child: Row(
@@ -1370,7 +1378,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             iconSize: 28,
             icon: Icon(
               Icons.edit_note_rounded,
-              color: canEdit ? enabledColor : disabledColor,
+              color: canEdit ? ink.active : ink.disabled,
             ),
             onPressed: canEdit ? () => _openTagEditor(player) : null,
           ),
@@ -1380,7 +1388,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             iconSize: 28,
             icon: Icon(
               Icons.playlist_add_rounded,
-              color: canEdit ? enabledColor : disabledColor,
+              color: canEdit ? ink.active : ink.disabled,
             ),
             onPressed: canEdit
                 ? () {
@@ -1402,7 +1410,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             iconSize: 28,
             icon: Icon(
               Icons.auto_fix_high_outlined,
-              color: canEdit ? enabledColor : disabledColor,
+              color: canEdit ? ink.active : ink.disabled,
             ),
             onPressed: canEdit && !kIsWeb
                 ? () => showStandaloneSiteRenameDialog(context, track)
@@ -1835,7 +1843,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                     final artWidth = _fullArtHeroWidth(context);
                                     if (daisyNp) {
                                       final bottomInset =
-                                          MediaQuery.viewPaddingOf(context).bottom;
+                                          MediaQuery.viewPaddingOf(
+                                            context,
+                                          ).bottom;
                                       final t = player.currentTrack;
                                       return Padding(
                                         padding: const EdgeInsets.fromLTRB(
@@ -1850,6 +1860,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                             _buildDaisyTransportRow(
                                               player,
                                               artWidth,
+                                              pal,
                                             ),
                                             const SizedBox(height: 20),
                                             if (t != null)
@@ -1870,8 +1881,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                         context.appliedThemePalette ==
                                         AppThemePalette.silver;
                                     final bottomInset =
-                                        MediaQuery.viewPaddingOf(context)
-                                            .bottom;
+                                        MediaQuery.viewPaddingOf(
+                                          context,
+                                        ).bottom;
                                     return Padding(
                                       padding: const EdgeInsets.fromLTRB(
                                         24,
@@ -1891,9 +1903,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                             player: player,
                                             artWidth: artWidth,
                                           ),
-                                          SizedBox(
-                                            height: silverNp ? 10 : 16,
-                                          ),
+                                          SizedBox(height: silverNp ? 10 : 16),
                                           _buildSoftBlurVolumeBar(
                                             context,
                                             pal: pal,

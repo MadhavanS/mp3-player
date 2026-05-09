@@ -53,7 +53,7 @@ final class _GlassMiniPlayerThumbShape extends SliderComponentShape {
 /// Rebuilds art and title when [controller] notifies; position/duration via streams.
 /// Call only when [PlayerController.currentTrack] is non-null (parent may wrap with
 /// [SizedBox.shrink] when idle).
-class GlassMiniPlayer extends StatelessWidget {
+class GlassMiniPlayer extends StatefulWidget {
   const GlassMiniPlayer({
     super.key,
     required this.controller,
@@ -66,6 +66,13 @@ class GlassMiniPlayer extends StatelessWidget {
 
   /// Rounded top sheet radius; align with full-screen Now Playing for one continuous edge.
   final double topCornerRadius;
+
+  @override
+  State<GlassMiniPlayer> createState() => _GlassMiniPlayerState();
+}
+
+class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
+  double? _dragFraction;
 
   @override
   Widget build(BuildContext context) {
@@ -81,7 +88,7 @@ class GlassMiniPlayer extends StatelessWidget {
     final blurSigma = playerChrome ? 24.0 : 18.0;
 
     final borderRadius = BorderRadius.vertical(
-      top: Radius.circular(topCornerRadius),
+      top: Radius.circular(widget.topCornerRadius),
     );
 
     final borderColor = daisy
@@ -204,7 +211,7 @@ class GlassMiniPlayer extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                   InkWell(
-                    onTap: onTap,
+                    onTap: widget.onTap,
                     borderRadius: borderRadius.copyWith(
                       bottomLeft: Radius.zero,
                       bottomRight: Radius.zero,
@@ -218,9 +225,9 @@ class GlassMiniPlayer extends StatelessWidget {
                       child: Row(
                         children: [
                           ListenableBuilder(
-                            listenable: controller,
+                            listenable: widget.controller,
                             builder: (context, _) {
-                              final t = controller.currentTrack!;
+                              final t = widget.controller.currentTrack!;
                               return TrackAlbumArt(
                                 key: ValueKey<int>(Object.hash(
                                   t.filePath,
@@ -236,9 +243,9 @@ class GlassMiniPlayer extends StatelessWidget {
                           const SizedBox(width: 14),
                           Expanded(
                             child: ListenableBuilder(
-                              listenable: controller,
+                              listenable: widget.controller,
                               builder: (context, _) {
-                                final t = controller.currentTrack!;
+                                final t = widget.controller.currentTrack!;
                                 return Text(
                                   t.title,
                                   maxLines: 1,
@@ -265,12 +272,12 @@ class GlassMiniPlayer extends StatelessWidget {
                               size: 30,
                               semanticLabel: 'Previous track',
                             ),
-                            onPressed: () => controller.skipPrevious(),
+                            onPressed: () => widget.controller.skipPrevious(),
                           ),
                           ListenableBuilder(
-                            listenable: controller,
+                            listenable: widget.controller,
                             builder: (context, _) {
-                              final playing = controller.isPlaying;
+                              final playing = widget.controller.isPlaying;
                               return SizedBox(
                                 width: 48,
                                 height: 48,
@@ -280,7 +287,7 @@ class GlassMiniPlayer extends StatelessWidget {
                                   clipBehavior: Clip.antiAlias,
                                   child: InkWell(
                                     onTap: () =>
-                                        controller.togglePlayPause(),
+                                        widget.controller.togglePlayPause(),
                                     customBorder: const CircleBorder(),
                                     child: Icon(
                                       playing
@@ -298,9 +305,9 @@ class GlassMiniPlayer extends StatelessWidget {
                             },
                           ),
                           ListenableBuilder(
-                            listenable: controller,
+                            listenable: widget.controller,
                             builder: (context, _) {
-                              final canNext = controller.canSkipNext;
+                              final canNext = widget.controller.canSkipNext;
                               return IconButton(
                                 constraints: const BoxConstraints(
                                   minWidth: 44,
@@ -318,7 +325,7 @@ class GlassMiniPlayer extends StatelessWidget {
                                   semanticLabel: 'Next track',
                                 ),
                                 onPressed: canNext
-                                    ? () => controller.skipNext()
+                                    ? () => widget.controller.skipNext()
                                     : null,
                               );
                             },
@@ -330,19 +337,20 @@ class GlassMiniPlayer extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
                     child: StreamBuilder<Duration>(
-                      stream: controller.audioPlayer.positionStream,
+                      stream: widget.controller.audioPlayer.positionStream,
                       builder: (context, posSnap) {
                         return StreamBuilder<Duration?>(
-                          stream: controller.audioPlayer.durationStream,
+                          stream: widget.controller.audioPlayer.durationStream,
                           builder: (context, durSnap) {
-                            final dur = durSnap.data ?? controller.duration;
+                            final dur = durSnap.data ?? widget.controller.duration;
                             final pos =
-                                posSnap.data ?? controller.position;
+                                posSnap.data ?? widget.controller.position;
                             final total = dur?.inMilliseconds ?? 0;
-                            final p = total > 0
+                            final live = total > 0
                                 ? (pos.inMilliseconds / total)
                                     .clamp(0.0, 1.0)
                                 : 0.0;
+                            final p = (_dragFraction ?? live).clamp(0.0, 1.0);
 
                             return SliderTheme(
                               data: SliderThemeData(
@@ -368,14 +376,21 @@ class GlassMiniPlayer extends StatelessWidget {
                                 onChanged: total <= 0
                                     ? null
                                     : (v) {
-                                        controller.seek(
+                                        setState(() => _dragFraction = v);
+                                      },
+                                onChangeEnd: total <= 0
+                                    ? null
+                                    : (v) {
+                                        widget.controller.seek(
                                           Duration(
-                                            milliseconds:
-                                                (v * total)
-                                                    .round()
-                                                    .clamp(0, total),
+                                            milliseconds: (v * total)
+                                                .round()
+                                                .clamp(0, total),
                                           ),
                                         );
+                                        if (mounted) {
+                                          setState(() => _dragFraction = null);
+                                        }
                                       },
                               ),
                             );

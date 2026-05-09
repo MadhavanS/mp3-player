@@ -3,7 +3,9 @@ enum AppFontOption {
   roboto,
   serif,
   monospace,
-  fraunces;
+  fraunces,
+  /// Google Fonts: Edu NSW ACT Cursive (handwriting).
+  eduNswActHandCursive;
 
   static AppFontOption parse(String? raw) {
     switch (raw) {
@@ -17,6 +19,8 @@ enum AppFontOption {
         return AppFontOption.monospace;
       case 'fraunces':
         return AppFontOption.fraunces;
+      case 'eduNswActHandCursive':
+        return AppFontOption.eduNswActHandCursive;
       default:
         return AppFontOption.system;
     }
@@ -30,6 +34,7 @@ extension AppFontOptionPresentation on AppFontOption {
     AppFontOption.serif => 'Serif',
     AppFontOption.monospace => 'Monospace',
     AppFontOption.fraunces => 'Fraunces',
+    AppFontOption.eduNswActHandCursive => 'Edu NSW ACT Hand Cursive',
   };
 
   String get subtitle => switch (this) {
@@ -38,6 +43,8 @@ extension AppFontOptionPresentation on AppFontOption {
     AppFontOption.serif => 'Classic serif typography',
     AppFontOption.monospace => 'Fixed-width style',
     AppFontOption.fraunces => 'Google serif display font',
+    AppFontOption.eduNswActHandCursive =>
+      'NSW/ACT school handwriting (Google Fonts: Edu NSW ACT Cursive)',
   };
 
   String? get fontFamily => switch (this) {
@@ -46,5 +53,6 @@ extension AppFontOptionPresentation on AppFontOption {
     AppFontOption.serif => 'serif',
     AppFontOption.monospace => 'monospace',
     AppFontOption.fraunces => null,
+    AppFontOption.eduNswActHandCursive => null,
   };
 }

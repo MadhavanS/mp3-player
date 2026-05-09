@@ -157,6 +157,13 @@ Future<void> _applySiteRenameStandalone(
   final messenger = ScaffoldMessenger.maybeOf(context);
 
   try {
+    final wasPlaying = player.isPlaying;
+    final resumePos = player.position;
+    final isCurrent = player.isCurrentTrackFilePath(originalPath);
+    if (isCurrent) {
+      await player.stopForExternalFileEdit();
+    }
+
     var newPath = originalPath;
     if (suggestion.filenameChanged) {
       newPath = await renameMp3File(
@@ -177,10 +184,21 @@ Future<void> _applySiteRenameStandalone(
     final base = TrackItem.fromFilePath(newPath);
     final refreshed = await readAudioMetadata(base);
     if (suggestion.filenameChanged) {
-      player.replaceTrackPath(originalPath, refreshed);
+      player.replaceTrackPath(
+        originalPath,
+        refreshed,
+        resumePosition: isCurrent ? resumePos : null,
+        resumePlaying: isCurrent ? wasPlaying : null,
+      );
       unawaited(SongMetadataCache.deletePaths([originalPath]));
     } else {
       player.updateTrackByPath(originalPath, refreshed);
+      if (isCurrent) {
+        await player.reloadCurrentSource(
+          initialPosition: resumePos,
+          resumePlaying: wasPlaying,
+        );
+      }
     }
     unawaited(SongMetadataCache.saveTracks([refreshed]));
 

@@ -54,7 +54,22 @@ class LibraryScreenState extends State<LibraryScreen>
   List<LibraryTabId> _visibleTabs = List<LibraryTabId>.from(
     LibraryTabId.values,
   );
+  List<UserPlaylistEntry> _userPlaylists = const <UserPlaylistEntry>[];
+  bool _userPlaylistsLoading = true;
   int _recentListRevision = 0;
+
+  /// Stable [Future]s so parent rebuilds (e.g. [PlayerController]) do not reset
+  /// [FutureBuilder] to `waiting` and flash the loading indicator.
+  Future<List<String>>? _cachedFavouritePathsFuture;
+  int _cachedFavouritePathsRev = -1;
+
+  Future<List<String>>? _cachedRecentlyAddedPathsFuture;
+  int _cachedRecentlyAddedStoreRev = -1;
+  int _cachedRecentlyAddedTracksIdentity = -1;
+
+  Future<List<String>>? _cachedRecentlyPlayedPathsFuture;
+  int _cachedRecentlyPlayedStoreRev = -1;
+  int _cachedRecentlyPlayedTabRev = -1;
 
   final GlobalKey _scrollAnchorSongs = GlobalKey(debugLabel: 'libScrollSongs');
   final GlobalKey _scrollAnchorRecentAdded = GlobalKey(
@@ -86,6 +101,42 @@ class LibraryScreenState extends State<LibraryScreen>
     final t = raw.trim();
     if (t.length < _kLibrarySearchMinChars) return '';
     return t;
+  }
+
+  Future<List<String>> _favouritePathsFuture() {
+    final r = FavoriteSongsStore.revision.value;
+    if (_cachedFavouritePathsFuture == null || _cachedFavouritePathsRev != r) {
+      _cachedFavouritePathsRev = r;
+      _cachedFavouritePathsFuture = FavoriteSongsStore.loadPaths();
+    }
+    return _cachedFavouritePathsFuture!;
+  }
+
+  Future<List<String>> _recentlyAddedPathsFuture(List<TrackItem> tracks) {
+    final r = RecentlyAddedStore.revision.value;
+    final id = identityHashCode(tracks);
+    if (_cachedRecentlyAddedPathsFuture == null ||
+        _cachedRecentlyAddedStoreRev != r ||
+        _cachedRecentlyAddedTracksIdentity != id) {
+      _cachedRecentlyAddedStoreRev = r;
+      _cachedRecentlyAddedTracksIdentity = id;
+      _cachedRecentlyAddedPathsFuture =
+          RecentlyAddedStore.orderedPathsForLibrary(tracks);
+    }
+    return _cachedRecentlyAddedPathsFuture!;
+  }
+
+  Future<List<String>> _recentlyPlayedPathsFuture() {
+    final sr = RecentlyPlayedStore.revision.value;
+    final tr = _recentListRevision;
+    if (_cachedRecentlyPlayedPathsFuture == null ||
+        _cachedRecentlyPlayedStoreRev != sr ||
+        _cachedRecentlyPlayedTabRev != tr) {
+      _cachedRecentlyPlayedStoreRev = sr;
+      _cachedRecentlyPlayedTabRev = tr;
+      _cachedRecentlyPlayedPathsFuture = RecentlyPlayedStore.loadPaths();
+    }
+    return _cachedRecentlyPlayedPathsFuture!;
   }
 
   LibraryTrackSortMode _songSortMode = LibraryTrackSortMode.modifiedNewest;
@@ -140,9 +191,11 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabsStore.revision.addListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.addListener(_onSongSortStoreRevision);
     RecentListLimitsStore.revision.addListener(_onRecentLimitsRevision);
+    UserPlaylistsStore.revision.addListener(_onUserPlaylistsRevision);
     unawaited(FavoriteSongsStore.ensureLoaded());
     unawaited(_reloadSongSortMode());
     unawaited(_syncTabsFromStore());
+    unawaited(_reloadUserPlaylists());
   }
 
   Future<void> _syncTabsFromStore() async {
@@ -193,6 +246,19 @@ class LibraryScreenState extends State<LibraryScreen>
     setState(() => _recentListRevision++);
   }
 
+  void _onUserPlaylistsRevision() {
+    unawaited(_reloadUserPlaylists());
+  }
+
+  Future<void> _reloadUserPlaylists() async {
+    final all = await UserPlaylistsStore.loadAll();
+    if (!mounted) return;
+    setState(() {
+      _userPlaylists = all;
+      _userPlaylistsLoading = false;
+    });
+  }
+
   void _onTabChanged() {
     if (!mounted) return;
     if (_tabController.indexIsChanging) return;
@@ -219,6 +285,7 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabsStore.revision.removeListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.removeListener(_onSongSortStoreRevision);
     RecentListLimitsStore.revision.removeListener(_onRecentLimitsRevision);
+    UserPlaylistsStore.revision.removeListener(_onUserPlaylistsRevision);
     super.dispose();
   }
 
@@ -896,231 +963,193 @@ class LibraryScreenState extends State<LibraryScreen>
     List<TrackItem> tracks,
     PlayerController player,
   ) {
-    return ValueListenableBuilder<int>(
-      valueListenable: UserPlaylistsStore.revision,
-      builder: (context, _, __) {
-        return FutureBuilder<List<UserPlaylistEntry>>(
-          future: UserPlaylistsStore.loadAll(),
-          builder: (context, snap) {
-            final allPlaylists = snap.data ?? [];
-            final filteredPlaylists = _filterPlaylistsBySearch(
-              allPlaylists,
-              query,
-            );
+    final filteredPlaylists = _filterPlaylistsBySearch(_userPlaylists, query);
 
-            final curPath = player.currentTrack?.filePath;
-            final curKey = (curPath != null && curPath.isNotEmpty)
-                ? canonicalMusicLibraryPathKey(curPath)
-                : '';
+    final curPath = player.currentTrack?.filePath;
+    final curKey = (curPath != null && curPath.isNotEmpty)
+        ? canonicalMusicLibraryPathKey(curPath)
+        : '';
 
-            return ListView(
-              controller: _playlistScrollController,
-              padding: const EdgeInsets.only(bottom: 24),
-              children: [
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () async {
-                      await _showCreatePlaylistDialog(context);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              color: context.controlAccent.withValues(
-                                alpha: 0.18,
+    return ListView(
+      controller: _playlistScrollController,
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () async {
+              await _showCreatePlaylistDialog(context);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: context.controlAccent.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.add_rounded,
+                      color: context.controlAccent,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Create new playlist',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: pal.onScaffold,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Name a playlist, then add songs from any track menu.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: pal.textSecondary.withValues(alpha: 0.9),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: pal.onScaffold.withValues(alpha: 0.45),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Your playlists',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: pal.onScaffold.withValues(alpha: 0.75),
+                letterSpacing: 0.4,
+              ),
+            ),
+          ),
+        ),
+        if (_userPlaylistsLoading)
+          const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+            ),
+          )
+        else if (filteredPlaylists.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Text(
+              query.trim().isEmpty
+                  ? 'No saved playlists yet.'
+                  : 'No playlists match your search.',
+              style: theme.textTheme.bodyMedium?.copyWith(color: pal.textMuted),
+            ),
+          )
+        else
+          ...() {
+            var anchorIndex = -1;
+            if (_isActiveTab(LibraryTabId.playlist) && curKey.isNotEmpty) {
+              for (var j = 0; j < filteredPlaylists.length; j++) {
+                if (_userPlaylistContainsCurrentPath(
+                  filteredPlaylists[j],
+                  curKey,
+                )) {
+                  anchorIndex = j;
+                  break;
+                }
+              }
+            }
+            return List.generate(filteredPlaylists.length, (i) {
+              final pl = filteredPlaylists[i];
+              final attachScrollKey =
+                  _isActiveTab(LibraryTabId.playlist) && anchorIndex == i;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (i > 0)
+                    Divider(height: 1, color: pal.dividerOnHero, indent: 56),
+                  Material(
+                    key: attachScrollKey ? _scrollAnchorPlaylist : null,
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        _showUserPlaylistSheet(context, pl, tracks, player);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: pal.onScaffold.withValues(
+                                alpha: 0.1,
                               ),
-                              borderRadius: BorderRadius.circular(12),
+                              child: Icon(
+                                Icons.queue_music_rounded,
+                                color: pal.onScaffold.withValues(alpha: 0.75),
+                              ),
                             ),
-                            child: Icon(
-                              Icons.add_rounded,
-                              color: context.controlAccent,
-                              size: 28,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Create new playlist',
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    color: pal.onScaffold,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Name a playlist, then add songs from any track menu.',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: pal.textSecondary.withValues(
-                                      alpha: 0.9,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            color: pal.onScaffold.withValues(alpha: 0.45),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Your playlists',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: pal.onScaffold.withValues(alpha: 0.75),
-                        letterSpacing: 0.4,
-                      ),
-                    ),
-                  ),
-                ),
-                if (snap.connectionState != ConnectionState.done)
-                  const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Center(
-                      child: SizedBox(
-                        width: 28,
-                        height: 28,
-                        child: CircularProgressIndicator(strokeWidth: 2.5),
-                      ),
-                    ),
-                  )
-                else if (filteredPlaylists.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                    child: Text(
-                      query.trim().isEmpty
-                          ? 'No saved playlists yet.'
-                          : 'No playlists match your search.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: pal.textMuted,
-                      ),
-                    ),
-                  )
-                else
-                  ...() {
-                    var anchorIndex = -1;
-                    if (_isActiveTab(LibraryTabId.playlist) &&
-                        curKey.isNotEmpty) {
-                      for (var j = 0; j < filteredPlaylists.length; j++) {
-                        if (_userPlaylistContainsCurrentPath(
-                          filteredPlaylists[j],
-                          curKey,
-                        )) {
-                          anchorIndex = j;
-                          break;
-                        }
-                      }
-                    }
-                    return List.generate(filteredPlaylists.length, (i) {
-                      final pl = filteredPlaylists[i];
-                      final attachScrollKey =
-                          _isActiveTab(LibraryTabId.playlist) &&
-                          anchorIndex == i;
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (i > 0)
-                            Divider(
-                              height: 1,
-                              color: pal.dividerOnHero,
-                              indent: 56,
-                            ),
-                          Material(
-                            key: attachScrollKey ? _scrollAnchorPlaylist : null,
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: () {
-                                _showUserPlaylistSheet(
-                                  context,
-                                  pl,
-                                  tracks,
-                                  player,
-                                );
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                child: Row(
-                                  children: [
-                                    CircleAvatar(
-                                      backgroundColor: pal.onScaffold
-                                          .withValues(alpha: 0.1),
-                                      child: Icon(
-                                        Icons.queue_music_rounded,
-                                        color: pal.onScaffold.withValues(
-                                          alpha: 0.75,
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    pl.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                          color: pal.onScaffold,
+                                          fontSize: 15,
                                         ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${pl.paths.length} songs',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: pal.textMuted.withValues(
+                                        alpha: 0.92,
                                       ),
                                     ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            pl.name,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.titleMedium
-                                                ?.copyWith(
-                                                  color: pal.onScaffold,
-                                                  fontSize: 15,
-                                                ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            '${pl.paths.length} songs',
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color: pal.textMuted
-                                                      .withValues(alpha: 0.92),
-                                                ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Icon(
-                                      Icons.chevron_right_rounded,
-                                      color: pal.onScaffold.withValues(
-                                        alpha: 0.45,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                        ],
-                      );
-                    });
-                  }(),
-              ],
-            );
-          },
-        );
-      },
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              color: pal.onScaffold.withValues(alpha: 0.45),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            });
+          }(),
+      ],
     );
   }
 
@@ -1416,7 +1445,7 @@ class LibraryScreenState extends State<LibraryScreen>
       valueListenable: FavoriteSongsStore.revision,
       builder: (context, _, __) {
         return FutureBuilder<List<String>>(
-          future: FavoriteSongsStore.loadPaths(),
+          future: _favouritePathsFuture(),
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
               return Center(
@@ -1635,7 +1664,7 @@ class LibraryScreenState extends State<LibraryScreen>
       valueListenable: RecentlyAddedStore.revision,
       builder: (context, _, __) {
         return FutureBuilder<List<String>>(
-          future: RecentlyAddedStore.orderedPathsForLibrary(tracks),
+          future: _recentlyAddedPathsFuture(tracks),
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
               return Center(
@@ -1824,178 +1853,183 @@ class LibraryScreenState extends State<LibraryScreen>
     List<TrackItem> tracks,
     Set<String>? browsePathKeys,
   ) {
-    return FutureBuilder<List<String>>(
-      key: ValueKey(_recentListRevision),
-      future: RecentlyPlayedStore.loadPaths(),
-      builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return Center(
-            child: CircularProgressIndicator(color: context.controlAccent),
-          );
-        }
+    return ValueListenableBuilder<int>(
+      valueListenable: RecentlyPlayedStore.revision,
+      builder: (context, _, __) {
+        return FutureBuilder<List<String>>(
+          future: _recentlyPlayedPathsFuture(),
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return Center(
+                child: CircularProgressIndicator(color: context.controlAccent),
+              );
+            }
 
-        var paths = _pathsMatchingBrowse(snap.data ?? [], browsePathKeys);
-        paths = _filterPathsBySearch(paths, rawQuery, tracks);
+            var paths = _pathsMatchingBrowse(snap.data ?? [], browsePathKeys);
+            paths = _filterPathsBySearch(paths, rawQuery, tracks);
 
-        if ((snap.data ?? []).isEmpty) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.history_rounded,
-                    size: 54,
-                    color: pal.onScaffold.withValues(alpha: 0.45),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Nothing here yet',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: pal.onScaffold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Songs you play will appear in this list.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: pal.textSecondary.withValues(alpha: 0.9),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        if (paths.isEmpty) {
-          final hasBrowse = browsePathKeys != null;
-          final q = rawQuery.trim();
-          final message = hasBrowse && q.isEmpty
-              ? 'No RecentlyPlayed songs in this folder.'
-              : 'No RecentlyPlayed songs match your search.';
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(28),
-              child: Text(
-                message,
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: pal.textMuted,
-                ),
-              ),
-            ),
-          );
-        }
-
-        final library = player.metadataLibrary;
-        return ListView.separated(
-          controller: _recentPlayedScrollController,
-          padding: const EdgeInsets.only(bottom: 8),
-          itemCount: paths.length,
-          separatorBuilder: (_, __) =>
-              Divider(height: 1, color: pal.dividerOnHero, indent: 88),
-          itemBuilder: (context, i) {
-            final path = paths[i];
-            final track = _trackForPath(path, library);
-            final plIndex = _playlistIndexForPath(player, path);
-            final selected = _isCurrentTrackPath(player, path);
-            final attachScrollKey =
-                selected && _isActiveTab(LibraryTabId.recentlyPlayed);
-            return Material(
-              key: attachScrollKey ? _scrollAnchorRecentPlayed : null,
-              color: selected
-                  ? pal.onScaffold.withValues(alpha: 0.08)
-                  : Colors.transparent,
-              child: InkWell(
-                onTap: () => _playOrderedPathsFrom(
-                  context,
-                  paths,
-                  i,
-                  playbackOriginTab: LibraryTabId.recentlyPlayed,
-                ),
+            if ((snap.data ?? []).isEmpty) {
+              return Center(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      TrackAlbumArt(
-                        track: track,
-                        display: TrackArtDisplay.list,
+                      Icon(
+                        Icons.history_rounded,
+                        size: 54,
+                        color: pal.onScaffold.withValues(alpha: 0.45),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              track.genres.isEmpty
-                                  ? track.metaLine
-                                  : '${track.metaLine} · ${track.genres}',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: pal.textMuted.withValues(alpha: 0.9),
-                                fontSize: 10,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              track.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: pal.onScaffold,
-                                fontSize: 15,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              track.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: pal.textSecondary.withValues(
-                                  alpha: 0.95,
-                                ),
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
+                      const SizedBox(height: 14),
+                      Text(
+                        'Nothing here yet',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: pal.onScaffold,
                         ),
                       ),
-                      TrackOverflowMenuWithFavourite(
-                        pal: pal,
-                        track: track,
-                        onSelected: (action) {
-                          final resolvedTracks = paths
-                              .map((p) => _trackForPath(p, library))
-                              .toList();
-                          unawaited(
-                            _onTrackOverflow(
-                              context,
-                              player,
-                              plIndex >= 0 ? plIndex : -1,
-                              action,
-                              playbackOriginTab: LibraryTabId.recentlyPlayed,
-                              outsideQueue: plIndex < 0
-                                  ? TrackOverflowQueueContext(
-                                      tracks: resolvedTracks,
-                                      index: i,
-                                      playbackOriginTab:
-                                          LibraryTabId.recentlyPlayed,
-                                    )
-                                  : null,
-                            ),
-                          );
-                        },
+                      const SizedBox(height: 8),
+                      Text(
+                        'Songs you play will appear in this list.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: pal.textSecondary.withValues(alpha: 0.9),
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ),
+              );
+            }
+
+            if (paths.isEmpty) {
+              final hasBrowse = browsePathKeys != null;
+              final q = rawQuery.trim();
+              final message = hasBrowse && q.isEmpty
+                  ? 'No RecentlyPlayed songs in this folder.'
+                  : 'No RecentlyPlayed songs match your search.';
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Text(
+                    message,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: pal.textMuted,
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            final library = player.metadataLibrary;
+            return ListView.separated(
+              controller: _recentPlayedScrollController,
+              padding: const EdgeInsets.only(bottom: 8),
+              itemCount: paths.length,
+              separatorBuilder: (_, __) =>
+                  Divider(height: 1, color: pal.dividerOnHero, indent: 88),
+              itemBuilder: (context, i) {
+                final path = paths[i];
+                final track = _trackForPath(path, library);
+                final plIndex = _playlistIndexForPath(player, path);
+                final selected = _isCurrentTrackPath(player, path);
+                final attachScrollKey =
+                    selected && _isActiveTab(LibraryTabId.recentlyPlayed);
+                return Material(
+                  key: attachScrollKey ? _scrollAnchorRecentPlayed : null,
+                  color: selected
+                      ? pal.onScaffold.withValues(alpha: 0.08)
+                      : Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _playOrderedPathsFrom(
+                      context,
+                      paths,
+                      i,
+                      playbackOriginTab: LibraryTabId.recentlyPlayed,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          TrackAlbumArt(
+                            track: track,
+                            display: TrackArtDisplay.list,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  track.genres.isEmpty
+                                      ? track.metaLine
+                                      : '${track.metaLine} · ${track.genres}',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: pal.textMuted.withValues(alpha: 0.9),
+                                    fontSize: 10,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  track.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: pal.onScaffold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  track.artist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: pal.textSecondary.withValues(
+                                      alpha: 0.95,
+                                    ),
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TrackOverflowMenuWithFavourite(
+                            pal: pal,
+                            track: track,
+                            onSelected: (action) {
+                              final resolvedTracks = paths
+                                  .map((p) => _trackForPath(p, library))
+                                  .toList();
+                              unawaited(
+                                _onTrackOverflow(
+                                  context,
+                                  player,
+                                  plIndex >= 0 ? plIndex : -1,
+                                  action,
+                                  playbackOriginTab:
+                                      LibraryTabId.recentlyPlayed,
+                                  outsideQueue: plIndex < 0
+                                      ? TrackOverflowQueueContext(
+                                          tracks: resolvedTracks,
+                                          index: i,
+                                          playbackOriginTab:
+                                              LibraryTabId.recentlyPlayed,
+                                        )
+                                      : null,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             );
           },
         );

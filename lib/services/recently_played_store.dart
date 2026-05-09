@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'recent_list_limits_store.dart';
@@ -9,6 +10,9 @@ class RecentlyPlayedStore {
   RecentlyPlayedStore._();
 
   static const _key = 'recently_played_paths_v1';
+
+  /// Bumps when persisted recently-played list changes (Library tab refresh).
+  static final ValueNotifier<int> revision = ValueNotifier(0);
 
   static Future<List<String>> loadPaths() async {
     final prefs = await SharedPreferences.getInstance();
@@ -40,11 +44,13 @@ class RecentlyPlayedStore {
       list = list.sublist(0, limit);
     }
     await prefs.setString(_key, jsonEncode(list));
+    revision.value++;
   }
 
   static Future<void> trimToConfiguredLimit() async {
     final prefs = await SharedPreferences.getInstance();
     final list = await loadPaths();
     await prefs.setString(_key, jsonEncode(list));
+    revision.value++;
   }
 }

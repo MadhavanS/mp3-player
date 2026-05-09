@@ -13,6 +13,18 @@ import 'notification_art_uri.dart';
 
 enum PlaylistRepeatMode { off, all, one }
 
+/// How [PlayerController] notifies listeners after catalog or in-memory track updates.
+///
+/// Use [throttled] for high-frequency background work (disk sync, cover warmup) so
+/// Library / mini-player do not rebuild on every row.
+enum CatalogNotifyMode {
+  /// One [notifyListeners] immediately.
+  immediate,
+
+  /// At most one [notifyListeners] per ~200ms while updates keep arriving.
+  throttled,
+}
+
 /// Local playback + playlist index. Exposes [audioPlayer] for streams in the UI.
 class PlayerController extends ChangeNotifier {
   bool _isInterruptedAbort(Object error) {
@@ -32,13 +44,41 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  /// After [setAudioSource], lazy [ConcatenatingAudioSource] can still be
+  /// [ProcessingState.loading] when [_loadCurrent] returns — [play] then no-ops
+  /// or fails on some devices. Wait for [ProcessingState.ready] when needed.
+  Future<void> _resumePlaybackAfterLoad({
+    String context = 'resumeAfterLoad',
+  }) async {
+    try {
+      if (_player.processingState != ProcessingState.ready) {
+        await _player.processingStateStream
+            .where((s) => s == ProcessingState.ready)
+            .first
+            .timeout(const Duration(seconds: 8));
+      }
+    } catch (e, st) {
+      debugPrint('_resumePlaybackAfterLoad wait: $e\n$st');
+    }
+    await _playSafely(context: context);
+  }
+
   PlayerController() {
     // Single subscription: listening to [processingStateStream] and
     // [playerStateStream] both triggered platform init; concurrent inits caused
     // "Platform player … already exists" on some devices (just_audio / Android).
     _playerStateSub = _player.playerStateStream.listen((state) {
       _onProcessingState(state.processingState);
-      notifyListeners();
+      final playing = state.playing;
+      final proc = state.processingState;
+      if (!_playerUiDispatchInitialized ||
+          playing != _lastDispatchedPlaying ||
+          proc != _lastDispatchedProcessing) {
+        _playerUiDispatchInitialized = true;
+        _lastDispatchedPlaying = playing;
+        _lastDispatchedProcessing = proc;
+        notifyListeners();
+      }
     });
     _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
   }
@@ -65,6 +105,37 @@ class PlayerController extends ChangeNotifier {
   /// `playing` false briefly; UI uses [isPlaying] which ORs this in so play/pause
   /// doesn't flash (repeat never reloads the source, so it has no such gap).
   bool _retainPlayingUiForShuffleReload = false;
+
+  Timer? _catalogNotifyThrottleTimer;
+  bool _catalogNotifyThrottlePending = false;
+
+  /// Avoid rebuilding the whole app (Library lists, etc.) on every [playerStateStream]
+  /// tick — only notify when play/pause or processing state actually changes.
+  bool _playerUiDispatchInitialized = false;
+  bool _lastDispatchedPlaying = false;
+  ProcessingState _lastDispatchedProcessing = ProcessingState.idle;
+
+  void _notifyCatalogListeners(CatalogNotifyMode mode) {
+    switch (mode) {
+      case CatalogNotifyMode.immediate:
+        _catalogNotifyThrottleTimer?.cancel();
+        _catalogNotifyThrottleTimer = null;
+        _catalogNotifyThrottlePending = false;
+        notifyListeners();
+      case CatalogNotifyMode.throttled:
+        _catalogNotifyThrottlePending = true;
+        _catalogNotifyThrottleTimer ??= Timer(
+          const Duration(milliseconds: 200),
+          () {
+            _catalogNotifyThrottleTimer = null;
+            if (_catalogNotifyThrottlePending) {
+              _catalogNotifyThrottlePending = false;
+              notifyListeners();
+            }
+          },
+        );
+    }
+  }
 
   /// When non-null, [skipNext], [skipPrevious], [upcomingTrack], and repeat-all wrap
   /// only among tracks whose path key is in this set (same as Songs tab folder filter).
@@ -95,9 +166,12 @@ class PlayerController extends ChangeNotifier {
   String? get playbackOriginUserPlaylistId => _playbackOriginUserPlaylistId;
 
   /// Called after a folder scan with the complete track list.
-  void setLibraryCatalog(List<TrackItem> tracks) {
+  void setLibraryCatalog(
+    List<TrackItem> tracks, {
+    CatalogNotifyMode notify = CatalogNotifyMode.immediate,
+  }) {
     _libraryCatalog = List<TrackItem>.from(tracks);
-    notifyListeners();
+    _notifyCatalogListeners(notify);
   }
 
   void removeFromLibraryCatalogByPath(String path) {
@@ -382,10 +456,7 @@ class PlayerController extends ChangeNotifier {
     }
 
     notifyListeners();
-    await _loadCurrent(
-      initialPosition: resumePosition,
-      stopBeforeLoad: false,
-    );
+    await _loadCurrent(initialPosition: resumePosition, stopBeforeLoad: false);
     _sourceNeedsReload = false;
     if (resumePlaying) {
       await _playSafely(context: 'tryResyncQueueWithLibraryScan.play');
@@ -491,41 +562,65 @@ class PlayerController extends ChangeNotifier {
     await addToPlaylistIfAbsent(track);
   }
 
-  void updateTrackByPath(String path, TrackItem updated) {
+  void updateTrackByPath(
+    String path,
+    TrackItem updated, {
+    CatalogNotifyMode notify = CatalogNotifyMode.immediate,
+  }) {
+    final key = canonicalMusicLibraryPathKey(path);
+    if (key.isEmpty) return;
     var changed = false;
     for (var i = 0; i < _playlist.length; i++) {
-      if (_playlist[i].filePath == path) {
+      final fp = _playlist[i].filePath;
+      if (fp != null && canonicalMusicLibraryPathKey(fp) == key) {
         _playlist[i] = updated;
         changed = true;
       }
     }
     for (var c = 0; c < _libraryCatalog.length; c++) {
-      if (_libraryCatalog[c].filePath == path) {
+      final fp = _libraryCatalog[c].filePath;
+      if (fp != null && canonicalMusicLibraryPathKey(fp) == key) {
         _libraryCatalog[c] = updated;
         changed = true;
       }
     }
-    if (changed) notifyListeners();
+    if (changed) _notifyCatalogListeners(notify);
   }
 
   /// Replace the playlist entry for [oldPath] with [updated] (new path + tags).
   /// Reloads the audio source when the renamed file is currently playing.
-  void replaceTrackPath(String oldPath, TrackItem updated) {
+  ///
+  /// Callers that invoke [stopForExternalFileEdit] before this must pass
+  /// [resumePlaying] / [resumePosition] — after a stop, [isPlaying] and
+  /// [position] are no longer the pre-edit values.
+  void replaceTrackPath(
+    String oldPath,
+    TrackItem updated, {
+    Duration? resumePosition,
+    bool? resumePlaying,
+  }) {
     final currentPathBeforeReplace = currentTrack?.filePath;
-    final isCurrentTrackPathBeingReplaced = currentPathBeforeReplace == oldPath;
-    final resumePlayingAfterReload = isCurrentTrackPathBeingReplaced && isPlaying;
-    final resumePositionAfterReload = isCurrentTrackPathBeingReplaced
-        ? _player.position
-        : Duration.zero;
+    final isCurrentTrackPathBeingReplaced =
+        currentPathBeforeReplace != null &&
+        canonicalMusicLibraryPathKey(currentPathBeforeReplace) ==
+            canonicalMusicLibraryPathKey(oldPath);
+    final resumePlayingAfterReload =
+        resumePlaying ?? (isCurrentTrackPathBeingReplaced && _player.playing);
+    final resumePositionAfterReload =
+        resumePosition ??
+        (isCurrentTrackPathBeingReplaced ? _player.position : Duration.zero);
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
     var changed = false;
     for (var i = 0; i < _playlist.length; i++) {
-      if (_playlist[i].filePath == oldPath) {
+      final fp = _playlist[i].filePath;
+      if (fp != null && canonicalMusicLibraryPathKey(fp) == oldKey) {
         _playlist[i] = updated;
         changed = true;
       }
     }
     for (var c = 0; c < _libraryCatalog.length; c++) {
-      if (_libraryCatalog[c].filePath == oldPath) {
+      final fp = _libraryCatalog[c].filePath;
+      if (fp != null && canonicalMusicLibraryPathKey(fp) == oldKey) {
         _libraryCatalog[c] = updated;
         changed = true;
       }
@@ -542,25 +637,29 @@ class PlayerController extends ChangeNotifier {
         stopBeforeLoad: isCurrentTrackPathBeingReplaced,
       );
       if (resumePlayingAfterReload) {
-        await _playSafely(context: 'replaceTrackPath.resumePlay');
+        await _resumePlaybackAfterLoad(context: 'replaceTrackPath.resumePlay');
       }
     }());
   }
 
   bool _prunePlaylistPathsNotInCatalog() {
     if (_libraryCatalog.isEmpty || _playlist.isEmpty) return false;
-    final validPaths = _libraryCatalog
-        .map((t) => t.filePath)
-        .whereType<String>()
-        .where((p) => p.trim().isNotEmpty)
-        .toSet();
-    if (validPaths.isEmpty) return false;
+    final validKeys = <String>{};
+    for (final t in _libraryCatalog) {
+      final fp = t.filePath?.trim();
+      if (fp == null || fp.isEmpty) continue;
+      final k = canonicalMusicLibraryPathKey(fp);
+      if (k.isNotEmpty) validKeys.add(k);
+    }
+    if (validKeys.isEmpty) return false;
 
     final before = _playlist.length;
     _playlist.removeWhere((t) {
       final fp = t.filePath;
       if (fp == null || fp.trim().isEmpty) return true;
-      return !validPaths.contains(fp);
+      final k = canonicalMusicLibraryPathKey(fp);
+      if (k.isEmpty) return true;
+      return !validKeys.contains(k);
     });
     if (_playlist.length == before) return false;
 
@@ -821,9 +920,28 @@ class PlayerController extends ChangeNotifier {
     return changed;
   }
 
+  /// Whether [path] refers to the same file as the current queue item (normalized).
+  bool isCurrentTrackFilePath(String path) {
+    final cur = currentTrack?.filePath;
+    if (cur == null || cur.trim().isEmpty || path.trim().isEmpty) {
+      return false;
+    }
+    return canonicalMusicLibraryPathKey(cur) ==
+        canonicalMusicLibraryPathKey(path);
+  }
+
   /// Reload the current file from disk (e.g. after embedded tags were rewritten).
-  Future<void> reloadCurrentSource() async {
-    await _loadCurrent(initialPosition: _player.position);
+  ///
+  /// [initialPosition] defaults to the player’s current offset when omitted.
+  Future<void> reloadCurrentSource({
+    Duration? initialPosition,
+    bool resumePlaying = false,
+  }) async {
+    final pos = initialPosition ?? _player.position;
+    await _loadCurrent(initialPosition: pos);
+    if (resumePlaying) {
+      await _resumePlaybackAfterLoad(context: 'reloadCurrentSource.play');
+    }
   }
 
   /// Release the open audio file so another process (or this app) can rewrite it.
@@ -1140,6 +1258,9 @@ class PlayerController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _catalogNotifyThrottleTimer?.cancel();
+    _catalogNotifyThrottleTimer = null;
+    _catalogNotifyThrottlePending = false;
     _concatIndexSub?.cancel();
     _playerStateSub.cancel();
     unawaited(() async {
