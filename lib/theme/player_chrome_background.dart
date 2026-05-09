@@ -1,8 +1,6 @@
-/// Background tone for Julia ([AppThemePalette.player]), Leah
-/// ([AppThemePalette.playerSoft]), and Silver ([AppThemePalette.silver]); separate
-/// from accent color.
+/// Background tone for player-chrome palettes; separate from accent color.
 enum PlayerChromeBackgroundKind {
-  /// In-house palette tuned per theme (e.g. gray paper for Silver).
+  /// In-house palette tuned for the active chrome theme.
   themeDefault,
   dark,
   light,

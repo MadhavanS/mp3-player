@@ -176,7 +176,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     textMuted: Color(0xFF9E9A94),
   );
 
-  /// Line under Settings → background (Default varies by Julia / Leah / Silver).
+  /// Line under Settings → Background when “Default” is selected.
   static String chromeBackgroundKindDetail(
     PlayerChromeBackgroundKind kind,
     AppThemeSetting themeSetting,
@@ -186,11 +186,11 @@ class AppPalette extends ThemeExtension<AppPalette> {
     }
     return switch (themeSetting) {
       AppThemeSetting.player =>
-        'In-house charcoal and surfaces tuned for Julia.',
+        'Charcoal-inspired in-house scaffold and surfaces.',
       AppThemeSetting.playerSoft =>
-        'In-house rose-blur look tuned for Leah.',
+        'Soft rose-blur in-house scaffold and surfaces.',
       AppThemeSetting.silver =>
-        'In-house warm gray paper tuned for Silver.',
+        'Warm gray paper in-house scaffold and surfaces.',
       _ => kind.subtitle,
     };
   }

@@ -682,7 +682,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             widget.themeSetting == AppThemeSetting.silver) ...[
           const SizedBox(height: 20),
           Text(
-            'Julia, Leah & Silver background',
+            'Background',
             style: theme.textTheme.titleSmall?.copyWith(
               color: pal.onScaffold.withValues(alpha: 0.92),
               fontWeight: FontWeight.w600,
@@ -690,8 +690,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Applies to the whole app when Julia, Leah, or Silver is selected. '
-            'This is separate from accent color.',
+            'Applies across the whole app. Separate from accent color.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: pal.onScaffold.withValues(alpha: 0.65),
             ),
