@@ -29,6 +29,28 @@ import '../player/now_playing_screen.dart';
 import '../player/track_overflow_actions.dart';
 import '../settings/settings_screen.dart';
 
+/// After [appNavigatorKey] pops to the root route, applies Library › Songs (drawer, shell page, tab).
+class EscapeToSongsLibraryHub {
+  EscapeToSongsLibraryHub._();
+
+  static void Function()? _complete;
+
+  static void register(void Function() complete) => _complete = complete;
+
+  static void unregister() => _complete = null;
+
+  static void completeNavigationToSongs() => _complete?.call();
+}
+
+/// ESC: close pushed routes (Files, Now Playing, dialogs), then Library › Songs.
+void dispatchEscapeToSongsLibrary() {
+  final nav = appNavigatorKey.currentState;
+  if (nav != null && nav.canPop()) {
+    nav.popUntil((route) => route.isFirst);
+  }
+  EscapeToSongsLibraryHub.completeNavigationToSongs();
+}
+
 enum _ShellPage { library, settings }
 
 class MainShell extends StatefulWidget {
@@ -95,6 +117,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    EscapeToSongsLibraryHub.register(_onEscapeToSongsLibrary);
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_bootstrapShellAsync());
@@ -440,6 +463,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    EscapeToSongsLibraryHub.unregister();
     WidgetsBinding.instance.removeObserver(this);
     _idleRescanTimer?.cancel();
     _albumArtWarmupRetryTimer?.cancel();
@@ -742,6 +766,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     unawaited(PlaybackSessionStore.saveShellPageIsSettings(false));
   }
 
+  void _onEscapeToSongsLibrary() {
+    if (!mounted) return;
+    _scaffoldKey.currentState?.closeDrawer();
+    _goLibrary();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _libraryScreenKey.currentState?.switchToSongsTab();
+    });
+  }
+
   void _goSettings() {
     setState(() => _page = _ShellPage.settings);
     unawaited(PlaybackSessionStore.saveShellPageIsSettings(true));
@@ -821,6 +855,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         builder: (ctx) => LibraryFilesPage(
           musicRoots: _folderPaths,
           onOverflow: _onLibraryTrackOverflow,
+          onOpenNowPlaying: _openNowPlaying,
         ),
       ),
     );
