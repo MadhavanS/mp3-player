@@ -4,6 +4,7 @@ import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/daisy_background.dart';
+import '../player/mini_player_bar.dart';
 import '../player/track_overflow_actions.dart';
 import 'library_files_explorer.dart';
 
@@ -13,9 +14,13 @@ class LibraryFilesPage extends StatefulWidget {
     super.key,
     required this.musicRoots,
     required this.onOverflow,
+    required this.onOpenNowPlaying,
   });
 
   final List<String> musicRoots;
+
+  /// Same as shell mini player tap — opens full Now Playing.
+  final VoidCallback onOpenNowPlaying;
 
   final Future<void> Function(
     BuildContext context,
@@ -93,6 +98,7 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
     final theme = Theme.of(context);
     final pal = context.palette;
     final q = _searchController.text.trim();
+    final player = PlayerController.of(context);
 
     return Scaffold(
       backgroundColor: pal.scaffoldBackground,
@@ -139,6 +145,10 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
                   onOverflow: widget.onOverflow,
                   onSongChosenFromExplorer: _onSongChosenFromExplorer,
                 ),
+              ),
+              MiniPlayerBar(
+                controller: player,
+                onTap: widget.onOpenNowPlaying,
               ),
             ],
           ),

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart' show PlayerState;
 
@@ -51,9 +52,17 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_onGlobalHardwareKey);
     _player.addListener(_onPlayerControllerChanged);
     _attachAndroidWidgetProgressTicker();
     _loadTheme();
+  }
+
+  bool _onGlobalHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (event.logicalKey != LogicalKeyboardKey.escape) return false;
+    dispatchEscapeToSongsLibrary();
+    return true;
   }
 
   void _attachAndroidWidgetProgressTicker() {
@@ -234,6 +243,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onGlobalHardwareKey);
     _androidWidgetSyncDebounce?.cancel();
     _androidWidgetProgressTimer?.cancel();
     _androidWidgetPlayerStateSub?.cancel();
