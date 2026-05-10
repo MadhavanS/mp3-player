@@ -48,6 +48,8 @@ dependencies:
   isar: 4.0.0-dev.14
   isar_flutter_libs: 4.0.0-dev.14
   google_fonts: ^8.1.0
+  just_audio_windows: ^0.2.3
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:

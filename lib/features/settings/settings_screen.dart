@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../platform/windows_window.dart';
 import '../../services/library_tabs_store.dart';
 import '../../services/recent_list_limits_store.dart';
 import '../../services/recently_added_store.dart';
@@ -56,7 +59,7 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-enum _SettingsSection { menu, appearance, musicFolders, recentLists }
+enum _SettingsSection { menu, appearance, musicFolders, recentLists, windows }
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _busy = false;
@@ -66,6 +69,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _recentlyPlayedLimitController;
   int _recentlyAddedLimit = RecentListLimitsStore.defaultLimit;
   int _recentlyPlayedLimit = RecentListLimitsStore.defaultLimit;
+  bool _windowsAlwaysOnTop = false;
+  bool _windowsWindowPrefsLoaded = false;
+
+  static bool get _isWindowsDesktop =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
 
   @override
   void initState() {
@@ -74,6 +82,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _recentlyPlayedLimitController = TextEditingController();
     unawaited(_loadLibraryTabRows());
     unawaited(_loadRecentListLimits());
+    unawaited(_loadWindowsWindowPrefs());
+  }
+
+  Future<void> _loadWindowsWindowPrefs() async {
+    if (!_isWindowsDesktop) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _windowsAlwaysOnTop = prefs.getBool(kWindowsAlwaysOnTopPrefKey) ?? false;
+      _windowsWindowPrefsLoaded = true;
+    });
   }
 
   @override
@@ -491,6 +510,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: pal.textMuted.withValues(alpha: 0.75),
           ),
           onTap: () => _goToSection(_SettingsSection.recentLists),
+        ),
+        if (_isWindowsDesktop) ...[
+          Divider(height: 1, color: pal.dividerOnHero),
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(vertical: 6),
+            leading: Icon(
+              Icons.desktop_windows_outlined,
+              color: pal.onScaffold.withValues(alpha: 0.88),
+              size: 28,
+            ),
+            title: Text(
+              'Windows',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: pal.onScaffold,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            subtitle: Text(
+              'Always on top and window size',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: pal.textMuted.withValues(alpha: 0.95),
+              ),
+            ),
+            trailing: Icon(
+              Icons.chevron_right_rounded,
+              color: pal.textMuted.withValues(alpha: 0.75),
+            ),
+            onTap: () => _goToSection(_SettingsSection.windows),
+          ),
+        ],
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildWindowsDetail(ThemeData theme, AppPalette pal) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      children: [
+        Text(
+          'These options apply to the Windows desktop build only.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: pal.textSecondary.withValues(alpha: 0.95),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: Text(
+            'Always on top',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: pal.onScaffold,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            'Keep MP3 Player above other windows',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.textMuted.withValues(alpha: 0.95),
+            ),
+          ),
+          value: _windowsAlwaysOnTop,
+          onChanged: !_windowsWindowPrefsLoaded || _busy
+              ? null
+              : (v) {
+                  setState(() => _windowsAlwaysOnTop = v);
+                  unawaited(setWindowsAlwaysOnTop(v));
+                },
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'The app opens in a tall, narrow window by default (similar to a phone '
+          'in portrait). You can still resize it.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.92),
+          ),
         ),
         const SizedBox(height: 24),
       ],
@@ -1101,6 +1196,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.appearance => 'Appearance',
       _SettingsSection.musicFolders => 'Music folders',
       _SettingsSection.recentLists => 'Recent lists',
+      _SettingsSection.windows => 'Windows',
     };
 
     return DaisyBackground(
@@ -1127,6 +1223,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       theme,
                       pal,
                     ),
+                    _SettingsSection.windows => _buildWindowsDetail(theme, pal),
                   },
                 ),
               ],

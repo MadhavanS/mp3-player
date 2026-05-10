@@ -83,6 +83,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
     final palette = context.appliedThemePalette;
     final daisy = context.appliedThemePalette == AppThemePalette.daisy;
     final leah = palette == AppThemePalette.leah;
+    final silver = palette == AppThemePalette.silver;
 
     final isDark = theme.brightness == Brightness.dark;
     final blurSigma = playerChrome ? 24.0 : 18.0;
@@ -155,10 +156,19 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
         : isDark
         ? Colors.white.withValues(alpha: 0.28)
         : pal.textMuted.withValues(alpha: 0.32);
-    final playButtonBg = (daisy || leah) ? const Color(0xFF151515) : accent;
+    final playButtonBg = (daisy || leah)
+        ? const Color(0xFF151515)
+        : silver
+        ? Colors.white.withValues(alpha: 0.74)
+        : accent;
     final playButtonFg = (daisy || leah)
         ? const Color(0xFFF0E4D2)
+        : silver
+        ? Colors.black
         : Colors.white;
+    final playButtonShape = silver
+        ? const CircleBorder(side: BorderSide(color: Colors.black, width: 1.4))
+        : const CircleBorder();
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -283,7 +293,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                                 height: 48,
                                 child: Material(
                                   color: playButtonBg,
-                                  shape: const CircleBorder(),
+                                  shape: playButtonShape,
                                   clipBehavior: Clip.antiAlias,
                                   child: InkWell(
                                     onTap: () =>

@@ -472,6 +472,34 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     await _playFolderTracks(context, scanned: scanned);
   }
 
+  Widget _folderPlayButton(BuildContext context, String folderPath) {
+    final silver = context.appliedThemePalette == AppThemePalette.silver;
+    return IconButton(
+      tooltip: 'Play folder',
+      visualDensity: VisualDensity.compact,
+      icon: silver
+          ? Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.black, width: 1.4),
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.black,
+                size: 22,
+              ),
+            )
+          : Icon(
+              Icons.play_circle_fill_rounded,
+              color: context.controlAccent,
+              size: 28,
+            ),
+      onPressed: () => unawaited(_playFolderByPath(context, folderPath)),
+    );
+  }
+
   String _durationSuffix(PlayerController player, String filePath) {
     if (player.currentTrack?.filePath == filePath && player.duration != null) {
       return _fmt(player.duration!);
@@ -623,17 +651,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                             ],
                           ),
                         ),
-                        IconButton(
-                          tooltip: 'Play folder',
-                          visualDensity: VisualDensity.compact,
-                          icon: Icon(
-                            Icons.play_circle_fill_rounded,
-                            color: context.controlAccent,
-                            size: 28,
-                          ),
-                          onPressed: () =>
-                              unawaited(_playFolderByPath(context, r)),
-                        ),
+                        _folderPlayButton(context, r),
                       ],
                     ),
                   ),
@@ -776,18 +794,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                                         ],
                                       ),
                                     ),
-                                    IconButton(
-                                      tooltip: 'Play folder',
-                                      visualDensity: VisualDensity.compact,
-                                      icon: Icon(
-                                        Icons.play_circle_fill_rounded,
-                                        color: context.controlAccent,
-                                        size: 28,
-                                      ),
-                                      onPressed: () => unawaited(
-                                        _playFolderByPath(context, folderPath),
-                                      ),
-                                    ),
+                                    _folderPlayButton(context, folderPath),
                                   ],
                                 ),
                               ),

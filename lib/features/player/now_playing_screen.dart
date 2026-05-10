@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:ui' show ImageFilter, Paint, Radius, Rect, RRect;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
@@ -86,6 +88,23 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 
   void _resetPullDismiss() => _pullDismissPx = 0;
+
+  bool get _desktopNowPlayingEscDismiss =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.macOS);
+
+  /// Desktop has no system back gesture; offer Escape like many full-screen UIs.
+  Widget _wrapDesktopEscDismiss({required Widget child}) {
+    if (!_desktopNowPlayingEscDismiss) return child;
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): _safeCollapse,
+      },
+      child: Focus(autofocus: true, child: child),
+    );
+  }
 
   void _onPullDownUpdate(double deltaDown) {
     if (deltaDown <= 0) return;
@@ -707,8 +726,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   child: StreamBuilder<double>(
-                    stream: player.audioPlayer.volumeStream,
-                    initialData: player.audioPlayer.volume,
+                    stream: player.volumeStream,
+                    initialData: player.volume,
                     builder: (context, snap) {
                       final v = (snap.data ?? 1.0).clamp(0.0, 1.0);
                       return _softBlurSeekSliderTheme(
@@ -718,8 +737,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         child: Slider(
                           padding: EdgeInsets.zero,
                           value: v,
-                          onChanged: (nv) =>
-                              unawaited(player.audioPlayer.setVolume(nv)),
+                          onChanged: (nv) => unawaited(player.setVolume(nv)),
                         ),
                       );
                     },
@@ -1349,53 +1367,70 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }) {
     final canEdit = track.filePath != null && track.filePath!.isNotEmpty;
     final ink = _daisyNpIconStates(pal);
+    // Left column lines up with the shuffle control above (same bar width).
     return SizedBox(
       width: width,
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           IconButton(
-            tooltip: 'Edit tags & cover',
-            iconSize: 28,
+            tooltip: 'Back to library',
+            iconSize: 30,
+            onPressed: _safeCollapse,
             icon: Icon(
-              Icons.edit_note_rounded,
-              color: canEdit ? ink.active : ink.disabled,
+              Icons.chevron_left_rounded,
+              color: ink.active,
             ),
-            onPressed: canEdit ? () => _openTagEditor(player) : null,
           ),
-          const SizedBox(width: 10),
-          IconButton(
-            tooltip: 'Add to playlist',
-            iconSize: 28,
-            icon: Icon(
-              Icons.playlist_add_rounded,
-              color: canEdit ? ink.active : ink.disabled,
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: 'Edit tags & cover',
+                  iconSize: 28,
+                  icon: Icon(
+                    Icons.edit_note_rounded,
+                    color: canEdit ? ink.active : ink.disabled,
+                  ),
+                  onPressed: canEdit ? () => _openTagEditor(player) : null,
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  tooltip: 'Add to playlist',
+                  iconSize: 28,
+                  icon: Icon(
+                    Icons.playlist_add_rounded,
+                    color: canEdit ? ink.active : ink.disabled,
+                  ),
+                  onPressed: canEdit
+                      ? () {
+                          unawaited(
+                            applyTrackOverflowAction(
+                              context,
+                              player,
+                              player.currentIndex,
+                              TrackOverflowAction.addToPlaylist,
+                              playbackOriginTab: player.playbackOriginTab,
+                            ),
+                          );
+                        }
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  tooltip: 'Auto update tags',
+                  iconSize: 28,
+                  icon: Icon(
+                    Icons.auto_fix_high_outlined,
+                    color: canEdit ? ink.active : ink.disabled,
+                  ),
+                  onPressed: canEdit && !kIsWeb
+                      ? () => showStandaloneSiteRenameDialog(context, track)
+                      : null,
+                ),
+              ],
             ),
-            onPressed: canEdit
-                ? () {
-                    unawaited(
-                      applyTrackOverflowAction(
-                        context,
-                        player,
-                        player.currentIndex,
-                        TrackOverflowAction.addToPlaylist,
-                        playbackOriginTab: player.playbackOriginTab,
-                      ),
-                    );
-                  }
-                : null,
-          ),
-          const SizedBox(width: 10),
-          IconButton(
-            tooltip: 'Auto update tags',
-            iconSize: 28,
-            icon: Icon(
-              Icons.auto_fix_high_outlined,
-              color: canEdit ? ink.active : ink.disabled,
-            ),
-            onPressed: canEdit && !kIsWeb
-                ? () => showStandaloneSiteRenameDialog(context, track)
-                : null,
           ),
         ],
       ),
@@ -1430,404 +1465,463 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           ),
           child: Scaffold(
             backgroundColor: pageBg,
-            body: SafeArea(
-              bottom: false,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: DaisyBackground(
-                      baseColor: pageBg,
-                      child: NotificationListener<ScrollNotification>(
-                        onNotification: _onScrollForDismiss,
-                        child: CustomScrollView(
-                          physics: const AlwaysScrollableScrollPhysics(
-                            parent: BouncingScrollPhysics(),
-                          ),
-                          slivers: [
-                            SliverPadding(
-                              padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-                              sliver: SliverToBoxAdapter(
-                                child: ListenableBuilder(
-                                  listenable: player,
-                                  builder: (context, _) {
-                                    final t = player.currentTrack;
-                                    if (t == null) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    if (daisyNp) {
-                                      return _buildDaisyTopSection(
-                                        context,
-                                        theme: theme,
-                                        pal: pal,
-                                        player: player,
-                                        track: t,
-                                      );
-                                    }
-                                    if (fullArtNp) {
-                                      return _buildSoftBlurTopSection(
-                                        context,
-                                        theme: theme,
-                                        pal: pal,
-                                        player: player,
-                                        track: t,
-                                      );
-                                    }
-                                    return Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.center,
-                                      children: [
-                                        Center(
-                                          child: _NowPlayingAlbumArtCard(
-                                            playerChrome: playerChrome,
-                                            theme: theme,
-                                            track: t,
-                                            artwork: TrackAlbumArt(
+            body: _wrapDesktopEscDismiss(
+              child: SafeArea(
+                bottom: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: DaisyBackground(
+                        baseColor: pageBg,
+                        child: NotificationListener<ScrollNotification>(
+                          onNotification: _onScrollForDismiss,
+                          child: CustomScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(
+                              parent: BouncingScrollPhysics(),
+                            ),
+                            slivers: [
+                              SliverPadding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  24,
+                                  16,
+                                  24,
+                                  0,
+                                ),
+                                sliver: SliverToBoxAdapter(
+                                  child: ListenableBuilder(
+                                    listenable: player,
+                                    builder: (context, _) {
+                                      final t = player.currentTrack;
+                                      if (t == null) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      if (daisyNp) {
+                                        return _buildDaisyTopSection(
+                                          context,
+                                          theme: theme,
+                                          pal: pal,
+                                          player: player,
+                                          track: t,
+                                        );
+                                      }
+                                      if (fullArtNp) {
+                                        return _buildSoftBlurTopSection(
+                                          context,
+                                          theme: theme,
+                                          pal: pal,
+                                          player: player,
+                                          track: t,
+                                        );
+                                      }
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          Center(
+                                            child: _NowPlayingAlbumArtCard(
+                                              playerChrome: playerChrome,
+                                              theme: theme,
                                               track: t,
-                                              display:
-                                                  TrackArtDisplay.nowPlaying,
-                                              showShadow: false,
+                                              artwork: TrackAlbumArt(
+                                                track: t,
+                                                display:
+                                                    TrackArtDisplay.nowPlaying,
+                                                showShadow: false,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                        const SizedBox(height: 16),
-                                        StreamBuilder<Duration>(
-                                          stream:
-                                              player.audioPlayer.positionStream,
-                                          builder: (context, posSnap) {
-                                            return StreamBuilder<Duration?>(
-                                              stream: player
-                                                  .audioPlayer
-                                                  .durationStream,
-                                              builder: (context, durSnap) {
-                                                final dur =
-                                                    durSnap.data ??
-                                                    player.duration;
-                                                final pos =
-                                                    posSnap.data ??
-                                                    player.position;
-                                                final totalMs =
-                                                    dur?.inMilliseconds ?? 0;
-                                                final posMs =
-                                                    pos.inMilliseconds;
-                                                final sliderValue =
-                                                    _dragPositionFraction ??
-                                                    (totalMs > 0
-                                                        ? (posMs / totalMs)
-                                                              .clamp(0.0, 1.0)
-                                                        : 0.0);
+                                          const SizedBox(height: 16),
+                                          StreamBuilder<Duration>(
+                                            stream: player
+                                                .audioPlayer
+                                                .positionStream,
+                                            builder: (context, posSnap) {
+                                              return StreamBuilder<Duration?>(
+                                                stream: player
+                                                    .audioPlayer
+                                                    .durationStream,
+                                                builder: (context, durSnap) {
+                                                  final dur =
+                                                      durSnap.data ??
+                                                      player.duration;
+                                                  final pos =
+                                                      posSnap.data ??
+                                                      player.position;
+                                                  final totalMs =
+                                                      dur?.inMilliseconds ?? 0;
+                                                  final posMs =
+                                                      pos.inMilliseconds;
+                                                  final sliderValue =
+                                                      _dragPositionFraction ??
+                                                      (totalMs > 0
+                                                          ? (posMs / totalMs)
+                                                                .clamp(0.0, 1.0)
+                                                          : 0.0);
 
-                                                return Row(
-                                                  children: [
-                                                    Text(
-                                                      _formatDuration(pos),
-                                                      style: theme
-                                                          .textTheme
-                                                          .labelSmall,
-                                                    ),
-                                                    Expanded(
-                                                      child: Slider(
-                                                        value: sliderValue
-                                                            .clamp(0.0, 1.0),
-                                                        onChanged: totalMs > 0
-                                                            ? (v) => setState(
-                                                                () =>
-                                                                    _dragPositionFraction =
-                                                                        v,
-                                                              )
-                                                            : null,
-                                                        onChangeEnd: totalMs > 0
-                                                            ? (v) {
-                                                                player.seek(
-                                                                  Duration(
-                                                                    milliseconds:
-                                                                        (v * totalMs)
-                                                                            .round(),
-                                                                  ),
-                                                                );
-                                                                setState(
+                                                  return Row(
+                                                    children: [
+                                                      Text(
+                                                        _formatDuration(pos),
+                                                        style: theme
+                                                            .textTheme
+                                                            .labelSmall,
+                                                      ),
+                                                      Expanded(
+                                                        child: Slider(
+                                                          value: sliderValue
+                                                              .clamp(0.0, 1.0),
+                                                          onChanged: totalMs > 0
+                                                              ? (v) => setState(
                                                                   () =>
                                                                       _dragPositionFraction =
-                                                                          null,
-                                                                );
-                                                              }
-                                                            : null,
+                                                                          v,
+                                                                )
+                                                              : null,
+                                                          onChangeEnd:
+                                                              totalMs > 0
+                                                              ? (v) {
+                                                                  player.seek(
+                                                                    Duration(
+                                                                      milliseconds:
+                                                                          (v * totalMs)
+                                                                              .round(),
+                                                                    ),
+                                                                  );
+                                                                  setState(
+                                                                    () =>
+                                                                        _dragPositionFraction =
+                                                                            null,
+                                                                  );
+                                                                }
+                                                              : null,
+                                                        ),
                                                       ),
-                                                    ),
-                                                    Text(
-                                                      dur != null
-                                                          ? _formatDuration(dur)
-                                                          : '--:--',
-                                                      style: theme
-                                                          .textTheme
-                                                          .labelSmall,
-                                                    ),
-                                                  ],
-                                                );
-                                              },
-                                            );
-                                          },
-                                        ),
-                                        const SizedBox(height: 12),
-                                        if (playerChrome)
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              IconButton(
-                                                tooltip: 'Shuffle',
-                                                icon: Icon(
-                                                  Icons.shuffle_rounded,
-                                                  color: player.shuffleEnabled
-                                                      ? context.controlAccent
-                                                      : pal.textSecondary
-                                                            .withValues(
-                                                              alpha: 0.55,
-                                                            ),
-                                                ),
-                                                onPressed:
-                                                    player.playlist.length < 2
-                                                    ? null
-                                                    : () => _notifyShuffle(
-                                                        player,
+                                                      Text(
+                                                        dur != null
+                                                            ? _formatDuration(
+                                                                dur,
+                                                              )
+                                                            : '--:--',
+                                                        style: theme
+                                                            .textTheme
+                                                            .labelSmall,
                                                       ),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              IconButton(
-                                                iconSize: 36,
-                                                icon: const Icon(
-                                                  Icons.skip_previous_rounded,
-                                                ),
-                                                color: pal.textPrimary,
-                                                onPressed: () =>
-                                                    player.skipPrevious(),
-                                              ),
-                                              const SizedBox(width: 16),
-                                              ListenableBuilder(
-                                                listenable: player,
-                                                builder: (context, _) {
-                                                  final playing =
-                                                      player.isPlaying;
-                                                  return IconButton.filled(
-                                                    tooltip: playing
-                                                        ? 'Pause'
-                                                        : 'Play',
-                                                    iconSize: 36,
-                                                    style: IconButton.styleFrom(
-                                                      backgroundColor:
-                                                          context.controlAccent,
-                                                      foregroundColor:
-                                                          Colors.white,
-                                                      fixedSize: const Size(
-                                                        76,
-                                                        76,
-                                                      ),
-                                                    ),
-                                                    onPressed: () => player
-                                                        .togglePlayPause(),
-                                                    icon: Icon(
-                                                      playing
-                                                          ? Icons.pause_rounded
-                                                          : Icons
-                                                                .play_arrow_rounded,
-                                                    ),
+                                                    ],
                                                   );
                                                 },
-                                              ),
-                                              const SizedBox(width: 16),
-                                              ListenableBuilder(
-                                                listenable: player,
-                                                builder: (context, _) {
-                                                  final canNext =
-                                                      player.canSkipNext;
-                                                  return IconButton(
-                                                    tooltip: canNext
-                                                        ? 'Next track'
-                                                        : 'End of playlist',
-                                                    iconSize: 36,
-                                                    icon: const Icon(
-                                                      Icons.skip_next_rounded,
-                                                    ),
-                                                    color: canNext
-                                                        ? pal.textPrimary
+                                              );
+                                            },
+                                          ),
+                                          const SizedBox(height: 12),
+                                          if (playerChrome)
+                                            Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                IconButton(
+                                                  tooltip: 'Shuffle',
+                                                  icon: Icon(
+                                                    Icons.shuffle_rounded,
+                                                    color: player.shuffleEnabled
+                                                        ? context.controlAccent
                                                         : pal.textSecondary
                                                               .withValues(
-                                                                alpha: 0.38,
+                                                                alpha: 0.55,
                                                               ),
-                                                    onPressed: canNext
-                                                        ? () =>
-                                                              player.skipNext()
-                                                        : null,
-                                                  );
-                                                },
-                                              ),
-                                              const SizedBox(width: 4),
-                                              IconButton(
-                                                tooltip: 'Repeat mode',
-                                                icon: Icon(
-                                                  player.repeatMode ==
-                                                          PlaylistRepeatMode.one
-                                                      ? Icons.repeat_one_rounded
-                                                      : Icons.repeat_rounded,
-                                                  color:
-                                                      player.repeatMode ==
-                                                          PlaylistRepeatMode.off
-                                                      ? pal.textSecondary
-                                                            .withValues(
-                                                              alpha: 0.55,
-                                                            )
-                                                      : context.controlAccent,
+                                                  ),
+                                                  onPressed:
+                                                      player.playlist.length < 2
+                                                      ? null
+                                                      : () => _notifyShuffle(
+                                                          player,
+                                                        ),
                                                 ),
-                                                onPressed: () =>
-                                                    _notifyRepeat(player),
-                                              ),
-                                            ],
-                                          )
-                                        else ...[
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              IconButton(
-                                                tooltip: 'Shuffle',
-                                                icon: Icon(
-                                                  Icons.shuffle_rounded,
-                                                  color: player.shuffleEnabled
-                                                      ? context.controlAccent
-                                                      : pal.textSecondary
-                                                            .withValues(
-                                                              alpha: 0.55,
-                                                            ),
+                                                const SizedBox(width: 4),
+                                                IconButton(
+                                                  iconSize: 36,
+                                                  icon: const Icon(
+                                                    Icons.skip_previous_rounded,
+                                                  ),
+                                                  color: pal.textPrimary,
+                                                  onPressed: () =>
+                                                      player.skipPrevious(),
                                                 ),
-                                                onPressed:
-                                                    player.playlist.length < 2
-                                                    ? null
-                                                    : () => _notifyShuffle(
-                                                        player,
+                                                const SizedBox(width: 16),
+                                                ListenableBuilder(
+                                                  listenable: player,
+                                                  builder: (context, _) {
+                                                    final playing =
+                                                        player.isPlaying;
+                                                    return IconButton.filled(
+                                                      tooltip: playing
+                                                          ? 'Pause'
+                                                          : 'Play',
+                                                      iconSize: 36,
+                                                      style: IconButton.styleFrom(
+                                                        backgroundColor: context
+                                                            .controlAccent,
+                                                        foregroundColor:
+                                                            Colors.white,
+                                                        fixedSize: const Size(
+                                                          76,
+                                                          76,
+                                                        ),
                                                       ),
-                                              ),
-                                              const SizedBox(width: 24),
-                                              IconButton(
-                                                tooltip: 'Repeat mode',
-                                                icon: Icon(
-                                                  player.repeatMode ==
-                                                          PlaylistRepeatMode.one
-                                                      ? Icons.repeat_one_rounded
-                                                      : Icons.repeat_rounded,
-                                                  color:
-                                                      player.repeatMode ==
-                                                          PlaylistRepeatMode.off
-                                                      ? pal.textSecondary
-                                                            .withValues(
-                                                              alpha: 0.55,
-                                                            )
-                                                      : context.controlAccent,
+                                                      onPressed: () => player
+                                                          .togglePlayPause(),
+                                                      icon: Icon(
+                                                        playing
+                                                            ? Icons
+                                                                  .pause_rounded
+                                                            : Icons
+                                                                  .play_arrow_rounded,
+                                                      ),
+                                                    );
+                                                  },
                                                 ),
-                                                onPressed: () =>
-                                                    _notifyRepeat(player),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              IconButton(
-                                                iconSize: 36,
-                                                icon: const Icon(
-                                                  Icons.skip_previous_rounded,
+                                                const SizedBox(width: 16),
+                                                ListenableBuilder(
+                                                  listenable: player,
+                                                  builder: (context, _) {
+                                                    final canNext =
+                                                        player.canSkipNext;
+                                                    return IconButton(
+                                                      tooltip: canNext
+                                                          ? 'Next track'
+                                                          : 'End of playlist',
+                                                      iconSize: 36,
+                                                      icon: const Icon(
+                                                        Icons.skip_next_rounded,
+                                                      ),
+                                                      color: canNext
+                                                          ? pal.textPrimary
+                                                          : pal.textSecondary
+                                                                .withValues(
+                                                                  alpha: 0.38,
+                                                                ),
+                                                      onPressed: canNext
+                                                          ? () => player
+                                                                .skipNext()
+                                                          : null,
+                                                    );
+                                                  },
                                                 ),
-                                                color: pal.textPrimary,
-                                                onPressed: () =>
-                                                    player.skipPrevious(),
-                                              ),
-                                              const SizedBox(width: 20),
-                                              ListenableBuilder(
-                                                listenable: player,
-                                                builder: (context, _) {
-                                                  final playing =
-                                                      player.isPlaying;
-                                                  return IconButton.filled(
-                                                    tooltip: playing
-                                                        ? 'Pause'
-                                                        : 'Play',
-                                                    iconSize: 40,
-                                                    style: IconButton.styleFrom(
-                                                      backgroundColor:
-                                                          context.controlAccent,
-                                                      foregroundColor:
-                                                          Colors.white,
-                                                      padding:
-                                                          const EdgeInsets.all(
-                                                            20,
-                                                          ),
-                                                      elevation: 0,
-                                                    ),
-                                                    onPressed: () => player
-                                                        .togglePlayPause(),
-                                                    icon: Icon(
-                                                      playing
-                                                          ? Icons.pause_rounded
-                                                          : Icons
-                                                                .play_arrow_rounded,
-                                                    ),
-                                                  );
-                                                },
-                                              ),
-                                              const SizedBox(width: 20),
-                                              ListenableBuilder(
-                                                listenable: player,
-                                                builder: (context, _) {
-                                                  final canNext =
-                                                      player.canSkipNext;
-                                                  return IconButton(
-                                                    tooltip: canNext
-                                                        ? 'Next track'
-                                                        : 'End of playlist',
-                                                    iconSize: 36,
-                                                    icon: const Icon(
-                                                      Icons.skip_next_rounded,
-                                                    ),
-                                                    color: canNext
-                                                        ? pal.textPrimary
+                                                const SizedBox(width: 4),
+                                                IconButton(
+                                                  tooltip: 'Repeat mode',
+                                                  icon: Icon(
+                                                    player.repeatMode ==
+                                                            PlaylistRepeatMode
+                                                                .one
+                                                        ? Icons
+                                                              .repeat_one_rounded
+                                                        : Icons.repeat_rounded,
+                                                    color:
+                                                        player.repeatMode ==
+                                                            PlaylistRepeatMode
+                                                                .off
+                                                        ? pal.textSecondary
+                                                              .withValues(
+                                                                alpha: 0.55,
+                                                              )
+                                                        : context.controlAccent,
+                                                  ),
+                                                  onPressed: () =>
+                                                      _notifyRepeat(player),
+                                                ),
+                                              ],
+                                            )
+                                          else ...[
+                                            Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                IconButton(
+                                                  tooltip: 'Shuffle',
+                                                  icon: Icon(
+                                                    Icons.shuffle_rounded,
+                                                    color: player.shuffleEnabled
+                                                        ? context.controlAccent
                                                         : pal.textSecondary
                                                               .withValues(
-                                                                alpha: 0.38,
+                                                                alpha: 0.55,
                                                               ),
-                                                    onPressed: canNext
-                                                        ? () =>
-                                                              player.skipNext()
-                                                        : null,
-                                                  );
-                                                },
-                                              ),
-                                            ],
-                                          ),
+                                                  ),
+                                                  onPressed:
+                                                      player.playlist.length < 2
+                                                      ? null
+                                                      : () => _notifyShuffle(
+                                                          player,
+                                                        ),
+                                                ),
+                                                const SizedBox(width: 24),
+                                                IconButton(
+                                                  tooltip: 'Repeat mode',
+                                                  icon: Icon(
+                                                    player.repeatMode ==
+                                                            PlaylistRepeatMode
+                                                                .one
+                                                        ? Icons
+                                                              .repeat_one_rounded
+                                                        : Icons.repeat_rounded,
+                                                    color:
+                                                        player.repeatMode ==
+                                                            PlaylistRepeatMode
+                                                                .off
+                                                        ? pal.textSecondary
+                                                              .withValues(
+                                                                alpha: 0.55,
+                                                              )
+                                                        : context.controlAccent,
+                                                  ),
+                                                  onPressed: () =>
+                                                      _notifyRepeat(player),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              children: [
+                                                IconButton(
+                                                  iconSize: 36,
+                                                  icon: const Icon(
+                                                    Icons.skip_previous_rounded,
+                                                  ),
+                                                  color: pal.textPrimary,
+                                                  onPressed: () =>
+                                                      player.skipPrevious(),
+                                                ),
+                                                const SizedBox(width: 20),
+                                                ListenableBuilder(
+                                                  listenable: player,
+                                                  builder: (context, _) {
+                                                    final playing =
+                                                        player.isPlaying;
+                                                    return IconButton.filled(
+                                                      tooltip: playing
+                                                          ? 'Pause'
+                                                          : 'Play',
+                                                      iconSize: 40,
+                                                      style: IconButton.styleFrom(
+                                                        backgroundColor: context
+                                                            .controlAccent,
+                                                        foregroundColor:
+                                                            Colors.white,
+                                                        padding:
+                                                            const EdgeInsets.all(
+                                                              20,
+                                                            ),
+                                                        elevation: 0,
+                                                      ),
+                                                      onPressed: () => player
+                                                          .togglePlayPause(),
+                                                      icon: Icon(
+                                                        playing
+                                                            ? Icons
+                                                                  .pause_rounded
+                                                            : Icons
+                                                                  .play_arrow_rounded,
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                                const SizedBox(width: 20),
+                                                ListenableBuilder(
+                                                  listenable: player,
+                                                  builder: (context, _) {
+                                                    final canNext =
+                                                        player.canSkipNext;
+                                                    return IconButton(
+                                                      tooltip: canNext
+                                                          ? 'Next track'
+                                                          : 'End of playlist',
+                                                      iconSize: 36,
+                                                      icon: const Icon(
+                                                        Icons.skip_next_rounded,
+                                                      ),
+                                                      color: canNext
+                                                          ? pal.textPrimary
+                                                          : pal.textSecondary
+                                                                .withValues(
+                                                                  alpha: 0.38,
+                                                                ),
+                                                      onPressed: canNext
+                                                          ? () => player
+                                                                .skipNext()
+                                                          : null,
+                                                    );
+                                                  },
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                          const SizedBox(height: 8),
                                         ],
-                                        const SizedBox(height: 8),
-                                      ],
-                                    );
-                                  },
+                                      );
+                                    },
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (fullArtNp)
-                              SliverFillRemaining(
-                                hasScrollBody: false,
-                                child: ListenableBuilder(
-                                  listenable: player,
-                                  builder: (context, _) {
-                                    if (player.currentTrack == null) {
-                                      return const SizedBox.shrink();
-                                    }
-                                    final artWidth = _fullArtHeroWidth(context);
-                                    if (daisyNp) {
+                              if (fullArtNp)
+                                SliverFillRemaining(
+                                  hasScrollBody: false,
+                                  child: ListenableBuilder(
+                                    listenable: player,
+                                    builder: (context, _) {
+                                      if (player.currentTrack == null) {
+                                        return const SizedBox.shrink();
+                                      }
+                                      final artWidth = _fullArtHeroWidth(
+                                        context,
+                                      );
+                                      if (daisyNp) {
+                                        final bottomInset =
+                                            MediaQuery.viewPaddingOf(
+                                              context,
+                                            ).bottom;
+                                        final t = player.currentTrack;
+                                        return Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            24,
+                                            0,
+                                            24,
+                                            0,
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              const SizedBox(height: 18),
+                                              _buildDaisyTransportRow(
+                                                player,
+                                                artWidth,
+                                                pal,
+                                              ),
+                                              const SizedBox(height: 20),
+                                              if (t != null)
+                                                _buildDaisyFooterTools(
+                                                  context,
+                                                  pal: pal,
+                                                  player: player,
+                                                  track: t,
+                                                  width: artWidth,
+                                                ),
+                                              const Spacer(),
+                                              SizedBox(
+                                                height: 16 + bottomInset,
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }
+                                      final silverNp =
+                                          context.appliedThemePalette ==
+                                          AppThemePalette.silver;
                                       final bottomInset =
                                           MediaQuery.viewPaddingOf(
                                             context,
                                           ).bottom;
-                                      final t = player.currentTrack;
                                       return Padding(
                                         padding: const EdgeInsets.fromLTRB(
                                           24,
@@ -1837,92 +1931,58 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                         ),
                                         child: Column(
                                           children: [
-                                            const SizedBox(height: 18),
-                                            _buildDaisyTransportRow(
-                                              player,
-                                              artWidth,
-                                              pal,
+                                            if (silverNp)
+                                              const SizedBox(height: 8)
+                                            else
+                                              const Spacer(flex: 2),
+                                            _buildSoftBlurTransportRow(
+                                              context,
+                                              pal: pal,
+                                              player: player,
+                                              artWidth: artWidth,
                                             ),
-                                            const SizedBox(height: 20),
-                                            if (t != null)
-                                              _buildDaisyFooterTools(
-                                                context,
-                                                pal: pal,
-                                                player: player,
-                                                track: t,
-                                                width: artWidth,
-                                              ),
+                                            SizedBox(
+                                              height: silverNp ? 10 : 16,
+                                            ),
+                                            _buildSoftBlurVolumeBar(
+                                              context,
+                                              pal: pal,
+                                              player: player,
+                                              artWidth: artWidth,
+                                            ),
                                             const Spacer(),
-                                            SizedBox(height: 16 + bottomInset),
+                                            SizedBox(height: 12 + bottomInset),
                                           ],
                                         ),
                                       );
-                                    }
-                                    final silverNp =
-                                        context.appliedThemePalette ==
-                                        AppThemePalette.silver;
-                                    final bottomInset =
-                                        MediaQuery.viewPaddingOf(
-                                          context,
-                                        ).bottom;
-                                    return Padding(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        24,
-                                        0,
-                                        24,
-                                        0,
-                                      ),
-                                      child: Column(
-                                        children: [
-                                          if (silverNp)
-                                            const SizedBox(height: 8)
-                                          else
-                                            const Spacer(flex: 2),
-                                          _buildSoftBlurTransportRow(
-                                            context,
-                                            pal: pal,
-                                            player: player,
-                                            artWidth: artWidth,
-                                          ),
-                                          SizedBox(height: silverNp ? 10 : 16),
-                                          _buildSoftBlurVolumeBar(
-                                            context,
-                                            pal: pal,
-                                            player: player,
-                                            artWidth: artWidth,
-                                          ),
-                                          const Spacer(),
-                                          SizedBox(height: 12 + bottomInset),
-                                        ],
-                                      ),
-                                    );
-                                  },
+                                    },
+                                  ),
                                 ),
-                              ),
-                            if (!fullArtNp)
-                              SliverFillRemaining(
-                                hasScrollBody: false,
-                                child: ListenableBuilder(
-                                  listenable: player,
-                                  builder: (context, _) {
-                                    return _UpNextPanel(
-                                      next: player.upcomingTrack,
-                                      pal: pal,
-                                      theme: theme,
-                                      repeatMode: player.repeatMode,
-                                      queueLength: player.playlist.length,
-                                      playerChrome: playerChrome,
-                                    );
-                                  },
+                              if (!fullArtNp)
+                                SliverFillRemaining(
+                                  hasScrollBody: false,
+                                  child: ListenableBuilder(
+                                    listenable: player,
+                                    builder: (context, _) {
+                                      return _UpNextPanel(
+                                        next: player.upcomingTrack,
+                                        pal: pal,
+                                        theme: theme,
+                                        repeatMode: player.repeatMode,
+                                        queueLength: player.playlist.length,
+                                        playerChrome: playerChrome,
+                                      );
+                                    },
+                                  ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  if (!fullArtNp) _footerTrackTools(context, pal, player),
-                ],
+                    if (!fullArtNp) _footerTrackTools(context, pal, player),
+                  ],
+                ),
               ),
             ),
           ),
