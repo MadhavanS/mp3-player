@@ -131,6 +131,7 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
         final favOk = trackCanToggleFavorite(track);
         final isFav = favOk && FavoriteSongsStore.isFavorite(path);
         final accent = context.controlAccent;
+        final silver = context.appliedThemePalette == AppThemePalette.silver;
         final iconFg = menuIconColor ?? pal.onScaffold.withValues(alpha: 0.8);
         return Row(
           mainAxisSize: MainAxisSize.min,
@@ -141,7 +142,7 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
                 child: Icon(
                   Icons.favorite_rounded,
                   size: iconSize * 0.85,
-                  color: accent,
+                  color: silver ? Colors.black : accent,
                 ),
               ),
             PopupMenuButton<TrackOverflowAction>(

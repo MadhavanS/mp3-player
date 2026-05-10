@@ -10,6 +10,7 @@ import '../../services/file_path_mtime_sort.dart';
 import '../../services/first_run_library_hint_store.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/mp3_scanner_types.dart';
+import '../../services/music_library_path_key.dart';
 import '../../services/playback_session_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
@@ -593,9 +594,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           return;
         }
         var resolvedStart = startIndex.clamp(0, tracks.length - 1);
-        if (pathToPreserve != null) {
-          final idx = tracks.indexWhere((t) => t.filePath == pathToPreserve);
-          if (idx >= 0) resolvedStart = idx;
+        if (pathToPreserve != null && pathToPreserve.trim().isNotEmpty) {
+          final key = canonicalMusicLibraryPathKey(pathToPreserve);
+          if (key.isNotEmpty) {
+            final idx = tracks.indexWhere(
+              (t) =>
+                  canonicalMusicLibraryPathKey((t.filePath ?? '').trim()) ==
+                  key,
+            );
+            if (idx >= 0) resolvedStart = idx;
+          }
         }
         await player.setPlaylist(
           tracks,

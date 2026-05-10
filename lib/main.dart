@@ -4,9 +4,11 @@ import 'package:flutter/widgets.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import 'app.dart';
+import 'platform/windows_window.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initWindowsWindowOnLaunch();
   if (_mediaNotificationSupported) {
     await JustAudioBackground.init(
       androidNotificationChannelId: 'com.example.mp3_player.audio',
