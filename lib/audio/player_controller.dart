@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
@@ -9,6 +11,7 @@ import '../models/library_tab_id.dart';
 import '../models/track_item.dart';
 import '../services/music_library_path_key.dart';
 import '../services/track_metadata.dart';
+import '../services/volume_settings_store.dart';
 import 'notification_art_uri.dart';
 
 enum PlaylistRepeatMode { off, all, one }
@@ -23,6 +26,21 @@ enum CatalogNotifyMode {
 
   /// At most one [notifyListeners] per ~200ms while updates keep arriving.
   throttled,
+}
+
+/// `just_audio_windows` currently logs "Failed to seek to item" during
+/// [setAudioSource] with a concatenated source and can ignore [initialIndex],
+/// causing item 0 to play regardless of the selected Dart queue index.
+bool _useSingleTrackAudioSourceForPlatform() {
+  if (kIsWeb) return false;
+  return defaultTargetPlatform == TargetPlatform.windows;
+}
+
+/// [ConcatenatingAudioSource] with lazy preparation makes [setAudioSource]'s
+/// [initialIndex] unreliable on desktop Windows. Other platforms keep lazy prep.
+bool _concatUseLazyPreparationForPlatform() {
+  if (kIsWeb) return true;
+  return defaultTargetPlatform != TargetPlatform.windows;
 }
 
 /// Local playback + playlist index. Exposes [audioPlayer] for streams in the UI.
@@ -44,26 +62,70 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  /// After [setAudioSource], lazy [ConcatenatingAudioSource] can still be
-  /// [ProcessingState.loading] when [_loadCurrent] returns — [play] then no-ops
-  /// or fails on some devices. Wait for [ProcessingState.ready] when needed.
+  /// After [setAudioSource], the native player may still be [ProcessingState.loading]
+  /// when [_loadCurrent] returns — [play] then no-ops on some platforms.
+  ///
+  /// We **poll** [processingState] instead of subscribing to [processingStateStream]:
+  /// a fast `loading → ready` transition can happen between the synchronous `!= ready`
+  /// check and subscribing, so the stream never emits `ready` and playback never starts
+  /// until a long timeout (or never, if [play] keeps no-op'ing).
   Future<void> _resumePlaybackAfterLoad({
     String context = 'resumeAfterLoad',
   }) async {
-    try {
-      if (_player.processingState != ProcessingState.ready) {
-        await _player.processingStateStream
-            .where((s) => s == ProcessingState.ready)
-            .first
-            .timeout(const Duration(seconds: 8));
+    await _waitForPlayerPreparedAfterSourceChange();
+    // One event-loop turn; helps desktop embedders finish native load callbacks.
+    await Future<void>.delayed(Duration.zero);
+    await _ensurePlayingWithRetries(context: context);
+  }
+
+  Future<void> _waitForPlayerPreparedAfterSourceChange() async {
+    const step = Duration(milliseconds: 40);
+    final deadline = DateTime.now().add(const Duration(seconds: 8));
+    while (DateTime.now().isBefore(deadline)) {
+      switch (_player.processingState) {
+        case ProcessingState.ready:
+        case ProcessingState.buffering:
+          return;
+        case ProcessingState.completed:
+          return;
+        case ProcessingState.idle:
+        case ProcessingState.loading:
+          break;
       }
-    } catch (e, st) {
-      debugPrint('_resumePlaybackAfterLoad wait: $e\n$st');
+      await Future<void>.delayed(step);
     }
-    await _playSafely(context: context);
+    debugPrint(
+      '_waitForPlayerPreparedAfterSourceChange: timeout '
+      'processingState=${_player.processingState}',
+    );
+  }
+
+  /// Calls [play] until [AudioPlayer.playing] is true or attempts are exhausted.
+  Future<void> _ensurePlayingWithRetries({
+    required String context,
+    int attempts = 12,
+  }) async {
+    for (var i = 0; i < attempts; i++) {
+      try {
+        await _playSafely(context: context);
+      } catch (e, st) {
+        if (_isInterruptedAbort(e)) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          continue;
+        }
+        debugPrint('$context attempt $i: $e\n$st');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 45));
+      if (_player.playing) return;
+    }
+    debugPrint(
+      '$context: still not playing (attempts exhausted); '
+      'playing=${_player.playing} processingState=${_player.processingState}',
+    );
   }
 
   PlayerController() {
+    unawaited(_loadPersistedVolume());
     // Single subscription: listening to [processingStateStream] and
     // [playerStateStream] both triggered platform init; concurrent inits caused
     // "Platform player … already exists" on some devices (just_audio / Android).
@@ -97,9 +159,22 @@ class PlayerController extends ChangeNotifier {
   PlaylistRepeatMode _repeat = PlaylistRepeatMode.off;
   ProcessingState? _previousProcessing;
   bool _isLoadingSource = false;
+  int _loadCurrentDepth = 0;
   int? _pendingConcatIndexWhileLoading;
+  /// After [setAudioSource], [currentIndexStream] can still emit `0` once loading
+  /// ends even when [initialIndex] was non-zero — that would overwrite [_index] via
+  /// [_onConcatIndexChanged]. Ignore that specific stray event for a short window.
+  DateTime? _postLoadConcatGuardUntil;
+  int? _postLoadExpectedConcatIndex;
   bool _sourceNeedsReload = false;
+  /// [AudioPlayer.stop] can report [ProcessingState.completed] on some platforms.
+  /// That must not run [skipNext] while we only released the decoder for a disk edit.
+  bool _suppressTrackCompletedAdvance = false;
+  /// [processingStateStream] may deliver [ProcessingState.completed] late; ignore briefly
+  /// after [stopForExternalFileEdit] even after [_suppressTrackCompletedAdvance] clears.
+  DateTime? _ignoreSpuriousPlaybackCompletedUntil;
   List<int> _activeSourceOrder = <int>[];
+  double _preferredVolume = 1.0;
 
   /// While rebuilding [ConcatenatingAudioSource] for shuffle, [AudioPlayer.stop] makes
   /// `playing` false briefly; UI uses [isPlaying] which ORs this in so play/pause
@@ -152,6 +227,27 @@ class PlayerController extends ChangeNotifier {
   String? _playbackOriginUserPlaylistId;
 
   AudioPlayer get audioPlayer => _player;
+
+  Stream<double> get volumeStream => _player.volumeStream;
+
+  double get volume => _preferredVolume;
+
+  Future<void> _loadPersistedVolume() async {
+    final volume = await VolumeSettingsStore.load();
+    _preferredVolume = volume;
+    await _applyPreferredVolume();
+    notifyListeners();
+  }
+
+  Future<void> _applyPreferredVolume() => _player.setVolume(_preferredVolume);
+
+  Future<void> setVolume(double volume) async {
+    final next = volume.clamp(0.0, 1.0).toDouble();
+    _preferredVolume = next;
+    await _player.setVolume(next);
+    await VolumeSettingsStore.save(next);
+    notifyListeners();
+  }
 
   List<TrackItem> get libraryCatalog =>
       List<TrackItem>.unmodifiable(_libraryCatalog);
@@ -311,6 +407,13 @@ class PlayerController extends ChangeNotifier {
     final enteredComplete =
         _previousProcessing != ProcessingState.completed &&
         state == ProcessingState.completed;
+    final ignoreCompleted = _suppressTrackCompletedAdvance ||
+        (_ignoreSpuriousPlaybackCompletedUntil != null &&
+            DateTime.now().isBefore(_ignoreSpuriousPlaybackCompletedUntil!));
+    if (enteredComplete && ignoreCompleted) {
+      // Do not assign completed to [_previousProcessing] — would block real track-end.
+      return;
+    }
     _previousProcessing = state;
     if (enteredComplete) {
       unawaited(_handleTrackCompleted());
@@ -318,6 +421,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _handleTrackCompleted() async {
+    if (_suppressTrackCompletedAdvance || _isLoadingSource) return;
     if (_playlist.isEmpty) return;
     if (_repeat == PlaylistRepeatMode.one) {
       await _player.seek(Duration.zero);
@@ -367,13 +471,42 @@ class PlayerController extends ChangeNotifier {
 
   void _onConcatIndexChanged(int? concatIdx) {
     if (concatIdx == null) return;
+    if (_postLoadConcatGuardUntil != null &&
+        !DateTime.now().isBefore(_postLoadConcatGuardUntil!)) {
+      _postLoadConcatGuardUntil = null;
+      _postLoadExpectedConcatIndex = null;
+    }
     if (_isLoadingSource) {
       _pendingConcatIndexWhileLoading = concatIdx;
+      return;
+    }
+    if (_postLoadConcatGuardUntil != null &&
+        DateTime.now().isBefore(_postLoadConcatGuardUntil!) &&
+        _postLoadExpectedConcatIndex != null &&
+        concatIdx == 0 &&
+        _postLoadExpectedConcatIndex != 0) {
       return;
     }
     if (_applyConcatIndexChanged(concatIdx)) {
       notifyListeners();
     }
+  }
+
+  /// During [setAudioSource] with lazy preparation, [currentIndexStream] can briefly
+  /// report index `0`. That value is queued as [_pendingConcatIndexWhileLoading] and
+  /// would otherwise overwrite [_index] in [_loadCurrent]'s `finally`, switching the
+  /// queue to the wrong song (e.g. after tag / cover edits that reload the source).
+  bool _pendingConcatIndexMatchesLoadedPath(int concatIdx, String loadTargetKey) {
+    if (loadTargetKey.isEmpty) return true;
+    final order = _activeSourceOrder.isNotEmpty
+        ? _activeSourceOrder
+        : _effectiveQueueOrder();
+    if (concatIdx < 0 || concatIdx >= order.length) return false;
+    final pl = order[concatIdx];
+    if (pl < 0 || pl >= _playlist.length) return false;
+    final fp = _playlist[pl].filePath?.trim();
+    if (fp == null || fp.isEmpty) return false;
+    return canonicalMusicLibraryPathKey(fp) == loadTargetKey;
   }
 
   Future<void> setPlaylist(
@@ -436,10 +569,15 @@ class PlayerController extends ChangeNotifier {
 
     var newIndex = 0;
     if (pathPreserve != null && pathPreserve.isNotEmpty) {
-      final ix = _playlist.indexWhere(
-        (t) => (t.filePath ?? '').trim() == pathPreserve,
-      );
-      if (ix >= 0) newIndex = ix;
+      final preserveKey = canonicalMusicLibraryPathKey(pathPreserve);
+      if (preserveKey.isNotEmpty) {
+        final ix = _playlist.indexWhere(
+          (t) =>
+              canonicalMusicLibraryPathKey((t.filePath ?? '').trim()) ==
+              preserveKey,
+        );
+        if (ix >= 0) newIndex = ix;
+      }
     }
 
     if (keepShuffle) {
@@ -459,7 +597,9 @@ class PlayerController extends ChangeNotifier {
     await _loadCurrent(initialPosition: resumePosition, stopBeforeLoad: false);
     _sourceNeedsReload = false;
     if (resumePlaying) {
-      await _playSafely(context: 'tryResyncQueueWithLibraryScan.play');
+      await _resumePlaybackAfterLoad(
+        context: 'tryResyncQueueWithLibraryScan.play',
+      );
     } else {
       try {
         await _player.pause();
@@ -486,7 +626,7 @@ class PlayerController extends ChangeNotifier {
     if (wasEmpty) {
       _index = 0;
       await _loadCurrent();
-      await _playSafely(context: 'appendToPlaylist.play');
+      await _resumePlaybackAfterLoad(context: 'appendToPlaylist.play');
     } else {
       await _loadCurrent(initialPosition: resumePos);
     }
@@ -507,7 +647,9 @@ class PlayerController extends ChangeNotifier {
       playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
       keepShuffleMode: keepShuffleMode,
     );
-    await _playSafely(context: 'setPlaylistAndPlay.play');
+    // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
+    // returns; [play] can no-op until [ProcessingState.ready].
+    await _resumePlaybackAfterLoad(context: 'setPlaylistAndPlay.play');
   }
 
   static bool _sameQueuedIdentity(TrackItem a, TrackItem b) {
@@ -744,7 +886,7 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
     await _loadCurrent();
     if (autoPlay) {
-      await _playSafely(context: 'jumpToIndex.play');
+      await _resumePlaybackAfterLoad(context: 'jumpToIndex.play');
     }
   }
 
@@ -756,6 +898,7 @@ class PlayerController extends ChangeNotifier {
     final preview = currentTrack;
     final pathPreview = preview?.filePath;
     if (preview == null || pathPreview == null || pathPreview.isEmpty) {
+      _suppressTrackCompletedAdvance = false;
       if (stopBeforeLoad) {
         try {
           await _player.stop();
@@ -766,6 +909,14 @@ class PlayerController extends ChangeNotifier {
       return;
     }
 
+    final loadTargetPathKey = canonicalMusicLibraryPathKey(pathPreview.trim());
+
+    _postLoadConcatGuardUntil = null;
+    _postLoadExpectedConcatIndex = null;
+
+    // Set before any await so [stop]-driven [ProcessingState.completed] cannot
+    // run [skipNext] in the gap after [stopForExternalFileEdit] (see [_suppressTrackCompletedAdvance]).
+    _loadCurrentDepth++;
     _isLoadingSource = true;
     try {
       if (_prunePlaylistPathsNotInCatalog() && _playlist.isNotEmpty) {
@@ -824,8 +975,11 @@ class PlayerController extends ChangeNotifier {
           ? _playlist[logical]
           : preview;
       final logicalArtUri = await uriForNotificationAlbumArt(logicalTrack);
+      final sourceOrder = _useSingleTrackAudioSourceForPlatform()
+          ? <int>[logical]
+          : order;
 
-      for (final pi in order) {
+      for (final pi in sourceOrder) {
         if (pi < 0 || pi >= _playlist.length) continue;
         final t = _playlist[pi];
         final fp = t.filePath?.trim();
@@ -859,10 +1013,25 @@ class PlayerController extends ChangeNotifier {
       initialConcatIndex = initialConcatIndex.clamp(0, children.length - 1);
       _activeSourceOrder = loadedOrder;
 
-      await _player.setAudioSource(
-        ConcatenatingAudioSource(useLazyPreparation: true, children: children),
-        initialIndex: initialConcatIndex,
-        initialPosition: initialPosition,
+      if (_useSingleTrackAudioSourceForPlatform()) {
+        await _player.setAudioSource(
+          children.single,
+          initialPosition: initialPosition,
+        );
+      } else {
+        await _player.setAudioSource(
+          ConcatenatingAudioSource(
+            useLazyPreparation: _concatUseLazyPreparationForPlatform(),
+            children: children,
+          ),
+          initialIndex: initialConcatIndex,
+          initialPosition: initialPosition,
+        );
+      }
+      await _applyPreferredVolume();
+      _postLoadExpectedConcatIndex = initialConcatIndex;
+      _postLoadConcatGuardUntil = DateTime.now().add(
+        const Duration(milliseconds: 650),
       );
       _sourceNeedsReload = false;
     } catch (e, st) {
@@ -882,10 +1051,18 @@ class PlayerController extends ChangeNotifier {
         }
       }
     } finally {
-      _isLoadingSource = false;
+      _loadCurrentDepth--;
+      if (_loadCurrentDepth <= 0) {
+        _loadCurrentDepth = 0;
+        _isLoadingSource = false;
+        _suppressTrackCompletedAdvance = false;
+        _ignoreSpuriousPlaybackCompletedUntil = null;
+      }
       final pending = _pendingConcatIndexWhileLoading;
       _pendingConcatIndexWhileLoading = null;
-      if (pending != null && _applyConcatIndexChanged(pending)) {
+      if (pending != null &&
+          _pendingConcatIndexMatchesLoadedPath(pending, loadTargetPathKey) &&
+          _applyConcatIndexChanged(pending)) {
         notifyListeners();
       }
     }
@@ -977,6 +1154,10 @@ class PlayerController extends ChangeNotifier {
 
   /// Release the open audio file so another process (or this app) can rewrite it.
   Future<void> stopForExternalFileEdit() async {
+    _suppressTrackCompletedAdvance = true;
+    _ignoreSpuriousPlaybackCompletedUntil = DateTime.now().add(
+      const Duration(milliseconds: 900),
+    );
     try {
       await _player.stop();
     } catch (_) {}
@@ -1003,7 +1184,7 @@ class PlayerController extends ChangeNotifier {
     if (_sourceNeedsReload) {
       await _loadCurrent();
       _sourceNeedsReload = false;
-      await _playSafely(context: playContext);
+      await _resumePlaybackAfterLoad(context: playContext);
       return;
     }
     final order = _activeSourceOrder.isNotEmpty
@@ -1013,7 +1194,7 @@ class PlayerController extends ChangeNotifier {
     if (concatIndex < 0) {
       await _loadCurrent();
       _sourceNeedsReload = false;
-      await _playSafely(context: playContext);
+      await _resumePlaybackAfterLoad(context: playContext);
       return;
     }
     try {
@@ -1022,7 +1203,7 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {
       await _loadCurrent();
       _sourceNeedsReload = false;
-      await _playSafely(context: playContext);
+      await _resumePlaybackAfterLoad(context: playContext);
     }
   }
 

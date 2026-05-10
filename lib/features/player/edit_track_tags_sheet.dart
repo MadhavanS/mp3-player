@@ -285,10 +285,11 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                 _artist.text = suggestion.suggestedArtist;
                 _album.text = suggestion.suggestedAlbum;
                 _genre.text = suggestion.suggestedGenre;
+                _fileName.text = suggestion.newBasenameWithoutExt;
                 Navigator.pop(ctx);
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   ActionPillToast.showUsingRootNavigator(
-                    'Suggested tags in editor — tap Save to write',
+                    'Suggested tags and filename in editor — tap Save to write',
                     icon: Icons.edit_note_rounded,
                     uppercaseLabel: false,
                   );
