@@ -161,15 +161,18 @@ class PlayerController extends ChangeNotifier {
   bool _isLoadingSource = false;
   int _loadCurrentDepth = 0;
   int? _pendingConcatIndexWhileLoading;
+
   /// After [setAudioSource], [currentIndexStream] can still emit `0` once loading
   /// ends even when [initialIndex] was non-zero — that would overwrite [_index] via
   /// [_onConcatIndexChanged]. Ignore that specific stray event for a short window.
   DateTime? _postLoadConcatGuardUntil;
   int? _postLoadExpectedConcatIndex;
   bool _sourceNeedsReload = false;
+
   /// [AudioPlayer.stop] can report [ProcessingState.completed] on some platforms.
   /// That must not run [skipNext] while we only released the decoder for a disk edit.
   bool _suppressTrackCompletedAdvance = false;
+
   /// [processingStateStream] may deliver [ProcessingState.completed] late; ignore briefly
   /// after [stopForExternalFileEdit] even after [_suppressTrackCompletedAdvance] clears.
   DateTime? _ignoreSpuriousPlaybackCompletedUntil;
@@ -339,8 +342,7 @@ class PlayerController extends ChangeNotifier {
   bool get shuffleEnabled => _shuffle;
 
   /// Playlist indices in the order the player will play them (respects shuffle and folder scope).
-  List<int> get playbackOrderIndices =>
-      List<int>.from(_effectiveQueueOrder());
+  List<int> get playbackOrderIndices => List<int>.from(_effectiveQueueOrder());
 
   /// Whether the queue tab may reorder rows (folder filter + non-shuffle uses a non-contiguous subset).
   bool get canReorderPlaybackQueue {
@@ -418,7 +420,8 @@ class PlayerController extends ChangeNotifier {
     final enteredComplete =
         _previousProcessing != ProcessingState.completed &&
         state == ProcessingState.completed;
-    final ignoreCompleted = _suppressTrackCompletedAdvance ||
+    final ignoreCompleted =
+        _suppressTrackCompletedAdvance ||
         (_ignoreSpuriousPlaybackCompletedUntil != null &&
             DateTime.now().isBefore(_ignoreSpuriousPlaybackCompletedUntil!));
     if (enteredComplete && ignoreCompleted) {
@@ -507,7 +510,10 @@ class PlayerController extends ChangeNotifier {
   /// report index `0`. That value is queued as [_pendingConcatIndexWhileLoading] and
   /// would otherwise overwrite [_index] in [_loadCurrent]'s `finally`, switching the
   /// queue to the wrong song (e.g. after tag / cover edits that reload the source).
-  bool _pendingConcatIndexMatchesLoadedPath(int concatIdx, String loadTargetKey) {
+  bool _pendingConcatIndexMatchesLoadedPath(
+    int concatIdx,
+    String loadTargetKey,
+  ) {
     if (loadTargetKey.isEmpty) return true;
     final order = _activeSourceOrder.isNotEmpty
         ? _activeSourceOrder
@@ -870,9 +876,7 @@ class PlayerController extends ChangeNotifier {
     if (isCurrent) {
       await _loadCurrent();
       if (resumePlayingIfCurrentRemoved) {
-        await _resumePlaybackAfterLoad(
-          context: 'removePlaylistEntryAt.resume',
-        );
+        await _resumePlaybackAfterLoad(context: 'removePlaylistEntryAt.resume');
       }
     } else {
       await _loadCurrent(initialPosition: _player.position);
@@ -901,17 +905,14 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  /// Reorders [playbackOrderIndices] from [oldOrderIndex] to [newOrderIndex] and rebuilds audio.
-  Future<void> reorderPlaybackQueue(int oldOrderIndex, int newOrderIndex) async {
+  /// Reorders [playbackOrderIndices] without interrupting the loaded current source.
+  void reorderPlaybackQueue(int oldOrderIndex, int newOrderIndex) {
     if (!canReorderPlaybackQueue) return;
     final order = _effectiveQueueOrder();
     if (order.isEmpty) return;
     if (oldOrderIndex < 0 || oldOrderIndex >= order.length) return;
     newOrderIndex = newOrderIndex.clamp(0, order.length - 1);
     if (oldOrderIndex == newOrderIndex) return;
-
-    final pos = _player.position;
-    final wasPlaying = _player.playing;
 
     if (_shuffle) {
       final curPl = _logicalPlaylistIndex();
@@ -924,24 +925,17 @@ class PlayerController extends ChangeNotifier {
     } else {
       final moving = _playlist.removeAt(oldOrderIndex);
       _playlist.insert(newOrderIndex, moving);
-      final fp = (currentTrack?.filePath ?? '').trim();
-      if (fp.isNotEmpty) {
-        final ck = canonicalMusicLibraryPathKey(fp);
-        if (ck.isNotEmpty) {
-          final ni = _playlist.indexWhere((t) {
-            final u = (t.filePath ?? '').trim();
-            return u.isNotEmpty && canonicalMusicLibraryPathKey(u) == ck;
-          });
-          if (ni >= 0) _index = ni;
-        }
+      if (oldOrderIndex == _index) {
+        _index = newOrderIndex;
+      } else if (oldOrderIndex < _index && newOrderIndex >= _index) {
+        _index--;
+      } else if (oldOrderIndex > _index && newOrderIndex <= _index) {
+        _index++;
       }
     }
 
+    _sourceNeedsReload = true;
     notifyListeners();
-    await _loadCurrent(initialPosition: pos);
-    if (wasPlaying) {
-      await _resumePlaybackAfterLoad(context: 'reorderPlaybackQueue.play');
-    }
   }
 
   Future<void> _loadCurrent({

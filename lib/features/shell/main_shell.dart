@@ -29,6 +29,7 @@ import '../player/mini_player_bar.dart';
 import '../player/now_playing_screen.dart';
 import '../player/track_overflow_actions.dart';
 import '../settings/settings_screen.dart';
+import 'now_playing_escape_bridge.dart';
 
 /// After [appNavigatorKey] pops to the root route, applies Library › Songs (drawer, shell page, tab).
 class EscapeToSongsLibraryHub {
@@ -82,7 +83,7 @@ class MainShell extends StatefulWidget {
   final PlayerChromeBackgroundKind playerChromeBackgroundKind;
   final Color? playerChromeCustomBackground;
   final ValueChanged<PlayerChromeBackgroundKind>
-      onPlayerChromeBackgroundKindChanged;
+  onPlayerChromeBackgroundKindChanged;
   final ValueChanged<Color> onPlayerChromeCustomBackgroundChanged;
 
   @override
@@ -104,10 +105,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   /// Set after filesystem scan completes; `null` means still enumerating MP3 paths.
   int? _scanDetectedMp3Count;
   PlayerController? _playerForRecentHistory;
+  PlayerController? _playerForPlaybackPersistence;
   PlayerController? _playerRef;
   String? _dispatchedRecentPath;
   bool _showingFirstRunHint = false;
   Timer? _idleRescanTimer;
+  Timer? _persistPlaybackDebounceTimer;
   bool _backgroundSyncInProgress = false;
   bool _backgroundSyncQueued = false;
   bool _albumArtWarmupInProgress = false;
@@ -115,10 +118,16 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Timer? _albumArtWarmupRetryTimer;
   bool _refreshInProgress = false;
 
+  /// Library tab that was visible when Now Playing was opened (for Windows Escape).
+  LibraryTabId? _nowPlayingOpenedFromTab;
+
   @override
   void initState() {
     super.initState();
     EscapeToSongsLibraryHub.register(_onEscapeToSongsLibrary);
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      NowPlayingWindowsEsc.handler = _windowsEscapeCloseNowPlaying;
+    }
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_bootstrapShellAsync());
@@ -134,6 +143,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
       _playerForRecentHistory = player;
       player.addListener(_recordRecentlyPlayedTrack);
+    }
+    if (!identical(_playerForPlaybackPersistence, player)) {
+      _playerForPlaybackPersistence?.removeListener(
+        _schedulePlaybackSessionPersist,
+      );
+      _playerForPlaybackPersistence = player;
+      player.addListener(_schedulePlaybackSessionPersist);
     }
   }
 
@@ -151,8 +167,21 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _idleRescanTimer?.cancel();
+      _persistPlaybackDebounceTimer?.cancel();
       unawaited(_persistSession());
     }
+  }
+
+  void _schedulePlaybackSessionPersist() {
+    _persistPlaybackDebounceTimer?.cancel();
+    _persistPlaybackDebounceTimer = Timer(
+      const Duration(milliseconds: 700),
+      () {
+        final p = _playerRef;
+        if (p == null) return;
+        unawaited(PlaybackSessionStore.savePlayer(p));
+      },
+    );
   }
 
   Future<void> _bootstrapShellAsync() async {
@@ -370,10 +399,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         final partial = scanned
             .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
             .toList(growable: false);
-        player.setLibraryCatalog(
-          partial,
-          notify: CatalogNotifyMode.throttled,
-        );
+        player.setLibraryCatalog(partial, notify: CatalogNotifyMode.throttled);
       }
 
       if (!mounted) return;
@@ -465,11 +491,18 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     EscapeToSongsLibraryHub.unregister();
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      NowPlayingWindowsEsc.handler = null;
+    }
     WidgetsBinding.instance.removeObserver(this);
     _idleRescanTimer?.cancel();
+    _persistPlaybackDebounceTimer?.cancel();
     _albumArtWarmupRetryTimer?.cancel();
     unawaited(_persistSession());
     _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
+    _playerForPlaybackPersistence?.removeListener(
+      _schedulePlaybackSessionPersist,
+    );
     _songsBrowsePathKeysNotifier.dispose();
     super.dispose();
   }
@@ -784,6 +817,47 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _windowsEscapeCloseNowPlaying() async {
+    if (!mounted) return;
+    if (!NowPlayingRouteMark.isOpen) return;
+    final nav = appNavigatorKey.currentState;
+    if (nav == null || !nav.canPop()) return;
+
+    final openedFrom = _nowPlayingOpenedFromTab;
+    NowPlayingEscDuplicatePopGuard.blockShortcutCollapse = true;
+    try {
+      nav.pop();
+      _applyLibraryAfterClosingNowPlaying(openedFrom);
+      _nowPlayingOpenedFromTab = null;
+    } finally {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        NowPlayingEscDuplicatePopGuard.blockShortcutCollapse = false;
+      });
+    }
+  }
+
+  void _applyLibraryAfterClosingNowPlaying(LibraryTabId? openedFromTab) {
+    if (!mounted) return;
+    final player = PlayerController.of(context);
+    final tabId = openedFromTab == LibraryTabId.nowPlayingList
+        ? LibraryTabId.nowPlayingList
+        : (player.playbackOriginTab ?? LibraryTabId.songs);
+    final userPlaylistId = player.playbackOriginUserPlaylistId;
+    _goLibrary();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        final st = _libraryScreenKey.currentState;
+        if (st == null) return;
+        await st.switchToTabAndScrollToCurrentTrack(tabId);
+        if (!mounted) return;
+        if (tabId == LibraryTabId.playlist && userPlaylistId != null) {
+          await st.openUserPlaylistSheetById(userPlaylistId);
+        }
+      });
+    });
+  }
+
   void _goSettings() {
     setState(() => _page = _ShellPage.settings);
     unawaited(PlaybackSessionStore.saveShellPageIsSettings(true));
@@ -791,12 +865,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   void _openNowPlaying() {
     final player = PlayerController.of(context);
+    final openedFromTab = _libraryScreenKey.currentState?.currentTabId;
     if (player.currentTrack == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Nothing is playing right now.')),
       );
       return;
     }
+    _nowPlayingOpenedFromTab = openedFromTab;
     Navigator.of(context).push(
       PageRouteBuilder<void>(
         pageBuilder: (context, animation, secondaryAnimation) {
@@ -805,22 +881,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             child: NowPlayingScreen(
               onCollapse: () {
                 Navigator.of(context).pop();
-                final tabId = player.playbackOriginTab ?? LibraryTabId.songs;
-                final userPlaylistId = player.playbackOriginUserPlaylistId;
-                _goLibrary();
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  WidgetsBinding.instance.addPostFrameCallback((_) async {
-                    if (!mounted) return;
-                    final st = _libraryScreenKey.currentState;
-                    if (st == null) return;
-                    await st.switchToTabAndScrollToCurrentTrack(tabId);
-                    if (!mounted) return;
-                    if (tabId == LibraryTabId.playlist &&
-                        userPlaylistId != null) {
-                      await st.openUserPlaylistSheetById(userPlaylistId);
-                    }
-                  });
-                });
+                _applyLibraryAfterClosingNowPlaying(_nowPlayingOpenedFromTab);
+                _nowPlayingOpenedFromTab = null;
               },
             ),
           );

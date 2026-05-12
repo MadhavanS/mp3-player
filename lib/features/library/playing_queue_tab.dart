@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
-import '../../widgets/track_album_art.dart';
 import '../player/track_overflow_actions.dart';
 
 String _formatQueueDuration(Duration d) {
@@ -111,79 +110,12 @@ class PlayingQueueTab extends StatelessWidget {
           );
         }
 
-        final upcoming = player.upcomingTrack;
-        final showNextStrip =
-            upcoming != null &&
-            playlist.length > 1 &&
-            searchQuery.isEmpty;
         final allowReorder =
             player.canReorderPlaybackQueue && searchQuery.isEmpty;
 
         return CustomScrollView(
           controller: scrollController,
           slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Column(
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 36,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: pal.onScaffold.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Current playing list',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: pal.onScaffold,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    if (player.shuffleEnabled) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        'Shuffle on — order below is the resolved playback sequence.',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: pal.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    ] else if (!player.canReorderPlaybackQueue) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        'Folder filter is active — reorder is disabled for this queue view.',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: pal.textSecondary,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            if (showNextStrip)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: _PlayNextStrip(
-                    theme: theme,
-                    pal: pal,
-                    label: 'Play next',
-                    track: upcoming,
-                  ),
-                ),
-              ),
             if (allowReorder)
               SliverReorderableList(
                 itemCount: rows.length,
@@ -222,115 +154,36 @@ class PlayingQueueTab extends StatelessWidget {
               )
             else
               SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final r = rows[index];
-                    final durationLabel = r.plIndex == player.currentIndex
-                        ? (player.duration != null
-                              ? _formatQueueDuration(player.duration!)
-                              : null)
-                        : null;
-                    return _QueueListRow(
-                      key: ValueKey(
-                        'pq_${r.plIndex}_${r.orderPos}_${r.track.filePath ?? r.track.title}',
-                      ),
-                      displayIndex: index + 1,
-                      track: r.track,
-                      playlistIndex: r.plIndex,
-                      isCurrent: r.plIndex == player.currentIndex,
-                      scrollAnchorKey: r.plIndex == player.currentIndex
-                          ? scrollAnchorKey
-                          : null,
-                      durationLabel: durationLabel,
-                      theme: theme,
-                      pal: pal,
-                      reorderHandleIndex: null,
-                      onOverflow: (a) => onOverflow(r.plIndex, a),
-                    );
-                  },
-                  childCount: rows.length,
-                ),
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final r = rows[index];
+                  final durationLabel = r.plIndex == player.currentIndex
+                      ? (player.duration != null
+                            ? _formatQueueDuration(player.duration!)
+                            : null)
+                      : null;
+                  return _QueueListRow(
+                    key: ValueKey(
+                      'pq_${r.plIndex}_${r.orderPos}_${r.track.filePath ?? r.track.title}',
+                    ),
+                    displayIndex: index + 1,
+                    track: r.track,
+                    playlistIndex: r.plIndex,
+                    isCurrent: r.plIndex == player.currentIndex,
+                    scrollAnchorKey: r.plIndex == player.currentIndex
+                        ? scrollAnchorKey
+                        : null,
+                    durationLabel: durationLabel,
+                    theme: theme,
+                    pal: pal,
+                    reorderHandleIndex: null,
+                    onOverflow: (a) => onOverflow(r.plIndex, a),
+                  );
+                }, childCount: rows.length),
               ),
             const SliverToBoxAdapter(child: SizedBox(height: 96)),
           ],
         );
       },
-    );
-  }
-}
-
-class _PlayNextStrip extends StatelessWidget {
-  const _PlayNextStrip({
-    required this.theme,
-    required this.pal,
-    required this.label,
-    required this.track,
-  });
-
-  final ThemeData theme;
-  final AppPalette pal;
-  final String label;
-  final TrackItem track;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: pal.onScaffold.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(14),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: SizedBox(
-                width: 44,
-                height: 44,
-                child: TrackAlbumArt(
-                  track: track,
-                  display: TrackArtDisplay.list,
-                  showShadow: false,
-                  cornerRadius: 10,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label.toUpperCase(),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: pal.textMuted,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.6,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    track.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: pal.onScaffold,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    track.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: pal.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -365,116 +218,145 @@ class _QueueListRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final subtitle = durationLabel != null && durationLabel!.isNotEmpty
+    final accent = context.controlAccent;
+    final artistLine = durationLabel != null && durationLabel!.isNotEmpty
         ? '${track.artist} • $durationLabel'
         : track.artist;
+
+    const leadingSize = 36.0;
+    const dividerIndent = 12.0 + leadingSize + 10.0;
 
     final handle = reorderHandleIndex != null
         ? ReorderableDragStartListener(
             index: reorderHandleIndex!,
             child: Padding(
-              padding: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.only(left: 2),
               child: Icon(
                 Icons.drag_handle_rounded,
                 color: pal.onScaffold.withValues(alpha: 0.45),
-                size: 26,
+                size: 22,
               ),
             ),
           )
         : Padding(
-            padding: const EdgeInsets.only(left: 4),
+            padding: const EdgeInsets.only(left: 2),
             child: Icon(
               Icons.drag_handle_rounded,
               color: pal.onScaffold.withValues(alpha: 0.16),
-              size: 26,
+              size: 22,
             ),
+          );
+
+    final textColumn = isCurrent
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                track.genres.isEmpty
+                    ? track.metaLine
+                    : '${track.metaLine} · ${track.genres}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: pal.textMuted.withValues(alpha: 0.9),
+                  fontSize: 10,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(Icons.play_arrow_rounded, size: 22, color: accent),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: pal.onScaffold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(
+                artistLine,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textSecondary.withValues(alpha: 0.95),
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                track.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: pal.onScaffold,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                track.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textSecondary.withValues(alpha: 0.95),
+                  fontSize: 13,
+                ),
+              ),
+            ],
           );
 
     final row = Material(
       key: scrollAnchorKey,
       color: isCurrent
-          ? pal.onScaffold.withValues(alpha: 0.12)
+          ? pal.onScaffold.withValues(alpha: 0.08)
           : Colors.transparent,
       child: InkWell(
         onTap: () {
-          unawaited(
-            PlayerController.of(context).jumpToIndex(playlistIndex),
-          );
+          unawaited(PlayerController.of(context).jumpToIndex(playlistIndex));
         },
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               SizedBox(
-                width: 56,
-                height: 56,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned.fill(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: TrackAlbumArt(
-                          track: track,
-                          display: TrackArtDisplay.list,
-                          showShadow: false,
-                          cornerRadius: 12,
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      right: 2,
-                      bottom: 2,
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.58),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Text(
-                          '$displayIndex',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      track.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                width: leadingSize,
+                height: leadingSize,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: isCurrent
+                        ? accent.withValues(alpha: 0.2)
+                        : pal.onScaffold.withValues(alpha: 0.08),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      '$displayIndex',
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: pal.onScaffold,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        fontSize: isCurrent ? 14 : 13,
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: pal.textSecondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
+              const SizedBox(width: 10),
+              Expanded(child: textColumn),
               TrackOverflowMenuWithFavourite(
                 pal: pal,
                 track: track,
@@ -492,7 +374,7 @@ class _QueueListRow extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         row,
-        Divider(height: 1, color: pal.dividerOnHero, indent: 82),
+        Divider(height: 1, color: pal.dividerOnHero, indent: dividerIndent),
       ],
     );
   }

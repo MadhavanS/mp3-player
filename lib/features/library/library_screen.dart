@@ -97,6 +97,7 @@ class LibraryScreenState extends State<LibraryScreen>
   final ScrollController _nowPlayingListScrollController = ScrollController();
 
   static const double _kLibraryListRowStride = 88;
+  static const double _kQueueListRowStride = 64;
 
   /// Search text shorter than this (after trim) does not filter library lists.
   static const int _kLibrarySearchMinChars = 3;
@@ -170,6 +171,9 @@ class LibraryScreenState extends State<LibraryScreen>
     if (!mounted) return;
     await _scrollActiveTabToCurrentTrack();
   }
+
+  /// Active library tab in the current UI.
+  LibraryTabId get currentTabId => _currentLibraryTabId;
 
   LibraryTabId get _currentLibraryTabId =>
       _visibleTabs[_tabController.index.clamp(0, _visibleTabs.length - 1)];
@@ -361,8 +365,9 @@ class LibraryScreenState extends State<LibraryScreen>
     ScrollController controller,
     int index,
     int totalItems,
-    GlobalKey anchorKey,
-  ) async {
+    GlobalKey anchorKey, {
+    double rowStride = _kLibraryListRowStride,
+  }) async {
     if (!mounted) return;
     final clampedIndex = index.clamp(0, totalItems > 0 ? totalItems - 1 : 0);
 
@@ -386,7 +391,7 @@ class LibraryScreenState extends State<LibraryScreen>
       } else {
         final scale = totalItems <= 1 ? 0.0 : (clampedIndex / (totalItems - 1));
         final proportional = scale * maxExtent;
-        final linear = (index * _kLibraryListRowStride).clamp(0.0, maxExtent);
+        final linear = (index * rowStride).clamp(0.0, maxExtent);
         target = switch (attempt % 3) {
           0 => proportional.clamp(0.0, maxExtent),
           1 => linear,
@@ -507,8 +512,7 @@ class LibraryScreenState extends State<LibraryScreen>
           final pl = order[r];
           if (pl < 0 || pl >= playlist.length) continue;
           final fp = playlist[pl].filePath;
-          if (fp != null &&
-              canonicalMusicLibraryPathKey(fp) == pathKey) {
+          if (fp != null && canonicalMusicLibraryPathKey(fp) == pathKey) {
             orderPos = r;
             break;
           }
@@ -537,6 +541,7 @@ class LibraryScreenState extends State<LibraryScreen>
           listIndex,
           listTotal,
           _scrollAnchorNowPlayingList,
+          rowStride: _kQueueListRowStride,
         );
         return;
     }
@@ -1463,7 +1468,7 @@ class LibraryScreenState extends State<LibraryScreen>
           playbackOriginTab: LibraryTabId.nowPlayingList,
         ),
         onReorder: (oldOrder, newOrder) {
-          unawaited(player.reorderPlaybackQueue(oldOrder, newOrder));
+          player.reorderPlaybackQueue(oldOrder, newOrder);
         },
       ),
       LibraryTabId.recentlyAdded => _buildRecentlyAddedTab(

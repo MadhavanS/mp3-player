@@ -10,6 +10,7 @@ import 'package:just_audio/just_audio.dart' show PlayerState;
 import 'audio/notification_art_uri.dart';
 import 'audio/player_controller.dart';
 import 'features/shell/main_shell.dart';
+import 'features/shell/now_playing_escape_bridge.dart';
 import 'platform/android_home_widget_bridge.dart';
 import 'services/accent_settings_store.dart';
 import 'services/font_settings_store.dart';
@@ -61,6 +62,17 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
   bool _onGlobalHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     if (event.logicalKey != LogicalKeyboardKey.escape) return false;
+    // Windows: global Escape was forcing Library › Songs even when Now Playing
+    // was opened from Queue. Delegate to MainShell so the same tab logic as Back applies.
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      if (NowPlayingRouteMark.isOpen) {
+        final h = NowPlayingWindowsEsc.handler;
+        if (h != null) {
+          unawaited(h());
+          return true;
+        }
+      }
+    }
     dispatchEscapeToSongsLibrary();
     return true;
   }
@@ -297,7 +309,8 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
           playerChromeBackgroundKind: _playerChromeBackgroundKind,
           playerChromeCustomBackground: _playerChromeCustomBackground,
           onPlayerChromeBackgroundKindChanged: _setPlayerChromeBackgroundKind,
-          onPlayerChromeCustomBackgroundChanged: _setPlayerChromeCustomBackground,
+          onPlayerChromeCustomBackgroundChanged:
+              _setPlayerChromeCustomBackground,
         ),
       ),
     );
