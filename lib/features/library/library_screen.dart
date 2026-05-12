@@ -402,6 +402,38 @@ class LibraryScreenState extends State<LibraryScreen>
     }
   }
 
+  Future<void> _scrollNowPlayingQueueToCurrentTrack() async {
+    if (!mounted) return;
+    final player = PlayerController.of(context);
+    final playlist = player.playlist;
+    if (playlist.isEmpty) return;
+    final currentPl = player.currentIndex;
+    if (currentPl < 0 || currentPl >= playlist.length) return;
+
+    final searchQuery = _effectiveLibrarySearchQuery(_searchController.text);
+    final order = player.playbackOrderIndices;
+
+    var listIndex = -1;
+    var visibleCount = 0;
+    for (var r = 0; r < order.length; r++) {
+      final pl = order[r];
+      if (pl < 0 || pl >= playlist.length) continue;
+      final t = playlist[pl];
+      if (!PlayingQueueTab.matchesSearchFilter(t, searchQuery)) continue;
+      if (pl == currentPl) listIndex = visibleCount;
+      visibleCount++;
+    }
+    if (listIndex < 0) return;
+
+    await _coaxLazyListThenEnsureVisible(
+      _nowPlayingListScrollController,
+      listIndex,
+      visibleCount,
+      _scrollAnchorNowPlayingList,
+      rowStride: _kQueueListRowStride,
+    );
+  }
+
   Future<void> _scrollActiveTabToCurrentTrack() async {
     if (!mounted) return;
     final player = PlayerController.of(context);
@@ -1460,6 +1492,7 @@ class LibraryScreenState extends State<LibraryScreen>
         searchQuery: searchQuery,
         scrollController: _nowPlayingListScrollController,
         scrollAnchorKey: _scrollAnchorNowPlayingList,
+        onScrollToCurrentPlaying: _scrollNowPlayingQueueToCurrentTrack,
         onOverflow: (playlistIndex, action) => _onTrackOverflow(
           context,
           player,

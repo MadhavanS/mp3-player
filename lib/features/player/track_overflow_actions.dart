@@ -18,6 +18,7 @@ import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 
 enum TrackOverflowAction {
+  playNext,
   playFromHere,
   playOnlyThis,
   addToPlaylist,
@@ -38,6 +39,15 @@ List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
   bool isFavorite = false,
 }) {
   return [
+    const PopupMenuItem(
+      value: TrackOverflowAction.playNext,
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(Icons.queue_play_next_rounded),
+        title: Text('Play next'),
+        subtitle: Text('Queue this track right after the current song'),
+      ),
+    ),
     const PopupMenuItem(
       value: TrackOverflowAction.playFromHere,
       child: ListTile(
@@ -348,6 +358,26 @@ Future<void> applyTrackOverflowAction(
   final tab = playbackOriginTab ?? outsideQueue?.playbackOriginTab;
 
   switch (action) {
+    case TrackOverflowAction.playNext:
+      final t = tracks[ix];
+      final added = await player.playTrackNext(t, playbackOriginTab: tab);
+      if (context.mounted) {
+        if (added) {
+          ActionPillToast.show(
+            context,
+            'Queued as next',
+            icon: Icons.queue_play_next_rounded,
+            uppercaseLabel: true,
+          );
+        } else {
+          ActionPillToast.show(
+            context,
+            'Already playing',
+            uppercaseLabel: true,
+          );
+        }
+      }
+
     case TrackOverflowAction.playFromHere:
       await player.setPlaylistAndPlay(
         tracks.sublist(ix),

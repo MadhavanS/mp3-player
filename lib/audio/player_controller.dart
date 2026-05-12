@@ -694,6 +694,131 @@ class PlayerController extends ChangeNotifier {
     return true;
   }
 
+  /// Inserts [track] so it plays immediately after the current song.
+  ///
+  /// Returns `false` only when [track] is already the current queue item.
+  /// With shuffle on, an existing non-current copy is removed first, then the track
+  /// is queued after the current position in the shuffle order.
+  Future<bool> playTrackNext(
+    TrackItem track, {
+    LibraryTabId? playbackOriginTab,
+  }) async {
+    if (_playlist.isEmpty) {
+      await setPlaylistAndPlay([track], playbackOriginTab: playbackOriginTab);
+      return true;
+    }
+
+    int? existingIx;
+    for (var i = 0; i < _playlist.length; i++) {
+      if (_sameQueuedIdentity(_playlist[i], track)) {
+        existingIx = i;
+        break;
+      }
+    }
+
+    if (!_shuffle) {
+      if (existingIx == _index) {
+        return false;
+      }
+      if (existingIx != null) {
+        _playlist.removeAt(existingIx);
+        if (existingIx < _index) {
+          _index--;
+        }
+      }
+      final insertAt = (_index + 1).clamp(0, _playlist.length);
+      _playlist.insert(insertAt, track);
+      _sourceNeedsReload = true;
+      notifyListeners();
+      return true;
+    }
+
+    final curPl = _logicalPlaylistIndex();
+    if (existingIx != null && existingIx == curPl) {
+      return false;
+    }
+    if (existingIx != null) {
+      _removePlaylistIndexWhileShuffling(existingIx);
+    }
+    if (!_shuffle) {
+      int? ex;
+      for (var i = 0; i < _playlist.length; i++) {
+        if (_sameQueuedIdentity(_playlist[i], track)) {
+          ex = i;
+          break;
+        }
+      }
+      if (ex == _index) {
+        return false;
+      }
+      if (ex != null) {
+        _playlist.removeAt(ex);
+        if (ex < _index) {
+          _index--;
+        }
+      }
+      final insertAt = (_index + 1).clamp(0, _playlist.length);
+      _playlist.insert(insertAt, track);
+      _sourceNeedsReload = true;
+      notifyListeners();
+      return true;
+    }
+
+    _playlist.add(track);
+    final newIx = _playlist.length - 1;
+    final insertPos = (_shufflePos + 1).clamp(0, _shuffleOrder.length);
+    _shuffleOrder.insert(insertPos, newIx);
+
+    _sourceNeedsReload = true;
+    notifyListeners();
+    return true;
+  }
+
+  void _removePlaylistIndexWhileShuffling(int rm) {
+    final curKey = canonicalMusicLibraryPathKey(
+      (currentTrack?.filePath ?? '').trim(),
+    );
+    _playlist.removeAt(rm);
+    final nextOrder = <int>[];
+    for (final oi in _shuffleOrder) {
+      if (oi == rm) continue;
+      nextOrder.add(oi > rm ? oi - 1 : oi);
+    }
+    _shuffleOrder = nextOrder;
+    if (_shuffleOrder.isEmpty) {
+      if (_playlist.isEmpty) {
+        _resetShuffleState();
+        return;
+      }
+      _shuffle = false;
+      _shuffleOrder = [];
+      _shufflePos = 0;
+      _index = _index.clamp(0, _playlist.length - 1);
+      return;
+    }
+    if (curKey.isEmpty) {
+      _shufflePos = _shufflePos.clamp(0, _shuffleOrder.length - 1);
+      _index = _shuffleOrder[_shufflePos].clamp(0, _playlist.length - 1);
+      return;
+    }
+    var found = false;
+    for (var i = 0; i < _shuffleOrder.length; i++) {
+      final pi = _shuffleOrder[i];
+      if (pi < 0 || pi >= _playlist.length) continue;
+      final fp = _playlist[pi].filePath?.trim() ?? '';
+      if (fp.isNotEmpty && canonicalMusicLibraryPathKey(fp) == curKey) {
+        _shufflePos = i;
+        _index = pi;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      _shufflePos = 0;
+      _index = _shuffleOrder[0].clamp(0, _playlist.length - 1);
+    }
+  }
+
   /// Resolves [filePath] to a library row when possible (same rules as Library sheets).
   TrackItem trackForLibraryPath(String filePath) {
     final raw = filePath.trim();

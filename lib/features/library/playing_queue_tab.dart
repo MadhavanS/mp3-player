@@ -23,6 +23,7 @@ class PlayingQueueTab extends StatelessWidget {
     required this.searchQuery,
     required this.scrollController,
     required this.scrollAnchorKey,
+    required this.onScrollToCurrentPlaying,
     required this.onOverflow,
     required this.onReorder,
   });
@@ -34,6 +35,9 @@ class PlayingQueueTab extends StatelessWidget {
 
   final ScrollController scrollController;
   final GlobalKey scrollAnchorKey;
+
+  /// Scrolls the queue so the now-playing row aligns to the top (same helper as deep links).
+  final Future<void> Function() onScrollToCurrentPlaying;
 
   final void Function(int playlistIndex, TrackOverflowAction action) onOverflow;
 
@@ -113,7 +117,11 @@ class PlayingQueueTab extends StatelessWidget {
         final allowReorder =
             player.canReorderPlaybackQueue && searchQuery.isEmpty;
 
-        return CustomScrollView(
+        final showJumpToCurrentFab = rows.any(
+          (r) => r.plIndex == player.currentIndex,
+        );
+
+        final scrollBody = CustomScrollView(
           controller: scrollController,
           slivers: [
             if (allowReorder)
@@ -181,6 +189,39 @@ class PlayingQueueTab extends StatelessWidget {
                 }, childCount: rows.length),
               ),
             const SliverToBoxAdapter(child: SizedBox(height: 96)),
+          ],
+        );
+
+        if (!showJumpToCurrentFab) {
+          return scrollBody;
+        }
+
+        final accent = context.controlAccent;
+        return Stack(
+          clipBehavior: Clip.none,
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(child: scrollBody),
+            Positioned(
+              left: 8,
+              bottom: 8,
+              child: SafeArea(
+                minimum: const EdgeInsets.only(left: 4, bottom: 4),
+                child: Tooltip(
+                  message: 'Jump to now playing',
+                  child: FloatingActionButton.small(
+                    heroTag: 'library_queue_jump_current',
+                    elevation: 3,
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    onPressed: () {
+                      unawaited(onScrollToCurrentPlaying());
+                    },
+                    child: const Icon(Icons.vertical_align_top_rounded),
+                  ),
+                ),
+              ),
+            ),
           ],
         );
       },
