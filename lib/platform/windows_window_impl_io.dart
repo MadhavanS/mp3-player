@@ -19,7 +19,7 @@ Future<void> initWindowsWindowOnLaunchImpl() async {
       size: const Size(420, 896),
       minimumSize: const Size(360, 480),
       center: true,
-      title: 'MP3 Player',
+      title: 'MadPlayer',
       alwaysOnTop: alwaysOnTop,
     ),
     () async {

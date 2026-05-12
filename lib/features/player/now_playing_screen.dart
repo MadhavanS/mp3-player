@@ -111,7 +111,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 
   /// Desktop has no system back gesture; offer Escape like many full-screen UIs.
   ///
-  /// On Windows, Escape is handled by [Mp3PlayerApp]'s global key handler so it can
+  /// On Windows, Escape is handled by [MadPlayerApp]'s global key handler so it can
   /// return to Queue vs Songs without double-popping (CallbackShortcuts + global would
   /// each call [Navigator.pop] and black out the window).
   Widget _wrapDesktopEscDismiss({required Widget child}) {

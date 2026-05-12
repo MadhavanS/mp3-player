@@ -22,14 +22,14 @@ import 'theme/app_theme.dart';
 import 'theme/player_chrome_background.dart';
 import 'widgets/action_pill_toast.dart';
 
-class Mp3PlayerApp extends StatefulWidget {
-  const Mp3PlayerApp({super.key});
+class MadPlayerApp extends StatefulWidget {
+  const MadPlayerApp({super.key});
 
   @override
-  State<Mp3PlayerApp> createState() => _Mp3PlayerAppState();
+  State<MadPlayerApp> createState() => _MadPlayerAppState();
 }
 
-class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
+class _MadPlayerAppState extends State<MadPlayerApp> {
   late final PlayerController _player = PlayerController();
   AppThemeSetting _themeSetting = AppThemeSetting.automatic;
   AppFontOption _fontOption = AppFontOption.system;
@@ -294,7 +294,7 @@ class _Mp3PlayerAppState extends State<Mp3PlayerApp> {
       controller: _player,
       child: MaterialApp(
         navigatorKey: appNavigatorKey,
-        title: 'MadPlay',
+        title: 'MadPlayer',
         debugShowCheckedModeBanner: false,
         theme: theme,
         home: MainShell(

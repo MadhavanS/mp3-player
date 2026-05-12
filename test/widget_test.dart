@@ -18,7 +18,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
   testWidgets('Library shell smoke test', (WidgetTester tester) async {
-    await tester.pumpWidget(const Mp3PlayerApp());
+    await tester.pumpWidget(const MadPlayerApp());
 
     expect(find.byKey(librarySearchFieldKey), findsOneWidget);
   });

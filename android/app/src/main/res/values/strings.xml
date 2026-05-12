@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="widget_title">MadPlay</string>
+    <string name="widget_title">MadPlayer</string>
     <string name="widget_description">Now playing: artwork, seek progress, and playback controls.</string>
     <string name="widget_idle_title">Nothing playing</string>
     <string name="widget_idle_subtitle">Open the app to play music</string>
