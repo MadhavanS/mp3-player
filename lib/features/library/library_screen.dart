@@ -156,7 +156,14 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   /// Used when closing Now Playing to restore the library section that started playback.
-  Future<void> switchToTabAndScrollToCurrentTrack(LibraryTabId tabId) async {
+  ///
+  /// When [scrollToCurrentTrack] is false (used for the Songs tab), the active list keeps
+  /// its previous [ScrollController] offset instead of running [_scrollActiveTabToCurrentTrack],
+  /// which can block the UI on very large libraries.
+  Future<void> switchToTabAndScrollToCurrentTrack(
+    LibraryTabId tabId, {
+    bool scrollToCurrentTrack = true,
+  }) async {
     if (!mounted) return;
     var ix = _visibleTabs.indexOf(tabId);
     if (ix < 0) {
@@ -169,7 +176,9 @@ class LibraryScreenState extends State<LibraryScreen>
     if (!mounted) return;
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
-    await _scrollActiveTabToCurrentTrack();
+    if (scrollToCurrentTrack) {
+      await _scrollActiveTabToCurrentTrack();
+    }
   }
 
   /// Active library tab in the current UI.
