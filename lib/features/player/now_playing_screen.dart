@@ -14,6 +14,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/daisy_background.dart';
 import '../../widgets/track_album_art.dart';
+import '../shell/now_playing_escape_bridge.dart';
 import 'edit_track_tags_sheet.dart';
 import 'mini_player_bar.dart';
 import 'site_rename_standalone_dialog.dart';
@@ -81,8 +82,21 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   double _pullDismissPx = 0;
   bool _collapseRequested = false;
 
+  @override
+  void initState() {
+    super.initState();
+    NowPlayingRouteMark.enter();
+  }
+
+  @override
+  void dispose() {
+    NowPlayingRouteMark.leave();
+    super.dispose();
+  }
+
   void _safeCollapse() {
     if (_collapseRequested || !mounted) return;
+    if (NowPlayingEscDuplicatePopGuard.blockShortcutCollapse) return;
     _collapseRequested = true;
     widget.onCollapse();
   }
@@ -96,8 +110,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           defaultTargetPlatform == TargetPlatform.macOS);
 
   /// Desktop has no system back gesture; offer Escape like many full-screen UIs.
+  ///
+  /// On Windows, Escape is handled by [Mp3PlayerApp]'s global key handler so it can
+  /// return to Queue vs Songs without double-popping (CallbackShortcuts + global would
+  /// each call [Navigator.pop] and black out the window).
   Widget _wrapDesktopEscDismiss({required Widget child}) {
     if (!_desktopNowPlayingEscDismiss) return child;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      return Focus(autofocus: true, child: child);
+    }
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): _safeCollapse,
@@ -1377,10 +1398,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             tooltip: 'Back to library',
             iconSize: 30,
             onPressed: _safeCollapse,
-            icon: Icon(
-              Icons.chevron_left_rounded,
-              color: ink.active,
-            ),
+            icon: Icon(Icons.chevron_left_rounded, color: ink.active),
           ),
           Expanded(
             child: Row(

@@ -161,15 +161,18 @@ class PlayerController extends ChangeNotifier {
   bool _isLoadingSource = false;
   int _loadCurrentDepth = 0;
   int? _pendingConcatIndexWhileLoading;
+
   /// After [setAudioSource], [currentIndexStream] can still emit `0` once loading
   /// ends even when [initialIndex] was non-zero — that would overwrite [_index] via
   /// [_onConcatIndexChanged]. Ignore that specific stray event for a short window.
   DateTime? _postLoadConcatGuardUntil;
   int? _postLoadExpectedConcatIndex;
   bool _sourceNeedsReload = false;
+
   /// [AudioPlayer.stop] can report [ProcessingState.completed] on some platforms.
   /// That must not run [skipNext] while we only released the decoder for a disk edit.
   bool _suppressTrackCompletedAdvance = false;
+
   /// [processingStateStream] may deliver [ProcessingState.completed] late; ignore briefly
   /// after [stopForExternalFileEdit] even after [_suppressTrackCompletedAdvance] clears.
   DateTime? _ignoreSpuriousPlaybackCompletedUntil;
@@ -338,6 +341,16 @@ class PlayerController extends ChangeNotifier {
 
   bool get shuffleEnabled => _shuffle;
 
+  /// Playlist indices in the order the player will play them (respects shuffle and folder scope).
+  List<int> get playbackOrderIndices => List<int>.from(_effectiveQueueOrder());
+
+  /// Whether the queue tab may reorder rows (folder filter + non-shuffle uses a non-contiguous subset).
+  bool get canReorderPlaybackQueue {
+    if (_playlist.length < 2) return false;
+    if (_playbackPathKeysScope != null && !_shuffle) return false;
+    return true;
+  }
+
   PlaylistRepeatMode get repeatMode => _repeat;
 
   /// Limits next/previous and repeat-all to tracks inside the scoped folder (see Files flow).
@@ -407,7 +420,8 @@ class PlayerController extends ChangeNotifier {
     final enteredComplete =
         _previousProcessing != ProcessingState.completed &&
         state == ProcessingState.completed;
-    final ignoreCompleted = _suppressTrackCompletedAdvance ||
+    final ignoreCompleted =
+        _suppressTrackCompletedAdvance ||
         (_ignoreSpuriousPlaybackCompletedUntil != null &&
             DateTime.now().isBefore(_ignoreSpuriousPlaybackCompletedUntil!));
     if (enteredComplete && ignoreCompleted) {
@@ -496,7 +510,10 @@ class PlayerController extends ChangeNotifier {
   /// report index `0`. That value is queued as [_pendingConcatIndexWhileLoading] and
   /// would otherwise overwrite [_index] in [_loadCurrent]'s `finally`, switching the
   /// queue to the wrong song (e.g. after tag / cover edits that reload the source).
-  bool _pendingConcatIndexMatchesLoadedPath(int concatIdx, String loadTargetKey) {
+  bool _pendingConcatIndexMatchesLoadedPath(
+    int concatIdx,
+    String loadTargetKey,
+  ) {
     if (loadTargetKey.isEmpty) return true;
     final order = _activeSourceOrder.isNotEmpty
         ? _activeSourceOrder
@@ -675,6 +692,131 @@ class PlayerController extends ChangeNotifier {
     }
     await appendToPlaylist([track]);
     return true;
+  }
+
+  /// Inserts [track] so it plays immediately after the current song.
+  ///
+  /// Returns `false` only when [track] is already the current queue item.
+  /// With shuffle on, an existing non-current copy is removed first, then the track
+  /// is queued after the current position in the shuffle order.
+  Future<bool> playTrackNext(
+    TrackItem track, {
+    LibraryTabId? playbackOriginTab,
+  }) async {
+    if (_playlist.isEmpty) {
+      await setPlaylistAndPlay([track], playbackOriginTab: playbackOriginTab);
+      return true;
+    }
+
+    int? existingIx;
+    for (var i = 0; i < _playlist.length; i++) {
+      if (_sameQueuedIdentity(_playlist[i], track)) {
+        existingIx = i;
+        break;
+      }
+    }
+
+    if (!_shuffle) {
+      if (existingIx == _index) {
+        return false;
+      }
+      if (existingIx != null) {
+        _playlist.removeAt(existingIx);
+        if (existingIx < _index) {
+          _index--;
+        }
+      }
+      final insertAt = (_index + 1).clamp(0, _playlist.length);
+      _playlist.insert(insertAt, track);
+      _sourceNeedsReload = true;
+      notifyListeners();
+      return true;
+    }
+
+    final curPl = _logicalPlaylistIndex();
+    if (existingIx != null && existingIx == curPl) {
+      return false;
+    }
+    if (existingIx != null) {
+      _removePlaylistIndexWhileShuffling(existingIx);
+    }
+    if (!_shuffle) {
+      int? ex;
+      for (var i = 0; i < _playlist.length; i++) {
+        if (_sameQueuedIdentity(_playlist[i], track)) {
+          ex = i;
+          break;
+        }
+      }
+      if (ex == _index) {
+        return false;
+      }
+      if (ex != null) {
+        _playlist.removeAt(ex);
+        if (ex < _index) {
+          _index--;
+        }
+      }
+      final insertAt = (_index + 1).clamp(0, _playlist.length);
+      _playlist.insert(insertAt, track);
+      _sourceNeedsReload = true;
+      notifyListeners();
+      return true;
+    }
+
+    _playlist.add(track);
+    final newIx = _playlist.length - 1;
+    final insertPos = (_shufflePos + 1).clamp(0, _shuffleOrder.length);
+    _shuffleOrder.insert(insertPos, newIx);
+
+    _sourceNeedsReload = true;
+    notifyListeners();
+    return true;
+  }
+
+  void _removePlaylistIndexWhileShuffling(int rm) {
+    final curKey = canonicalMusicLibraryPathKey(
+      (currentTrack?.filePath ?? '').trim(),
+    );
+    _playlist.removeAt(rm);
+    final nextOrder = <int>[];
+    for (final oi in _shuffleOrder) {
+      if (oi == rm) continue;
+      nextOrder.add(oi > rm ? oi - 1 : oi);
+    }
+    _shuffleOrder = nextOrder;
+    if (_shuffleOrder.isEmpty) {
+      if (_playlist.isEmpty) {
+        _resetShuffleState();
+        return;
+      }
+      _shuffle = false;
+      _shuffleOrder = [];
+      _shufflePos = 0;
+      _index = _index.clamp(0, _playlist.length - 1);
+      return;
+    }
+    if (curKey.isEmpty) {
+      _shufflePos = _shufflePos.clamp(0, _shuffleOrder.length - 1);
+      _index = _shuffleOrder[_shufflePos].clamp(0, _playlist.length - 1);
+      return;
+    }
+    var found = false;
+    for (var i = 0; i < _shuffleOrder.length; i++) {
+      final pi = _shuffleOrder[i];
+      if (pi < 0 || pi >= _playlist.length) continue;
+      final fp = _playlist[pi].filePath?.trim() ?? '';
+      if (fp.isNotEmpty && canonicalMusicLibraryPathKey(fp) == curKey) {
+        _shufflePos = i;
+        _index = pi;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      _shufflePos = 0;
+      _index = _shuffleOrder[0].clamp(0, _playlist.length - 1);
+    }
   }
 
   /// Resolves [filePath] to a library row when possible (same rules as Library sheets).
@@ -859,9 +1001,7 @@ class PlayerController extends ChangeNotifier {
     if (isCurrent) {
       await _loadCurrent();
       if (resumePlayingIfCurrentRemoved) {
-        await _resumePlaybackAfterLoad(
-          context: 'removePlaylistEntryAt.resume',
-        );
+        await _resumePlaybackAfterLoad(context: 'removePlaylistEntryAt.resume');
       }
     } else {
       await _loadCurrent(initialPosition: _player.position);
@@ -888,6 +1028,39 @@ class PlayerController extends ChangeNotifier {
     if (autoPlay) {
       await _resumePlaybackAfterLoad(context: 'jumpToIndex.play');
     }
+  }
+
+  /// Reorders [playbackOrderIndices] without interrupting the loaded current source.
+  void reorderPlaybackQueue(int oldOrderIndex, int newOrderIndex) {
+    if (!canReorderPlaybackQueue) return;
+    final order = _effectiveQueueOrder();
+    if (order.isEmpty) return;
+    if (oldOrderIndex < 0 || oldOrderIndex >= order.length) return;
+    newOrderIndex = newOrderIndex.clamp(0, order.length - 1);
+    if (oldOrderIndex == newOrderIndex) return;
+
+    if (_shuffle) {
+      final curPl = _logicalPlaylistIndex();
+      final perm = List<int>.from(_shuffleOrder);
+      final moved = perm.removeAt(oldOrderIndex);
+      perm.insert(newOrderIndex, moved);
+      _shuffleOrder = perm;
+      _shufflePos = _shuffleOrder.indexOf(curPl);
+      if (_shufflePos < 0) _shufflePos = 0;
+    } else {
+      final moving = _playlist.removeAt(oldOrderIndex);
+      _playlist.insert(newOrderIndex, moving);
+      if (oldOrderIndex == _index) {
+        _index = newOrderIndex;
+      } else if (oldOrderIndex < _index && newOrderIndex >= _index) {
+        _index--;
+      } else if (oldOrderIndex > _index && newOrderIndex <= _index) {
+        _index++;
+      }
+    }
+
+    _sourceNeedsReload = true;
+    notifyListeners();
   }
 
   Future<void> _loadCurrent({

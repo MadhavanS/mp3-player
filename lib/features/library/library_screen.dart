@@ -21,6 +21,7 @@ import '../../widgets/daisy_background.dart';
 import '../../widgets/track_album_art.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
+import 'playing_queue_tab.dart';
 
 /// Key for the library search field (widget tests).
 const Key librarySearchFieldKey = Key('library_search_field');
@@ -84,14 +85,19 @@ class LibraryScreenState extends State<LibraryScreen>
   final GlobalKey _scrollAnchorRecentPlayed = GlobalKey(
     debugLabel: 'libScrollRecentPlayed',
   );
+  final GlobalKey _scrollAnchorNowPlayingList = GlobalKey(
+    debugLabel: 'libScrollNowPlayingList',
+  );
 
   final ScrollController _songsScrollController = ScrollController();
   final ScrollController _recentAddedScrollController = ScrollController();
   final ScrollController _playlistScrollController = ScrollController();
   final ScrollController _favoritesScrollController = ScrollController();
   final ScrollController _recentPlayedScrollController = ScrollController();
+  final ScrollController _nowPlayingListScrollController = ScrollController();
 
   static const double _kLibraryListRowStride = 88;
+  static const double _kQueueListRowStride = 64;
 
   /// Search text shorter than this (after trim) does not filter library lists.
   static const int _kLibrarySearchMinChars = 3;
@@ -165,6 +171,9 @@ class LibraryScreenState extends State<LibraryScreen>
     if (!mounted) return;
     await _scrollActiveTabToCurrentTrack();
   }
+
+  /// Active library tab in the current UI.
+  LibraryTabId get currentTabId => _currentLibraryTabId;
 
   LibraryTabId get _currentLibraryTabId =>
       _visibleTabs[_tabController.index.clamp(0, _visibleTabs.length - 1)];
@@ -282,6 +291,7 @@ class LibraryScreenState extends State<LibraryScreen>
     _playlistScrollController.dispose();
     _favoritesScrollController.dispose();
     _recentPlayedScrollController.dispose();
+    _nowPlayingListScrollController.dispose();
     LibraryTabsStore.revision.removeListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.removeListener(_onSongSortStoreRevision);
     RecentListLimitsStore.revision.removeListener(_onRecentLimitsRevision);
@@ -355,8 +365,9 @@ class LibraryScreenState extends State<LibraryScreen>
     ScrollController controller,
     int index,
     int totalItems,
-    GlobalKey anchorKey,
-  ) async {
+    GlobalKey anchorKey, {
+    double rowStride = _kLibraryListRowStride,
+  }) async {
     if (!mounted) return;
     final clampedIndex = index.clamp(0, totalItems > 0 ? totalItems - 1 : 0);
 
@@ -380,7 +391,7 @@ class LibraryScreenState extends State<LibraryScreen>
       } else {
         final scale = totalItems <= 1 ? 0.0 : (clampedIndex / (totalItems - 1));
         final proportional = scale * maxExtent;
-        final linear = (index * _kLibraryListRowStride).clamp(0.0, maxExtent);
+        final linear = (index * rowStride).clamp(0.0, maxExtent);
         target = switch (attempt % 3) {
           0 => proportional.clamp(0.0, maxExtent),
           1 => linear,
@@ -389,6 +400,38 @@ class LibraryScreenState extends State<LibraryScreen>
       }
       controller.jumpTo(target);
     }
+  }
+
+  Future<void> _scrollNowPlayingQueueToCurrentTrack() async {
+    if (!mounted) return;
+    final player = PlayerController.of(context);
+    final playlist = player.playlist;
+    if (playlist.isEmpty) return;
+    final currentPl = player.currentIndex;
+    if (currentPl < 0 || currentPl >= playlist.length) return;
+
+    final searchQuery = _effectiveLibrarySearchQuery(_searchController.text);
+    final order = player.playbackOrderIndices;
+
+    var listIndex = -1;
+    var visibleCount = 0;
+    for (var r = 0; r < order.length; r++) {
+      final pl = order[r];
+      if (pl < 0 || pl >= playlist.length) continue;
+      final t = playlist[pl];
+      if (!PlayingQueueTab.matchesSearchFilter(t, searchQuery)) continue;
+      if (pl == currentPl) listIndex = visibleCount;
+      visibleCount++;
+    }
+    if (listIndex < 0) return;
+
+    await _coaxLazyListThenEnsureVisible(
+      _nowPlayingListScrollController,
+      listIndex,
+      visibleCount,
+      _scrollAnchorNowPlayingList,
+      rowStride: _kQueueListRowStride,
+    );
   }
 
   Future<void> _scrollActiveTabToCurrentTrack() async {
@@ -493,6 +536,46 @@ class LibraryScreenState extends State<LibraryScreen>
           _scrollAnchorRecentPlayed,
         );
         return;
+      case LibraryTabId.nowPlayingList:
+        final order = player.playbackOrderIndices;
+        final playlist = player.playlist;
+        var orderPos = -1;
+        for (var r = 0; r < order.length; r++) {
+          final pl = order[r];
+          if (pl < 0 || pl >= playlist.length) continue;
+          final fp = playlist[pl].filePath;
+          if (fp != null && canonicalMusicLibraryPathKey(fp) == pathKey) {
+            orderPos = r;
+            break;
+          }
+        }
+        if (orderPos < 0) return;
+        var listIndex = orderPos;
+        var listTotal = order.length;
+        if (searchQuery.isNotEmpty) {
+          listIndex = -1;
+          var vis = 0;
+          for (var r = 0; r < order.length; r++) {
+            final pl = order[r];
+            if (pl < 0 || pl >= playlist.length) continue;
+            final t = playlist[pl];
+            if (!PlayingQueueTab.matchesSearchFilter(t, searchQuery)) {
+              continue;
+            }
+            if (r == orderPos) listIndex = vis;
+            vis++;
+          }
+          listTotal = vis;
+          if (listIndex < 0) return;
+        }
+        await _coaxLazyListThenEnsureVisible(
+          _nowPlayingListScrollController,
+          listIndex,
+          listTotal,
+          _scrollAnchorNowPlayingList,
+          rowStride: _kQueueListRowStride,
+        );
+        return;
     }
   }
 
@@ -505,6 +588,7 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabId.songs ||
     LibraryTabId.recentlyAdded ||
     LibraryTabId.playlist => 'Search by title (min. 3 characters)',
+    LibraryTabId.nowPlayingList => 'Search queue (min. 3 characters)',
     LibraryTabId.favourites => 'Search favourites (min. 3 characters)',
     LibraryTabId.recentlyPlayed => 'Search RecentlyPlayed (min. 3 characters)',
   };
@@ -1281,25 +1365,28 @@ class LibraryScreenState extends State<LibraryScreen>
                             tooltip: 'Refresh library',
                             onPressed: widget.onRefreshLibrary,
                           ),
-                          PopupMenuButton<LibraryTrackSortMode>(
-                            tooltip: 'Sort songs',
-                            icon: Icon(
-                              Icons.sort_rounded,
-                              color: pal.onScaffold,
-                            ),
-                            padding: EdgeInsets.zero,
-                            onSelected: (mode) async {
-                              await LibraryTrackSortStore.save(mode);
-                            },
-                            itemBuilder: (context) => [
-                              for (final mode in LibraryTrackSortMode.values)
-                                CheckedPopupMenuItem<LibraryTrackSortMode>(
-                                  value: mode,
-                                  checked: mode == _songSortMode,
-                                  child: Text(mode.menuLabel),
-                                ),
-                            ],
-                          ),
+                          if (_currentLibraryTabId == LibraryTabId.songs)
+                            PopupMenuButton<LibraryTrackSortMode>(
+                              tooltip: 'Sort songs',
+                              icon: Icon(
+                                Icons.sort_rounded,
+                                color: pal.onScaffold,
+                              ),
+                              padding: EdgeInsets.zero,
+                              onSelected: (mode) async {
+                                await LibraryTrackSortStore.save(mode);
+                              },
+                              itemBuilder: (context) => [
+                                for (final mode in LibraryTrackSortMode.values)
+                                  CheckedPopupMenuItem<LibraryTrackSortMode>(
+                                    value: mode,
+                                    checked: mode == _songSortMode,
+                                    child: Text(mode.menuLabel),
+                                  ),
+                              ],
+                            )
+                          else
+                            const SizedBox(width: 48),
                         ],
                       ),
                     ),
@@ -1397,6 +1484,25 @@ class LibraryScreenState extends State<LibraryScreen>
         onClearBrowseFolder: browsePathKeys == null
             ? null
             : widget.onClearSongsBrowseFilter,
+      ),
+      LibraryTabId.nowPlayingList => PlayingQueueTab(
+        theme: theme,
+        pal: pal,
+        player: player,
+        searchQuery: searchQuery,
+        scrollController: _nowPlayingListScrollController,
+        scrollAnchorKey: _scrollAnchorNowPlayingList,
+        onScrollToCurrentPlaying: _scrollNowPlayingQueueToCurrentTrack,
+        onOverflow: (playlistIndex, action) => _onTrackOverflow(
+          context,
+          player,
+          playlistIndex,
+          action,
+          playbackOriginTab: LibraryTabId.nowPlayingList,
+        ),
+        onReorder: (oldOrder, newOrder) {
+          player.reorderPlaybackQueue(oldOrder, newOrder);
+        },
       ),
       LibraryTabId.recentlyAdded => _buildRecentlyAddedTab(
         theme,
