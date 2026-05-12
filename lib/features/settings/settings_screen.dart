@@ -566,7 +566,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           subtitle: Text(
-            'Keep MP3 Player above other windows',
+            'Keep MadPlayer above other windows',
             style: theme.textTheme.bodySmall?.copyWith(
               color: pal.textMuted.withValues(alpha: 0.95),
             ),

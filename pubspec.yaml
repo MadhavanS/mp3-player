@@ -1,5 +1,5 @@
 name: mp3_player
-description: "Local MP3 player for Android (folder picker + playback)."
+description: "MadPlayer — local MP3 playback (folder picker + queue)."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

@@ -42,7 +42,7 @@ Future<void> _writeMp3Id3v2Safe(File original, Mp3Metadata metadata) async {
     if (writtenLen != out.length) {
       throw StateError(
         'Write verification failed (file size $writtenLen vs $out). '
-        'On Android, grant "All files access" in Settings → Apps → MP3 Player → Permissions.',
+        'On Android, grant "All files access" in Settings → Apps → MadPlayer → Permissions.',
       );
     }
     if (out.length >= 3 &&

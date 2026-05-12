@@ -1,4 +1,4 @@
-# Flutter MP3 Player (Android)
+# MadPlayer
 
 A Flutter Android app that lets the user pick a folder on the device, lists `.mp3` files inside it (recursively or only that folder—your choice when implementing), and plays them with a UI inspired by the reference design: deep navy header, white “card” body on **Now Playing**, track list on a navy screen, and a bottom **mini player**.
 

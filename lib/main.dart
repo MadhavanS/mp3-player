@@ -22,7 +22,7 @@ Future<void> main() async {
       preloadArtwork: true,
     );
   }
-  runApp(const Mp3PlayerApp());
+  runApp(const MadPlayerApp());
 }
 
 bool get _mediaNotificationSupported {
