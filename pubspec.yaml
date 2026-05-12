@@ -86,7 +86,18 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "C:/Users/smadh/.cursor/projects/d-Programming-Programs-Flutter-mp3-player/assets/c__Users_smadh_AppData_Roaming_Cursor_User_workspaceStorage_0dbfe92190d87ed8cf776b817604569f_images_music_11028571-34792f68-4d6d-496b-8a4e-48b9af3108b4.png"
+  image_path: "assets/app_icon_source.png"
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/app_icon_source.png"
+  windows:
+    generate: true
+    image_path: "assets/app_icon_source.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/app_icon_source.png"
 
   # To add assets to your application, add an assets section, like this:
   # assets:

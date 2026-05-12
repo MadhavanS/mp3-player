@@ -849,7 +849,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         if (!mounted) return;
         final st = _libraryScreenKey.currentState;
         if (st == null) return;
-        await st.switchToTabAndScrollToCurrentTrack(tabId);
+        await st.switchToTabAndScrollToCurrentTrack(
+          tabId,
+          scrollToCurrentTrack: tabId != LibraryTabId.songs,
+        );
         if (!mounted) return;
         if (tabId == LibraryTabId.playlist && userPlaylistId != null) {
           await st.openUserPlaylistSheetById(userPlaylistId);
