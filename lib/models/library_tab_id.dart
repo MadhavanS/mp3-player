@@ -1,6 +1,8 @@
 /// Identifies a Library screen tab (persisted for playback origin + settings).
 enum LibraryTabId {
   songs('songs', 'Songs'),
+  /// Active playback queue (order matches what will play next, including shuffle).
+  nowPlayingList('now_playing_list', 'Queue'),
   recentlyAdded('recently_added', 'RecentlyAdded'),
   playlist('playlist', 'Playlist'),
   favourites('favourites', 'Favourites'),

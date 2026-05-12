@@ -338,6 +338,17 @@ class PlayerController extends ChangeNotifier {
 
   bool get shuffleEnabled => _shuffle;
 
+  /// Playlist indices in the order the player will play them (respects shuffle and folder scope).
+  List<int> get playbackOrderIndices =>
+      List<int>.from(_effectiveQueueOrder());
+
+  /// Whether the queue tab may reorder rows (folder filter + non-shuffle uses a non-contiguous subset).
+  bool get canReorderPlaybackQueue {
+    if (_playlist.length < 2) return false;
+    if (_playbackPathKeysScope != null && !_shuffle) return false;
+    return true;
+  }
+
   PlaylistRepeatMode get repeatMode => _repeat;
 
   /// Limits next/previous and repeat-all to tracks inside the scoped folder (see Files flow).
@@ -887,6 +898,49 @@ class PlayerController extends ChangeNotifier {
     await _loadCurrent();
     if (autoPlay) {
       await _resumePlaybackAfterLoad(context: 'jumpToIndex.play');
+    }
+  }
+
+  /// Reorders [playbackOrderIndices] from [oldOrderIndex] to [newOrderIndex] and rebuilds audio.
+  Future<void> reorderPlaybackQueue(int oldOrderIndex, int newOrderIndex) async {
+    if (!canReorderPlaybackQueue) return;
+    final order = _effectiveQueueOrder();
+    if (order.isEmpty) return;
+    if (oldOrderIndex < 0 || oldOrderIndex >= order.length) return;
+    newOrderIndex = newOrderIndex.clamp(0, order.length - 1);
+    if (oldOrderIndex == newOrderIndex) return;
+
+    final pos = _player.position;
+    final wasPlaying = _player.playing;
+
+    if (_shuffle) {
+      final curPl = _logicalPlaylistIndex();
+      final perm = List<int>.from(_shuffleOrder);
+      final moved = perm.removeAt(oldOrderIndex);
+      perm.insert(newOrderIndex, moved);
+      _shuffleOrder = perm;
+      _shufflePos = _shuffleOrder.indexOf(curPl);
+      if (_shufflePos < 0) _shufflePos = 0;
+    } else {
+      final moving = _playlist.removeAt(oldOrderIndex);
+      _playlist.insert(newOrderIndex, moving);
+      final fp = (currentTrack?.filePath ?? '').trim();
+      if (fp.isNotEmpty) {
+        final ck = canonicalMusicLibraryPathKey(fp);
+        if (ck.isNotEmpty) {
+          final ni = _playlist.indexWhere((t) {
+            final u = (t.filePath ?? '').trim();
+            return u.isNotEmpty && canonicalMusicLibraryPathKey(u) == ck;
+          });
+          if (ni >= 0) _index = ni;
+        }
+      }
+    }
+
+    notifyListeners();
+    await _loadCurrent(initialPosition: pos);
+    if (wasPlaying) {
+      await _resumePlaybackAfterLoad(context: 'reorderPlaybackQueue.play');
     }
   }
 
