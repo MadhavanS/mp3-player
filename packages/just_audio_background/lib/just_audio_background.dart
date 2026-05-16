@@ -72,6 +72,12 @@ class JustAudioBackground {
       androidBrowsableRootExtras: androidBrowsableRootExtras,
     );
   }
+
+  /// Updates the currently reported [MediaItem] without touching the native
+  /// decoder/audio source. Useful for late artwork metadata, where reloading the
+  /// source would cause Android MediaCodec flush/reset churn.
+  static Future<void> updateCurrentMediaItem(MediaItem mediaItem) =>
+      _playerAudioHandler.customUpdateCurrentMediaItem(mediaItem);
 }
 
 class _JustAudioBackgroundPlugin extends JustAudioPlatform {
@@ -447,6 +453,18 @@ class _PlayerAudioHandler extends BaseAudioHandler
     }
   }
 
+  Future<void> customUpdateCurrentMediaItem(MediaItem item) async {
+    final queueIndex = index;
+    if (queueIndex != null &&
+        queueIndex >= 0 &&
+        queueIndex < currentQueue.length) {
+      final updatedQueue = List<MediaItem>.from(currentQueue);
+      updatedQueue[queueIndex] = item;
+      queue.add(updatedQueue);
+    }
+    mediaItem.add(item);
+  }
+
   Future<LoadResponse> customLoad(LoadRequest request) async {
     _source = request.audioSourceMessage;
     _updateShuffleIndices();
@@ -625,7 +643,9 @@ class _PlayerAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> skipToQueueItem(int index) async {
-    (await _player).seek(SeekRequest(position: Duration.zero, index: index));
+    await (await _player).seek(
+      SeekRequest(position: Duration.zero, index: index),
+    );
   }
 
   @override
@@ -645,7 +665,9 @@ class _PlayerAudioHandler extends BaseAudioHandler
   @override
   Future<void> play() async {
     if (_justAudioEvent.processingState == ProcessingStateMessage.completed) {
-      await skipToQueueItem(0);
+      await (await _player).seek(
+        SeekRequest(position: Duration.zero, index: 0),
+      );
     }
     if (!_playing) {
       _updatePosition();
@@ -671,8 +693,9 @@ class _PlayerAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> seek(Duration position) async =>
-      await (await _player).seek(SeekRequest(position: position));
+  Future<void> seek(Duration position) async {
+    await (await _player).seek(SeekRequest(position: position));
+  }
 
   @override
   Future<void> setSpeed(double speed) async {
@@ -710,6 +733,11 @@ class _PlayerAudioHandler extends BaseAudioHandler
     (await _player).setShuffleMode(SetShuffleModeRequest(
         shuffleMode: ShuffleModeMessage.values[
             min(ShuffleModeMessage.values.length - 1, shuffleMode.index)]));
+  }
+
+  @override
+  Future<void> onTaskRemoved() async {
+    await stop();
   }
 
   @override

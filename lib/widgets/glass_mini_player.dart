@@ -288,6 +288,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                             listenable: widget.controller,
                             builder: (context, _) {
                               final playing = widget.controller.isPlaying;
+                              final disabled = widget.controller.transportCommandInFlight;
                               return SizedBox(
                                 width: 48,
                                 height: 48,
@@ -296,8 +297,9 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                                   shape: playButtonShape,
                                   clipBehavior: Clip.antiAlias,
                                   child: InkWell(
-                                    onTap: () =>
-                                        widget.controller.togglePlayPause(),
+                                    onTap: disabled
+                                        ? null
+                                        : () => widget.controller.togglePlayPause(),
                                     customBorder: const CircleBorder(),
                                     child: Icon(
                                       playing

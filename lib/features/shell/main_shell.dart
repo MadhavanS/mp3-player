@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../../models/track_item.dart';
 import '../../services/file_path_mtime_sort.dart';
 import '../../services/first_run_library_hint_store.dart';
 import '../../services/mp3_scanner.dart';
+import '../../services/storage_access.dart';
 import '../../services/mp3_scanner_types.dart';
 import '../../services/music_library_path_key.dart';
 import '../../services/playback_session_store.dart';
@@ -30,6 +32,10 @@ import '../player/now_playing_screen.dart';
 import '../player/track_overflow_actions.dart';
 import '../settings/settings_screen.dart';
 import 'now_playing_escape_bridge.dart';
+
+/// During folder scan, skip building a huge native playback queue until the user
+/// actually plays something (avoids hanging on "Loading tags…" for large libraries).
+const int _largeLibraryDeferPlayerQueueThreshold = 200;
 
 /// After [appNavigatorKey] pops to the root route, applies Library › Songs (drawer, shell page, tab).
 class EscapeToSongsLibraryHub {
@@ -118,6 +124,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Timer? _albumArtWarmupRetryTimer;
   bool _refreshInProgress = false;
 
+  /// Whether the user has granted audio/storage read permission (Android).
+  /// `null` = not yet checked; `true` = granted; `false` = denied.
+  bool? _storagePermissionGranted;
+
   /// Library tab that was visible when Now Playing was opened (for Windows Escape).
   LibraryTabId? _nowPlayingOpenedFromTab;
 
@@ -157,11 +167,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _scheduleIdleRescan();
-    }
-    if (state == AppLifecycleState.detached) {
-      final p = _playerRef;
-      if (p != null) {
-        unawaited(p.stopForExternalFileEdit());
+      // Re-check permission when resuming; the user may have just granted it
+      // from the system Settings app.  If it was previously denied and is now
+      // granted, trigger an immediate rescan so the library populates.
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        unawaited(_recheckPermissionOnResume());
       }
     }
     if (state == AppLifecycleState.paused ||
@@ -169,6 +179,22 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _idleRescanTimer?.cancel();
       _persistPlaybackDebounceTimer?.cancel();
       unawaited(_persistSession());
+    }
+  }
+
+  Future<void> _recheckPermissionOnResume() async {
+    final wasGranted = _storagePermissionGranted;
+    // Only check status — don't show a dialog here; the user is returning from
+    // somewhere else and we don't want to interrupt their flow.
+    final nowGranted = await ensureCanReadMusicFiles(
+      context,
+      showDialogIfDenied: false,
+    );
+    if (!mounted) return;
+    _storagePermissionGranted = nowGranted;
+    // If permission was just granted, kick off a background sync immediately.
+    if (wasGranted != true && nowGranted && _folderPaths.isNotEmpty) {
+      _scheduleBackgroundSync();
     }
   }
 
@@ -185,10 +211,39 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _bootstrapShellAsync() async {
+    // Request audio/storage permission before doing any file I/O on Android.
+    final permGranted = await ensureCanReadMusicFiles(context);
+    if (!mounted) return;
+    _storagePermissionGranted = permGranted;
+
     final showSettings = await PlaybackSessionStore.loadShellPageIsSettings();
     final browseKeys = await PlaybackSessionStore.loadBrowsePathKeys();
-    final paths = await SavedMusicFolders.load();
+    var paths = await SavedMusicFolders.load();
     if (!mounted) return;
+
+    // Prune saved folder paths whose directory no longer exists on disk so that
+    // stale cached tracks from deleted folders are never loaded or played.
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.linux ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows)) {
+      final live = <String>[];
+      for (final p in paths) {
+        try {
+          if (await Directory(p).exists()) live.add(p);
+        } catch (_) {
+          live.add(p); // keep on error — don't silently remove
+        }
+      }
+      if (live.length != paths.length) {
+        paths = live;
+        await SavedMusicFolders.save(paths);
+      }
+    }
+    if (!mounted) return;
+
     setState(() {
       _folderPaths = List<String>.from(paths);
       _page = showSettings ? _ShellPage.settings : _ShellPage.library;
@@ -458,6 +513,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               path,
               updated,
               notify: CatalogNotifyMode.throttled,
+              refreshNotificationArt: false,
             );
             unawaited(SongMetadataCache.saveTracks([updated]));
           },
@@ -617,6 +673,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   path,
                   updated,
                   notify: CatalogNotifyMode.throttled,
+                  refreshNotificationArt: false,
                 );
                 unawaited(SongMetadataCache.saveTracks([updated]));
               },
@@ -637,6 +694,29 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             );
             if (idx >= 0) resolvedStart = idx;
           }
+        }
+        final deferHeavyPlayerQueue =
+            tracks.length >= _largeLibraryDeferPlayerQueueThreshold &&
+            !playAfter &&
+            !wasPlaying;
+        if (deferHeavyPlayerQueue && player.playlist.isEmpty) {
+          if (!kIsWeb && mounted) {
+            enrichPlaylistTracks(
+              tracks: tracks,
+              onTrackUpdated: (path, updated) {
+                player.updateTrackByPath(
+                  path,
+                  updated,
+                  notify: CatalogNotifyMode.throttled,
+                  refreshNotificationArt: false,
+                );
+                unawaited(SongMetadataCache.saveTracks([updated]));
+              },
+            ).catchError((Object e, StackTrace st) {
+              debugPrint('enrichPlaylistTracks: $e\n$st');
+            });
+          }
+          return;
         }
         await player.setPlaylist(
           tracks,
@@ -667,6 +747,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 path,
                 updated,
                 notify: CatalogNotifyMode.throttled,
+                refreshNotificationArt: false,
               );
               unawaited(SongMetadataCache.saveTracks([updated]));
             },
@@ -694,6 +775,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   path,
                   updated,
                   notify: CatalogNotifyMode.throttled,
+                  refreshNotificationArt: false,
                 );
                 unawaited(SongMetadataCache.saveTracks([updated]));
               },
@@ -706,6 +788,29 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
 
       var resolvedStart = startIndex.clamp(0, tracks.length - 1);
+      final deferHeavyPlayerQueue =
+          tracks.length >= _largeLibraryDeferPlayerQueueThreshold &&
+          !playAfter &&
+          !wasPlaying;
+      if (deferHeavyPlayerQueue && player.playlist.isEmpty) {
+        if (!kIsWeb && mounted) {
+          enrichPlaylistTracks(
+            tracks: tracks,
+            onTrackUpdated: (path, updated) {
+              player.updateTrackByPath(
+                path,
+                updated,
+                notify: CatalogNotifyMode.throttled,
+                refreshNotificationArt: false,
+              );
+              unawaited(SongMetadataCache.saveTracks([updated]));
+            },
+          ).catchError((Object e, StackTrace st) {
+            debugPrint('enrichPlaylistTracks: $e\n$st');
+          });
+        }
+        return;
+      }
       await player.setPlaylist(
         tracks,
         startIndex: resolvedStart,
@@ -724,6 +829,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               path,
               updated,
               notify: CatalogNotifyMode.throttled,
+              refreshNotificationArt: false,
             );
             unawaited(SongMetadataCache.saveTracks([updated]));
           },

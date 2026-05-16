@@ -9,7 +9,14 @@ import 'package:permission_handler/permission_handler.dart';
 /// all-files access when the platform returns a readable file path.
 ///
 /// Desktop / iOS: no extra gate here; picking and scanning still run.
-Future<bool> ensureCanReadMusicFiles(BuildContext context) async {
+///
+/// [showDialogIfDenied] controls whether a snackbar with a "Settings" button is
+/// shown when permission is denied.  Pass `false` when silently re-checking on
+/// app resume so the UI is not interrupted.
+Future<bool> ensureCanReadMusicFiles(
+  BuildContext context, {
+  bool showDialogIfDenied = true,
+}) async {
   if (kIsWeb) {
     return true;
   }
@@ -22,9 +29,16 @@ Future<bool> ensureCanReadMusicFiles(BuildContext context) async {
   if (granted(await Permission.audio.status)) {
     return true;
   }
-  final audioReq = await Permission.audio.request();
-  if (granted(audioReq)) {
-    return true;
+  // Only show the system permission prompt when allowed (on initial startup or
+  // when the user is actively trying to add a folder).
+  if (showDialogIfDenied) {
+    final audioReq = await Permission.audio.request();
+    if (granted(audioReq)) {
+      return true;
+    }
+  } else {
+    // Just check current status — don't prompt.
+    return false;
   }
 
   if (granted(await Permission.storage.status)) {
@@ -38,7 +52,9 @@ Future<bool> ensureCanReadMusicFiles(BuildContext context) async {
   if (context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Allow music / storage access to scan this folder.'),
+        content: const Text(
+          'Music access is required to scan your library. Tap Settings to enable it.',
+        ),
         action: SnackBarAction(
           label: 'Settings',
           onPressed: openAppSettings,

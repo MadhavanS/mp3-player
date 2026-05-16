@@ -6,6 +6,7 @@ import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../theme/app_theme.dart';
 import '../player/track_overflow_actions.dart';
+import 'library_screen.dart' show LibrarySearchQuery;
 
 String _formatQueueDuration(Duration d) {
   final m = d.inMinutes;
@@ -31,7 +32,7 @@ class PlayingQueueTab extends StatelessWidget {
   final ThemeData theme;
   final AppPalette pal;
   final PlayerController player;
-  final String searchQuery;
+  final LibrarySearchQuery searchQuery;
 
   final ScrollController scrollController;
   final GlobalKey scrollAnchorKey;
@@ -44,12 +45,8 @@ class PlayingQueueTab extends StatelessWidget {
   final void Function(int oldOrderIndex, int newOrderIndex) onReorder;
 
   /// Used by [LibraryScreenState] when scrolling to the current row under search.
-  static bool matchesSearchFilter(TrackItem t, String q) {
-    if (q.isEmpty) return true;
-    final s = q.toLowerCase();
-    return t.title.toLowerCase().contains(s) ||
-        t.artist.toLowerCase().contains(s);
-  }
+  static bool matchesSearchFilter(TrackItem t, LibrarySearchQuery q) =>
+      q.matchesTrack(t);
 
   @override
   Widget build(BuildContext context) {

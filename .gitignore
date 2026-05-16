@@ -9,6 +9,8 @@
 .buildlog/
 .history
 .svn/
+# Cursor IDE rules (local only — do not commit)
+.cursor/
 migrate_working_dir/
 
 # IntelliJ related

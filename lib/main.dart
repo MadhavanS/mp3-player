@@ -20,6 +20,9 @@ Future<void> main() async {
       androidNotificationOngoing: true,
       androidStopForegroundOnPause: true,
       preloadArtwork: true,
+      // Large embedded movie-poster art can fail or OOM in the Android notification pipeline.
+      artDownscaleWidth: 512,
+      artDownscaleHeight: 512,
     );
   }
   runApp(const MadPlayerApp());

@@ -26,6 +26,81 @@ import 'playing_queue_tab.dart';
 /// Key for the library search field (widget tests).
 const Key librarySearchFieldKey = Key('library_search_field');
 
+// ---------------------------------------------------------------------------
+// Search-query parsing
+// ---------------------------------------------------------------------------
+
+// Public so [LibrarySearchQuery] can reference it without lint warnings.
+enum LibrarySearchField { title, artist, album }
+
+/// Parsed search query produced from the raw text-field string.
+///
+/// Supported prefix rules (case-insensitive):
+///   `s:<term>` — match song title
+///   `a:<term>` — match artist tag
+///   `m:<term>` — match album tag (stored in [TrackItem.metaLine])
+///   (no prefix)  — match title (default, same as before)
+///
+/// The 3-character minimum applies to the **term** after stripping the prefix.
+class LibrarySearchQuery {
+  const LibrarySearchQuery._({required this.field, required this.term});
+
+  final LibrarySearchField field;
+
+  /// Lowercased search term (empty means "no filter").
+  final String term;
+
+  bool get isEmpty => term.isEmpty;
+  bool get isNotEmpty => term.isNotEmpty;
+
+  /// Parses [raw] into a [LibrarySearchQuery].
+  static LibrarySearchQuery parse(String raw, {int minChars = 3}) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return _empty;
+
+    LibrarySearchField field;
+    String rest;
+    final lower = trimmed.toLowerCase();
+    if (lower.startsWith('m:')) {
+      field = LibrarySearchField.album;
+      rest = trimmed.substring(2).trim();
+    } else if (lower.startsWith('s:')) {
+      field = LibrarySearchField.title;
+      rest = trimmed.substring(2).trim();
+    } else if (lower.startsWith('a:')) {
+      field = LibrarySearchField.artist;
+      rest = trimmed.substring(2).trim();
+    } else {
+      field = LibrarySearchField.title;
+      rest = trimmed;
+    }
+
+    final t = rest.toLowerCase();
+    if (t.length < minChars) return _empty;
+    return LibrarySearchQuery._(field: field, term: t);
+  }
+
+  static const LibrarySearchQuery _empty = LibrarySearchQuery._(
+    field: LibrarySearchField.title,
+    term: '',
+  );
+
+  /// Returns true when [track] matches the field restriction and term.
+  bool matchesTrack(TrackItem track) {
+    if (term.isEmpty) return true;
+    return switch (field) {
+      LibrarySearchField.title => track.title.toLowerCase().contains(term),
+      LibrarySearchField.artist => track.artist.toLowerCase().contains(term),
+      LibrarySearchField.album => track.metaLine.toLowerCase().contains(term),
+    };
+  }
+
+  /// Plain term for path/filename fallback and playlist-name searches (no field
+  /// restriction is meaningful for those targets).
+  bool matchesText(String text) =>
+      term.isEmpty || text.toLowerCase().contains(term);
+}
+
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({
     super.key,
@@ -99,15 +174,12 @@ class LibraryScreenState extends State<LibraryScreen>
   static const double _kLibraryListRowStride = 88;
   static const double _kQueueListRowStride = 64;
 
-  /// Search text shorter than this (after trim) does not filter library lists.
+  /// Search text shorter than this (after stripping any prefix) does not filter.
   static const int _kLibrarySearchMinChars = 3;
 
-  /// Returns trimmed [raw], or empty when fewer than [_kLibrarySearchMinChars] characters.
-  static String _effectiveLibrarySearchQuery(String raw) {
-    final t = raw.trim();
-    if (t.length < _kLibrarySearchMinChars) return '';
-    return t;
-  }
+  /// Parses the raw search-field text into a structured [LibrarySearchQuery].
+  static LibrarySearchQuery _parseSearchQuery(String raw) =>
+      LibrarySearchQuery.parse(raw, minChars: _kLibrarySearchMinChars);
 
   Future<List<String>> _favouritePathsFuture() {
     final r = FavoriteSongsStore.revision.value;
@@ -310,7 +382,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
   List<int> _sortedSongsTabIndices(
     List<TrackItem> tracks,
-    String query,
+    LibrarySearchQuery query,
     Set<String>? browsePathKeys,
   ) {
     final baseFilteredIndices = tracks.isEmpty
@@ -335,7 +407,7 @@ class LibraryScreenState extends State<LibraryScreen>
   (int? index, int total) _songsListIndexAndTotalForPathKey(
     List<TrackItem> tracks,
     Set<String>? browsePathKeys,
-    String query,
+    LibrarySearchQuery query,
     String pathKey,
   ) {
     final songsTabIndices = _sortedSongsTabIndices(
@@ -419,7 +491,7 @@ class LibraryScreenState extends State<LibraryScreen>
     final currentPl = player.currentIndex;
     if (currentPl < 0 || currentPl >= playlist.length) return;
 
-    final searchQuery = _effectiveLibrarySearchQuery(_searchController.text);
+    final searchQuery = _parseSearchQuery(_searchController.text);
     final order = player.playbackOrderIndices;
 
     var listIndex = -1;
@@ -452,7 +524,7 @@ class LibraryScreenState extends State<LibraryScreen>
     if (pathKey.isEmpty) return;
 
     final tracks = player.metadataLibrary;
-    final searchQuery = _effectiveLibrarySearchQuery(_searchController.text);
+    final searchQuery = _parseSearchQuery(_searchController.text);
     final browsePathKeys = widget.songsBrowsePathKeys.value;
 
     switch (_currentLibraryTabId) {
@@ -588,18 +660,17 @@ class LibraryScreenState extends State<LibraryScreen>
     }
   }
 
-  static bool _trackMatchesQuery(TrackItem t, String q) {
-    if (q.isEmpty) return true;
-    return t.title.toLowerCase().contains(q);
-  }
+  static bool _trackMatchesQuery(TrackItem t, LibrarySearchQuery q) =>
+      q.matchesTrack(t);
 
   String _searchHintForTab(LibraryTabId id) => switch (id) {
     LibraryTabId.songs ||
     LibraryTabId.recentlyAdded ||
-    LibraryTabId.playlist => 'Search by title (min. 3 characters)',
-    LibraryTabId.nowPlayingList => 'Search queue (min. 3 characters)',
-    LibraryTabId.favourites => 'Search favourites (min. 3 characters)',
-    LibraryTabId.recentlyPlayed => 'Search RecentlyPlayed (min. 3 characters)',
+    LibraryTabId.favourites ||
+    LibraryTabId.recentlyPlayed =>
+      'Search  •  m: album  s: title  a: artist',
+    LibraryTabId.nowPlayingList => 'Search queue  •  m: album  s: title  a: artist',
+    LibraryTabId.playlist => 'Search playlists (min. 3 characters)',
   };
 
   List<String> _pathsMatchingBrowse(
@@ -616,16 +687,21 @@ class LibraryScreenState extends State<LibraryScreen>
 
   List<String> _filterPathsBySearch(
     List<String> paths,
-    String rawQuery,
+    LibrarySearchQuery query,
     List<TrackItem> library,
   ) {
-    final q = rawQuery.trim().toLowerCase();
-    if (q.isEmpty) return paths;
+    if (query.isEmpty) return paths;
     return paths.where((path) {
       final t = _trackForPath(path, library);
-      if (_trackMatchesQuery(t, q)) return true;
-      return p.basenameWithoutExtension(path).toLowerCase().contains(q) ||
-          path.toLowerCase().contains(q);
+      if (query.matchesTrack(t)) return true;
+      // For title/default searches also fall back to filename matching.
+      if (query.field == LibrarySearchField.title) {
+        return p.basenameWithoutExtension(path).toLowerCase().contains(
+              query.term,
+            ) ||
+            path.toLowerCase().contains(query.term);
+      }
+      return false;
     }).toList();
   }
 
@@ -698,15 +774,14 @@ class LibraryScreenState extends State<LibraryScreen>
 
   static List<int> _filteredPlaylistIndices(
     List<TrackItem> tracks,
-    String rawQuery,
+    LibrarySearchQuery query,
   ) {
-    final q = rawQuery.trim().toLowerCase();
-    if (q.isEmpty) {
+    if (query.isEmpty) {
       return List<int>.generate(tracks.length, (i) => i);
     }
     final out = <int>[];
     for (var i = 0; i < tracks.length; i++) {
-      if (_trackMatchesQuery(tracks[i], q)) out.add(i);
+      if (_trackMatchesQuery(tracks[i], query)) out.add(i);
     }
     return out;
   }
@@ -759,11 +834,12 @@ class LibraryScreenState extends State<LibraryScreen>
 
   List<UserPlaylistEntry> _filterPlaylistsBySearch(
     List<UserPlaylistEntry> all,
-    String rawQuery,
+    LibrarySearchQuery query,
   ) {
-    final q = rawQuery.trim().toLowerCase();
-    if (q.isEmpty) return all;
-    return all.where((e) => e.name.toLowerCase().contains(q)).toList();
+    if (query.isEmpty) return all;
+    return all
+        .where((e) => query.matchesText(e.name))
+        .toList();
   }
 
   Future<void> _showUserPlaylistSheet(
@@ -1052,7 +1128,7 @@ class LibraryScreenState extends State<LibraryScreen>
     ThemeData theme,
     BuildContext context,
     AppPalette pal,
-    String query,
+    LibrarySearchQuery query,
     List<TrackItem> tracks,
     PlayerController player,
   ) {
@@ -1150,7 +1226,7 @@ class LibraryScreenState extends State<LibraryScreen>
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
             child: Text(
-              query.trim().isEmpty
+              query.isEmpty
                   ? 'No saved playlists yet.'
                   : 'No playlists match your search.',
               style: theme.textTheme.bodyMedium?.copyWith(color: pal.textMuted),
@@ -1319,8 +1395,7 @@ class LibraryScreenState extends State<LibraryScreen>
           valueListenable: widget.songsBrowsePathKeys,
           builder: (context, browsePathKeys, _) {
             final tracks = player.metadataLibrary;
-            final rawSearch = _searchController.text.trim();
-            final searchQuery = _effectiveLibrarySearchQuery(rawSearch);
+            final searchQuery = _parseSearchQuery(_searchController.text);
             final songsTabIndices = _sortedSongsTabIndices(
               tracks,
               searchQuery,
@@ -1479,7 +1554,7 @@ class LibraryScreenState extends State<LibraryScreen>
     List<int> songsTabIndices,
     PlayerController player,
     Set<String>? browsePathKeys,
-    String searchQuery,
+    LibrarySearchQuery searchQuery,
   ) {
     return switch (id) {
       LibraryTabId.songs => _buildTracksTab(
@@ -1551,7 +1626,7 @@ class LibraryScreenState extends State<LibraryScreen>
   Widget _buildFavoritesTab(
     ThemeData theme,
     AppPalette pal,
-    String rawQuery,
+    LibrarySearchQuery rawQuery,
     PlayerController player,
     List<TrackItem> tracks,
     Set<String>? browsePathKeys,
@@ -1737,7 +1812,7 @@ class LibraryScreenState extends State<LibraryScreen>
   Widget _buildRecentlyAddedTab(
     ThemeData theme,
     AppPalette pal,
-    String rawQuery,
+    LibrarySearchQuery rawQuery,
     PlayerController player,
     List<TrackItem> tracks,
     Set<String>? browsePathKeys,
@@ -1826,8 +1901,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
             if (paths.isEmpty) {
               final hasBrowse = browsePathKeys != null;
-              final q = rawQuery.trim();
-              final message = hasBrowse && q.isEmpty
+              final message = hasBrowse && rawQuery.isEmpty
                   ? 'No RecentlyAdded songs in this folder.'
                   : 'No RecentlyAdded songs match your search.';
               return Center(
@@ -1963,7 +2037,7 @@ class LibraryScreenState extends State<LibraryScreen>
   Widget _buildRecentTab(
     ThemeData theme,
     AppPalette pal,
-    String rawQuery,
+    LibrarySearchQuery rawQuery,
     PlayerController player,
     List<TrackItem> tracks,
     Set<String>? browsePathKeys,
@@ -2018,8 +2092,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
             if (paths.isEmpty) {
               final hasBrowse = browsePathKeys != null;
-              final q = rawQuery.trim();
-              final message = hasBrowse && q.isEmpty
+              final message = hasBrowse && rawQuery.isEmpty
                   ? 'No RecentlyPlayed songs in this folder.'
                   : 'No RecentlyPlayed songs match your search.';
               return Center(
@@ -2158,7 +2231,7 @@ class LibraryScreenState extends State<LibraryScreen>
     List<TrackItem> tracks,
     List<int> filteredIndices,
     PlayerController player,
-    String searchQuery, {
+    LibrarySearchQuery searchQuery, {
     Set<String>? browsePathKeys,
     VoidCallback? onClearBrowseFolder,
   }) {
@@ -2236,7 +2309,7 @@ class LibraryScreenState extends State<LibraryScreen>
               if (searchQuery.isNotEmpty) ...[
                 const SizedBox(height: 4),
                 Text(
-                  '"$searchQuery"',
+                  '"${searchQuery.term}"',
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,

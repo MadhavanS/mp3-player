@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../models/track_item.dart';
+import '../services/album_art_cache.dart';
 import '../theme/app_theme.dart';
 import 'daisy_background.dart';
 
@@ -67,17 +70,55 @@ class TrackAlbumArt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final r = _effectiveRadius(context);
     final bytes = track.albumArtBytes;
     if (bytes == null || bytes.isEmpty) {
       return _noArtPlaceholder(context);
     }
 
+    final pixelSize = (_size * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(96, 512)
+        .toInt();
+    final cached = cachedAlbumArtSync(track, maxDimension: pixelSize);
+    if (cached != null && cached.isNotEmpty) {
+      return _imageShell(context, cached, pixelSize);
+    }
+
+    return FutureBuilder<Uint8List?>(
+      future: cachedAlbumArt(track, maxDimension: pixelSize),
+      builder: (context, snapshot) {
+        final art = snapshot.data;
+        if (art == null || art.isEmpty) {
+          return _noArtPlaceholder(context);
+        }
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: _imageShell(
+            context,
+            art,
+            pixelSize,
+            key: ValueKey<int>(identityHashCode(art)),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _imageShell(
+    BuildContext context,
+    Uint8List bytes,
+    int pixelSize, {
+    Key? key,
+  }) {
+    final r = _effectiveRadius(context);
     final image = Image.memory(
       bytes,
+      key: key,
       width: _size,
       height: _size,
       fit: BoxFit.cover,
+      cacheWidth: pixelSize,
+      cacheHeight: pixelSize,
       gaplessPlayback: true,
       filterQuality: FilterQuality.medium,
       errorBuilder: (_, __, ___) => _noArtPlaceholder(context),

@@ -1,7 +1,12 @@
 import 'dart:async';
 
+// audio_session exposes output device types as experimental, but this is the
+// supported way to pause on Bluetooth output removal in the current package.
+// ignore_for_file: experimental_member_use
+
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, defaultTargetPlatform, kIsWeb, listEquals;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
@@ -9,6 +14,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 
 import '../models/library_tab_id.dart';
 import '../models/track_item.dart';
+import '../services/album_art_cache.dart';
 import '../services/music_library_path_key.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
@@ -72,10 +78,17 @@ class PlayerController extends ChangeNotifier {
   Future<void> _resumePlaybackAfterLoad({
     String context = 'resumeAfterLoad',
   }) async {
+    _invalidatePlayResumeRetries();
+    final generation = _playControlGeneration;
     await _waitForPlayerPreparedAfterSourceChange();
+    if (_playControlGeneration != generation) return;
     // One event-loop turn; helps desktop embedders finish native load callbacks.
     await Future<void>.delayed(Duration.zero);
-    await _ensurePlayingWithRetries(context: context);
+    if (_playControlGeneration != generation) return;
+    await _ensurePlayingWithRetries(
+      context: context,
+      generation: generation,
+    );
   }
 
   Future<void> _waitForPlayerPreparedAfterSourceChange() async {
@@ -100,12 +113,23 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
+  /// Bumped when the user pauses and at the start of each [_resumePlaybackAfterLoad].
+  /// In-flight [_ensurePlayingWithRetries] loops exit when this no longer matches
+  /// their captured value so a user pause cannot be overwritten by a late [play].
+  int _playControlGeneration = 0;
+
+  void _invalidatePlayResumeRetries() {
+    _playControlGeneration++;
+  }
+
   /// Calls [play] until [AudioPlayer.playing] is true or attempts are exhausted.
   Future<void> _ensurePlayingWithRetries({
     required String context,
+    required int generation,
     int attempts = 12,
   }) async {
     for (var i = 0; i < attempts; i++) {
+      if (_playControlGeneration != generation) return;
       try {
         await _playSafely(context: context);
       } catch (e, st) {
@@ -116,6 +140,7 @@ class PlayerController extends ChangeNotifier {
         debugPrint('$context attempt $i: $e\n$st');
       }
       await Future<void>.delayed(const Duration(milliseconds: 45));
+      if (_playControlGeneration != generation) return;
       if (_player.playing) return;
     }
     debugPrint(
@@ -126,6 +151,7 @@ class PlayerController extends ChangeNotifier {
 
   PlayerController() {
     unawaited(_loadPersistedVolume());
+    unawaited(_initAudioSessionInterruptions());
     // Single subscription: listening to [processingStateStream] and
     // [playerStateStream] both triggered platform init; concurrent inits caused
     // "Platform player … already exists" on some devices (just_audio / Android).
@@ -145,9 +171,22 @@ class PlayerController extends ChangeNotifier {
     _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
   }
 
-  final AudioPlayer _player = AudioPlayer();
+  /// [just_audio] can subscribe to [AudioSession] interruptions internally, but
+  /// we disable that and handle focus here so phone calls / mic use reliably pause
+  /// and transient focus loss can resume after the call.
+  final AudioPlayer _player = AudioPlayer(handleInterruptions: false);
   late final StreamSubscription<PlayerState> _playerStateSub;
   StreamSubscription<int?>? _concatIndexSub;
+  StreamSubscription<AudioInterruptionEvent>? _audioInterruptionSub;
+  StreamSubscription<void>? _becomingNoisySub;
+  StreamSubscription<AudioDevicesChangedEvent>? _devicesChangedSub;
+  Timer? _notificationArtRefreshDebounce;
+  bool _notificationArtRefreshInProgress = false;
+  bool _transportCommandInFlight = false;
+
+  /// True when we paused because another app (or the OS) took transient audio focus
+  /// (e.g. phone call). Cleared after we attempt resume.
+  bool _shouldResumeAfterTransientFocusLoss = false;
 
   List<TrackItem> _playlist = [];
   int _index = 0;
@@ -240,6 +279,96 @@ class PlayerController extends ChangeNotifier {
     _preferredVolume = volume;
     await _applyPreferredVolume();
     notifyListeners();
+  }
+
+  Future<void> _initAudioSessionInterruptions() async {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+      await _audioInterruptionSub?.cancel();
+      await _becomingNoisySub?.cancel();
+      await _devicesChangedSub?.cancel();
+      _audioInterruptionSub = session.interruptionEventStream.listen(
+        _onAudioSessionInterruption,
+      );
+      _becomingNoisySub = session.becomingNoisyEventStream.listen((_) {
+        _pauseForExternalOutputDisconnect();
+      });
+      _devicesChangedSub = session.devicesChangedEventStream.listen(
+        _onAudioOutputDevicesChanged,
+      );
+    } catch (e, st) {
+      debugPrint('Audio session interruption setup failed: $e\n$st');
+    }
+  }
+
+  static bool _isBluetoothOutputDevice(AudioDevice device) {
+    if (!device.isOutput) return false;
+    switch (device.type) {
+      case AudioDeviceType.bluetoothA2dp:
+      case AudioDeviceType.bluetoothSco:
+      case AudioDeviceType.bluetoothLe:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  void _onAudioOutputDevicesChanged(AudioDevicesChangedEvent event) {
+    if (!_player.playing) return;
+    if (event.devicesRemoved.any(_isBluetoothOutputDevice)) {
+      _pauseForExternalOutputDisconnect();
+    }
+  }
+
+  /// Headphones unplugged, Bluetooth A2DP lost, etc.
+  void _pauseForExternalOutputDisconnect() {
+    if (!_player.playing) return;
+    _shouldResumeAfterTransientFocusLoss = false;
+    _invalidatePlayResumeRetries();
+    unawaited(_player.pause());
+  }
+
+  void _onAudioSessionInterruption(AudioInterruptionEvent event) {
+    if (event.begin) {
+      switch (event.type) {
+        case AudioInterruptionType.duck:
+          break;
+        case AudioInterruptionType.pause:
+          if (_player.playing) {
+            _shouldResumeAfterTransientFocusLoss = true;
+            _invalidatePlayResumeRetries();
+            unawaited(_player.pause());
+          }
+          break;
+        case AudioInterruptionType.unknown:
+          if (_player.playing) {
+            _invalidatePlayResumeRetries();
+            unawaited(_player.pause());
+          }
+          _shouldResumeAfterTransientFocusLoss = false;
+          break;
+      }
+    } else {
+      switch (event.type) {
+        case AudioInterruptionType.duck:
+          break;
+        case AudioInterruptionType.pause:
+          if (_shouldResumeAfterTransientFocusLoss) {
+            _shouldResumeAfterTransientFocusLoss = false;
+            unawaited(_playSafely(context: 'audioFocusResume'));
+          }
+          break;
+        case AudioInterruptionType.unknown:
+          _shouldResumeAfterTransientFocusLoss = false;
+          break;
+      }
+    }
   }
 
   Future<void> _applyPreferredVolume() => _player.setVolume(_preferredVolume);
@@ -402,6 +531,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   bool get isPlaying => _player.playing || _retainPlayingUiForShuffleReload;
+  bool get transportCommandInFlight => _transportCommandInFlight;
   Duration get position => _player.position;
   Duration? get duration => _player.duration;
 
@@ -503,7 +633,40 @@ class PlayerController extends ChangeNotifier {
     }
     if (_applyConcatIndexChanged(concatIdx)) {
       notifyListeners();
+      _prewarmPlaybackAlbumArt();
+      _scheduleNotificationArtRefresh();
     }
+  }
+
+  void _prewarmPlaybackAlbumArt() {
+    final tracks = <TrackItem>[
+      if (currentTrack != null) currentTrack!,
+      if (upcomingTrack != null) upcomingTrack!,
+    ];
+    if (tracks.isEmpty) return;
+    prewarmAlbumArtCache(tracks, maxCount: tracks.length);
+  }
+
+  /// Playlist indices in [sourceOrder] that should get [MediaItem.artUri] when
+  /// building a concat source. Large libraries only tag the current item so
+  /// scan/load does not rasterize thousands of covers.
+  List<int> _notificationArtPlaylistIndices(
+    List<int> sourceOrder,
+    int logical,
+  ) {
+    if (sourceOrder.isEmpty) return const <int>[];
+    if (_playlist.length <= 80) return List<int>.from(sourceOrder);
+    final pos = sourceOrder.indexOf(logical);
+    if (pos < 0) return <int>[logical];
+    const radius = 2;
+    final out = <int>{};
+    for (var d = -radius; d <= radius; d++) {
+      final i = pos + d;
+      if (i >= 0 && i < sourceOrder.length) {
+        out.add(sourceOrder[i]);
+      }
+    }
+    return out.toList();
   }
 
   /// During [setAudioSource] with lazy preparation, [currentIndexStream] can briefly
@@ -850,9 +1013,22 @@ class PlayerController extends ChangeNotifier {
     String path,
     TrackItem updated, {
     CatalogNotifyMode notify = CatalogNotifyMode.immediate,
+    bool refreshNotificationArt = true,
   }) {
     final key = canonicalMusicLibraryPathKey(path);
     if (key.isEmpty) return;
+    final cur = currentTrack;
+    final curKey = cur?.filePath != null
+        ? canonicalMusicLibraryPathKey(cur!.filePath!.trim())
+        : '';
+    final shouldRefreshNotificationArt = curKey == key &&
+        cur != null &&
+        updated.albumArtBytes != null &&
+        updated.albumArtBytes!.isNotEmpty &&
+        (cur.albumArtBytes == null ||
+            cur.albumArtBytes!.isEmpty ||
+            !listEquals(cur.albumArtBytes, updated.albumArtBytes));
+
     var changed = false;
     for (var i = 0; i < _playlist.length; i++) {
       final fp = _playlist[i].filePath;
@@ -868,7 +1044,89 @@ class PlayerController extends ChangeNotifier {
         changed = true;
       }
     }
-    if (changed) _notifyCatalogListeners(notify);
+    if (changed) {
+      _notifyCatalogListeners(notify);
+      if (refreshNotificationArt &&
+          shouldRefreshNotificationArt &&
+          !_isLoadingSource) {
+        _scheduleNotificationArtRefresh();
+      }
+    }
+  }
+
+  void _scheduleNotificationArtRefresh() {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    if (_isLoadingSource || _notificationArtRefreshInProgress) return;
+    _notificationArtRefreshDebounce?.cancel();
+    _notificationArtRefreshDebounce = Timer(
+      const Duration(milliseconds: 280),
+      () {
+        _notificationArtRefreshDebounce = null;
+        unawaited(_refreshNotificationAlbumArt());
+      },
+    );
+  }
+
+  /// Pushes late artwork to the Android/iOS media notification without
+  /// reloading the audio source or resetting the native decoder.
+  Future<void> _refreshNotificationAlbumArt() async {
+    if (_playlist.isEmpty) return;
+    if (_notificationArtRefreshInProgress) return;
+    _notificationArtRefreshInProgress = true;
+    try {
+      final track = currentTrack;
+      final fp = track?.filePath?.trim();
+      if (track == null || fp == null || fp.isEmpty) return;
+      final trackKey = canonicalMusicLibraryPathKey(fp);
+      final artUri = await uriForNotificationAlbumArt(track);
+      if (artUri == null) return;
+
+      await _waitForNotificationMetadataWindow();
+      final latestPath = currentTrack?.filePath?.trim() ?? '';
+      if (trackKey.isNotEmpty &&
+          canonicalMusicLibraryPathKey(latestPath) != trackKey) {
+        return;
+      }
+
+      await JustAudioBackground.updateCurrentMediaItem(
+        MediaItem(
+          id: fp,
+          title: track.title,
+          artist: track.artist,
+          album: track.metaLine,
+          artUri: artUri,
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('_refreshNotificationAlbumArt: $e\n$st');
+    } finally {
+      _notificationArtRefreshInProgress = false;
+    }
+  }
+
+  /// Avoid metadata/art updates during the brief codec reset window after
+  /// source changes, skips, or seeks. This does not touch playback.
+  Future<void> _waitForNotificationMetadataWindow() async {
+    const step = Duration(milliseconds: 80);
+    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    while (DateTime.now().isBefore(deadline)) {
+      switch (_player.processingState) {
+        case ProcessingState.ready:
+        case ProcessingState.completed:
+          return;
+        case ProcessingState.buffering:
+          if (!_player.playing) return;
+          break;
+        case ProcessingState.idle:
+        case ProcessingState.loading:
+          break;
+      }
+      await Future<void>.delayed(step);
+    }
   }
 
   /// Replace the playlist entry for [oldPath] with [updated] (new path + tags).
@@ -1136,7 +1394,11 @@ class PlayerController extends ChangeNotifier {
         final enriched = await readAudioMetadata(_playlist[logical]);
         if (enriched.albumArtBytes != null &&
             enriched.albumArtBytes!.isNotEmpty) {
-          updateTrackByPath(enrichPath, enriched);
+          updateTrackByPath(
+            enrichPath,
+            enriched,
+            refreshNotificationArt: false,
+          );
         }
       }
 
@@ -1144,13 +1406,33 @@ class PlayerController extends ChangeNotifier {
       final loadedOrder = <int>[];
       var initialConcatIndex = 0;
       var concatPos = 0;
-      final logicalTrack = logical >= 0 && logical < _playlist.length
-          ? _playlist[logical]
-          : preview;
-      final logicalArtUri = await uriForNotificationAlbumArt(logicalTrack);
       final sourceOrder = _useSingleTrackAudioSourceForPlatform()
           ? <int>[logical]
           : order;
+
+      final logicalTrack = logical >= 0 && logical < _playlist.length
+          ? _playlist[logical]
+          : preview;
+      final artIndices = _notificationArtPlaylistIndices(sourceOrder, logical);
+      final notificationArtUris = <int, Uri?>{};
+      await Future.wait(
+        artIndices.map((pi) async {
+          if (pi < 0 || pi >= _playlist.length) return;
+          final bytes = _playlist[pi].albumArtBytes;
+          if (bytes == null || bytes.isEmpty) return;
+          notificationArtUris[pi] =
+              await uriForNotificationAlbumArt(_playlist[pi]);
+        }),
+      );
+      if (logical >= 0 &&
+          logical < _playlist.length &&
+          !notificationArtUris.containsKey(logical)) {
+        final bytes = logicalTrack.albumArtBytes;
+        if (bytes != null && bytes.isNotEmpty) {
+          notificationArtUris[logical] =
+              await uriForNotificationAlbumArt(logicalTrack);
+        }
+      }
 
       for (final pi in sourceOrder) {
         if (pi < 0 || pi >= _playlist.length) continue;
@@ -1158,7 +1440,7 @@ class PlayerController extends ChangeNotifier {
         final fp = t.filePath?.trim();
         if (fp == null || fp.isEmpty) continue;
 
-        final artUri = pi == logical ? logicalArtUri : null;
+        final artUri = notificationArtUris[pi];
         children.add(
           AudioSource.uri(
             Uri.file(fp),
@@ -1239,6 +1521,7 @@ class PlayerController extends ChangeNotifier {
         notifyListeners();
       }
     }
+    _prewarmPlaybackAlbumArt();
     notifyListeners();
   }
 
@@ -1336,15 +1619,44 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> play() => _playSafely(context: 'play');
+  // Marks a transport command as in-flight for at most [_transportCommandMaxMs].
+  // The lock is intentionally fire-and-forget for pause (no state confirmation
+  // wait), so the button is never disabled longer than the native call takes.
+  static const int _transportCommandMaxMs = 600;
 
-  Future<void> pause() => _player.pause();
+  Future<void> _runTransportCommand(Future<void> Function() action) async {
+    if (_transportCommandInFlight) return;
+    _transportCommandInFlight = true;
+    notifyListeners();
+    try {
+      await action().timeout(
+        const Duration(milliseconds: _transportCommandMaxMs),
+        onTimeout: () {},
+      );
+    } catch (_) {
+    } finally {
+      _transportCommandInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> play() => _runTransportCommand(
+        () => _playSafely(context: 'play'),
+      );
+
+  Future<void> pause() async {
+    _invalidatePlayResumeRetries();
+    await _runTransportCommand(() => _player.pause());
+  }
 
   Future<void> togglePlayPause() async {
     if (_player.playing) {
-      await _player.pause();
+      _invalidatePlayResumeRetries();
+      await _runTransportCommand(() => _player.pause());
     } else {
-      await _playSafely(context: 'togglePlayPause.play');
+      await _runTransportCommand(
+        () => _playSafely(context: 'togglePlayPause.play'),
+      );
     }
   }
 
@@ -1646,6 +1958,14 @@ class PlayerController extends ChangeNotifier {
     _catalogNotifyThrottleTimer?.cancel();
     _catalogNotifyThrottleTimer = null;
     _catalogNotifyThrottlePending = false;
+    _notificationArtRefreshDebounce?.cancel();
+    _notificationArtRefreshDebounce = null;
+    _audioInterruptionSub?.cancel();
+    _audioInterruptionSub = null;
+    _becomingNoisySub?.cancel();
+    _becomingNoisySub = null;
+    _devicesChangedSub?.cancel();
+    _devicesChangedSub = null;
     _concatIndexSub?.cancel();
     _playerStateSub.cancel();
     unawaited(() async {

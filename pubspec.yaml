@@ -37,6 +37,7 @@ dependencies:
   audio_metadata_reader: ^1.6.0
   file_picker: ^8.1.4
   just_audio: ^0.9.46
+  audio_session: ^0.1.25
   path: ^1.9.1
   permission_handler: ^11.3.1
   shared_preferences: ^2.3.5
