@@ -55,6 +55,28 @@ String _oneLineError(Object e) {
   return s;
 }
 
+/// Opens the manual tag editor bottom sheet for [track].
+Future<void> showManualTagEditor(BuildContext context, TrackItem track) {
+  final path = track.filePath;
+  if (path == null || path.isEmpty) {
+    ActionPillToast.show(context, 'Need a local file', uppercaseLabel: true);
+    return Future.value();
+  }
+  if (kIsWeb) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Editing tags is not supported on web.')),
+    );
+    return Future.value();
+  }
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: context.palette.surface,
+    showDragHandle: false,
+    builder: (ctx) => EditTrackTagsSheet(track: track),
+  );
+}
+
 class EditTrackTagsSheet extends StatefulWidget {
   const EditTrackTagsSheet({super.key, required this.track});
 
@@ -372,17 +394,21 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           resumePosition: isCurrent ? resumePos : null,
           resumePlaying: isCurrent ? wasPlaying : null,
         );
-        unawaited(SongMetadataCache.deletePaths([path]));
+        await SongMetadataCache.deletePaths([path]);
       } else {
-        player.updateTrackByPath(path, refreshed);
+        player.updateTrackByPath(
+          path,
+          refreshed,
+          refreshNotificationArt: false,
+        );
         if (isCurrent) {
-          player.reloadCurrentSourceUnawaited(
-            initialPosition: resumePos,
+          await player.reloadCurrentSourceAfterTagWrite(
+            resumePosition: resumePos,
             resumePlaying: wasPlaying,
           );
         }
       }
-      unawaited(SongMetadataCache.saveTracks([refreshed]));
+      await SongMetadataCache.saveTracks([refreshed]);
 
       saveSucceeded = true;
       if (mounted) {
@@ -444,8 +470,8 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       }
     } finally {
       if (stoppedForEdit && !saveSucceeded) {
-        player.reloadCurrentSourceUnawaited(
-          initialPosition: resumePos,
+        await player.reloadCurrentSourceAfterTagWrite(
+          resumePosition: resumePos,
           resumePlaying: wasPlaying,
         );
       }
@@ -514,12 +540,16 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           resumePosition: isCurrent ? resumePos : null,
           resumePlaying: isCurrent ? wasPlaying : null,
         );
-        unawaited(SongMetadataCache.deletePaths([path]));
+        await SongMetadataCache.deletePaths([path]);
       } else {
-        player.updateTrackByPath(path, refreshed);
+        player.updateTrackByPath(
+          path,
+          refreshed,
+          refreshNotificationArt: false,
+        );
         if (isCurrent) {
-          player.reloadCurrentSourceUnawaited(
-            initialPosition: resumePos,
+          await player.reloadCurrentSourceAfterTagWrite(
+            resumePosition: resumePos,
             resumePlaying: wasPlaying,
           );
         }
@@ -534,7 +564,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
-      unawaited(SongMetadataCache.saveTracks([refreshed]));
+      await SongMetadataCache.saveTracks([refreshed]);
     } on UnsupportedError catch (e) {
       if (mounted) {
         final detail = (e.message ?? '').trim();
@@ -585,8 +615,8 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       }
     } finally {
       if (stoppedForEdit && !saveSucceeded) {
-        player.reloadCurrentSourceUnawaited(
-          initialPosition: resumePos,
+        await player.reloadCurrentSourceAfterTagWrite(
+          resumePosition: resumePos,
           resumePlaying: wasPlaying,
         );
       }

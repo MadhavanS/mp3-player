@@ -194,17 +194,23 @@ Future<void> _applySiteRenameStandalone(
         resumePosition: isCurrent ? resumePos : null,
         resumePlaying: isCurrent ? wasPlaying : null,
       );
-      unawaited(SongMetadataCache.deletePaths([originalPath]));
+      // Await DB writes so a concurrent background sync doesn't read stale
+      // data and overwrite the in-memory update with the old metadata.
+      await SongMetadataCache.deletePaths([originalPath]);
     } else {
-      player.updateTrackByPath(originalPath, refreshed);
+      player.updateTrackByPath(
+        originalPath,
+        refreshed,
+        refreshNotificationArt: false,
+      );
       if (isCurrent) {
-        player.reloadCurrentSourceUnawaited(
-          initialPosition: resumePos,
+        await player.reloadCurrentSourceAfterTagWrite(
+          resumePosition: resumePos,
           resumePlaying: wasPlaying,
         );
       }
     }
-    unawaited(SongMetadataCache.saveTracks([refreshed]));
+    await SongMetadataCache.saveTracks([refreshed]);
 
     saveSucceeded = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -240,8 +246,8 @@ Future<void> _applySiteRenameStandalone(
     messenger?.showSnackBar(SnackBar(content: Text('Error: $e')));
   } finally {
     if (stoppedForEdit && !saveSucceeded) {
-      player.reloadCurrentSourceUnawaited(
-        initialPosition: resumePos,
+      await player.reloadCurrentSourceAfterTagWrite(
+        resumePosition: resumePos,
         resumePlaying: wasPlaying,
       );
     }

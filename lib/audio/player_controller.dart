@@ -1171,12 +1171,18 @@ class PlayerController extends ChangeNotifier {
     // The currently loaded audio source still points to old file URIs.
     _sourceNeedsReload = true;
     notifyListeners();
+
+    // Only reload the audio pipeline when the renamed/replaced file is the
+    // track currently loaded in the player.  For any other track in the queue,
+    // just leave _sourceNeedsReload = true so the pipeline is rebuilt lazily
+    // on the next skip/play — calling _loadCurrent for a non-current entry
+    // would hit setAudioSource and interrupt the currently playing song.
+    if (!isCurrentTrackPathBeingReplaced) return;
+
     unawaited(() async {
       await _loadCurrent(
-        initialPosition: isCurrentTrackPathBeingReplaced
-            ? resumePositionAfterReload
-            : _player.position,
-        stopBeforeLoad: isCurrentTrackPathBeingReplaced,
+        initialPosition: resumePositionAfterReload,
+        stopBeforeLoad: false, // already stopped by stopForExternalFileEdit
       );
       if (resumePlayingAfterReload) {
         await _resumePlaybackAfterLoad(context: 'replaceTrackPath.resumePlay');
@@ -1579,28 +1585,46 @@ class PlayerController extends ChangeNotifier {
   /// Reload the current file from disk (e.g. after embedded tags were rewritten).
   ///
   /// [initialPosition] defaults to the player’s current offset when omitted.
+  ///
+  /// Pass [stopBeforeLoad] false when the native player was already stopped to
+  /// release the file for an external tag write — avoids a redundant [stop] that
+  /// can leave playback paused after the sheet closes.
   Future<void> reloadCurrentSource({
     Duration? initialPosition,
     bool resumePlaying = false,
+    bool stopBeforeLoad = true,
   }) async {
     final pos = initialPosition ?? _player.position;
-    await _loadCurrent(initialPosition: pos);
+    await _loadCurrent(initialPosition: pos, stopBeforeLoad: stopBeforeLoad);
     if (resumePlaying) {
       await _resumePlaybackAfterLoad(context: 'reloadCurrentSource.play');
     }
   }
+
+  /// Reload after [stopForExternalFileEdit] rewrote tags on the playing file.
+  Future<void> reloadCurrentSourceAfterTagWrite({
+    required Duration resumePosition,
+    required bool resumePlaying,
+  }) =>
+      reloadCurrentSource(
+        initialPosition: resumePosition,
+        resumePlaying: resumePlaying,
+        stopBeforeLoad: false,
+      );
 
   /// Same as [reloadCurrentSource] but does not block — for UI flows (tag sheets)
   /// where awaiting lazy [setAudioSource] prep can strand the sheet on “saving”.
   void reloadCurrentSourceUnawaited({
     Duration? initialPosition,
     bool resumePlaying = false,
+    bool stopBeforeLoad = true,
   }) {
     unawaited(() async {
       try {
         await reloadCurrentSource(
           initialPosition: initialPosition,
           resumePlaying: resumePlaying,
+          stopBeforeLoad: stopBeforeLoad,
         );
       } catch (e, st) {
         debugPrint('reloadCurrentSourceUnawaited: $e\n$st');

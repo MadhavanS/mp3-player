@@ -16,6 +16,8 @@ import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
+import 'edit_track_tags_sheet.dart';
+import 'site_rename_standalone_dialog.dart';
 
 enum TrackOverflowAction {
   playNext,
@@ -24,6 +26,8 @@ enum TrackOverflowAction {
   addToPlaylist,
   removeFromPlaylist,
   toggleFavorite,
+  autoTag,
+  manualTagEditor,
   deleteFromDevice,
 }
 
@@ -33,77 +37,105 @@ bool trackCanDeleteFromDevice(TrackItem track) =>
 bool trackCanToggleFavorite(TrackItem track) =>
     !kIsWeb && track.filePath != null && track.filePath!.isNotEmpty;
 
+bool trackCanEditTags(TrackItem track) =>
+    !kIsWeb && track.filePath != null && track.filePath!.isNotEmpty;
+
+Widget _compactOverflowMenuRow({
+  required IconData icon,
+  required String label,
+  Color? iconColor,
+  Color? labelColor,
+}) {
+  return ListTile(
+    dense: true,
+    visualDensity: VisualDensity.compact,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+    minLeadingWidth: 28,
+    horizontalTitleGap: 12,
+    leading: Icon(icon, size: 20, color: iconColor),
+    title: Text(
+      label,
+      style: TextStyle(fontSize: 14, color: labelColor),
+    ),
+  );
+}
+
 List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
   required bool enableDeleteFromDevice,
   bool enableFavorite = false,
   bool isFavorite = false,
+  bool enableTagEditor = false,
 }) {
   return [
-    const PopupMenuItem(
+    PopupMenuItem(
       value: TrackOverflowAction.playNext,
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(Icons.queue_play_next_rounded),
-        title: Text('Play next'),
-        subtitle: Text('Queue this track right after the current song'),
+      child: _compactOverflowMenuRow(
+        icon: Icons.queue_play_next_rounded,
+        label: 'Play next',
       ),
     ),
-    const PopupMenuItem(
+    PopupMenuItem(
       value: TrackOverflowAction.playFromHere,
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(Icons.playlist_play_rounded),
-        title: Text('Play from here'),
-        subtitle: Text('New queue: this track to end of list'),
+      child: _compactOverflowMenuRow(
+        icon: Icons.playlist_play_rounded,
+        label: 'Play from here',
       ),
     ),
-    const PopupMenuItem(
+    PopupMenuItem(
       value: TrackOverflowAction.playOnlyThis,
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(Icons.music_note_rounded),
-        title: Text('Play this song only'),
+      child: _compactOverflowMenuRow(
+        icon: Icons.music_note_rounded,
+        label: 'Play this song only',
       ),
     ),
-    const PopupMenuItem(
+    PopupMenuItem(
       value: TrackOverflowAction.addToPlaylist,
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(Icons.playlist_add_rounded),
-        title: Text('Add to playlist'),
-        subtitle: Text('Choose a saved playlist'),
+      child: _compactOverflowMenuRow(
+        icon: Icons.playlist_add_rounded,
+        label: 'Add to playlist',
       ),
     ),
     if (enableFavorite)
       PopupMenuItem(
         value: TrackOverflowAction.toggleFavorite,
-        child: ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(
-            isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-          ),
-          title: Text(
-            isFavorite ? 'Remove from favourites' : 'Add to favourites',
-          ),
+        child: _compactOverflowMenuRow(
+          icon: isFavorite
+              ? Icons.favorite_rounded
+              : Icons.favorite_border_rounded,
+          label: isFavorite ? 'Remove from favourites' : 'Add to favourites',
         ),
       ),
+    if (enableTagEditor) ...[
+      const PopupMenuDivider(),
+      PopupMenuItem(
+        value: TrackOverflowAction.autoTag,
+        child: _compactOverflowMenuRow(
+          icon: Icons.auto_fix_high_outlined,
+          label: 'Clean site-style name',
+        ),
+      ),
+      PopupMenuItem(
+        value: TrackOverflowAction.manualTagEditor,
+        child: _compactOverflowMenuRow(
+          icon: Icons.edit_note_rounded,
+          label: 'Manual tag editor',
+        ),
+      ),
+    ],
     if (enableDeleteFromDevice) ...[
       const PopupMenuDivider(),
       PopupMenuItem(
         value: TrackOverflowAction.deleteFromDevice,
         child: Builder(
-          builder: (ctx) => ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              Icons.delete_outline_rounded,
-              color: Theme.of(ctx).colorScheme.error,
-            ),
-            title: Text(
-              'Delete from device',
-              style: TextStyle(color: Theme.of(ctx).colorScheme.error),
-            ),
-            subtitle: const Text('Removes this MP3 file permanently'),
-          ),
+          builder: (ctx) {
+            final err = Theme.of(ctx).colorScheme.error;
+            return _compactOverflowMenuRow(
+              icon: Icons.delete_outline_rounded,
+              label: 'Delete from device',
+              iconColor: err,
+              labelColor: err,
+            );
+          },
         ),
       ),
     ],
@@ -159,11 +191,13 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
               tooltip: 'Track options',
               icon: Icon(overflowIcon, color: iconFg, size: iconSize),
               padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 200, maxWidth: 248),
               onSelected: onSelected,
               itemBuilder: (ctx) => trackOverflowPopupMenuEntries(
                 enableDeleteFromDevice: trackCanDeleteFromDevice(track),
                 enableFavorite: favOk,
                 isFavorite: isFav,
+                enableTagEditor: trackCanEditTags(track),
               ),
             ),
           ],
@@ -457,6 +491,12 @@ Future<void> applyTrackOverflowAction(
           uppercaseLabel: true,
         );
       }
+
+    case TrackOverflowAction.autoTag:
+      await showStandaloneSiteRenameDialog(context, tracks[ix]);
+
+    case TrackOverflowAction.manualTagEditor:
+      await showManualTagEditor(context, tracks[ix]);
 
     case TrackOverflowAction.deleteFromDevice:
       final track = tracks[ix];

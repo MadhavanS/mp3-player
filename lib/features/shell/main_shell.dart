@@ -403,9 +403,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       final existingPaths = scanned.map((f) => f.path).toSet();
       await SongMetadataCache.deleteMissingPaths(existingPaths);
 
+      // Seed `live` from the DB snapshot.  Then overlay the in-memory library:
+      // any track whose path the player already knows about (e.g. just edited)
+      // is preferred over the DB row so a concurrent sync never reverts a
+      // freshly-saved tag edit back to stale data.
       final live = <String, TrackItem>{
         for (final e in cachedByPath.entries) e.key: e.value.track,
       };
+      for (final t in player.metadataLibrary) {
+        final fp = t.filePath;
+        if (fp != null && fp.isNotEmpty) live[fp] = t;
+      }
       final changedPaths = <ScannedMp3File>[];
 
       for (final f in scanned) {
@@ -415,7 +423,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             snap.fileSizeBytes != f.fileSizeBytes) {
           changedPaths.add(f);
         } else {
-          live[f.path] = snap.track;
+          // Keep in-memory version if already seeded above (may be fresher).
+          live[f.path] ??= snap.track;
         }
       }
 

@@ -482,6 +482,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                             tooltip: 'Track options',
                             padding: EdgeInsets.zero,
                             position: PopupMenuPosition.under,
+                            constraints: const BoxConstraints(
+                              minWidth: 200,
+                              maxWidth: 248,
+                            ),
                             icon: Icon(
                               Icons.more_vert_rounded,
                               color: navIconColor,
