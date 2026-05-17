@@ -18,6 +18,7 @@ import '../shell/now_playing_escape_bridge.dart';
 import 'edit_track_tags_sheet.dart';
 import 'mini_player_bar.dart';
 import 'site_rename_standalone_dialog.dart';
+import 'sleep_timer_control.dart';
 import 'track_overflow_actions.dart';
 
 /// Silver full-art player: ink, inactive seek track, timestamps, disabled icons.
@@ -423,6 +424,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               onPressed: canEdit
                                   ? () => _openTagEditor(player)
                                   : null,
+                            ),
+                            SleepTimerControl(
+                              player: player,
+                              iconColor: context.controlAccent,
                             ),
                             IconButton(
                               tooltip: 'Add to playlist',
@@ -1025,6 +1030,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   color: canEdit ? topIconEnabled : topIconDisabled,
                 ),
               ),
+              SleepTimerControl(
+                player: player,
+                iconColor: topIconEnabled,
+                iconSize: silver ? 34 : 28,
+              ),
               _favoriteButton(pal, track),
               IconButton(
                 tooltip: 'Clean site-style name',
@@ -1422,6 +1432,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                     color: canEdit ? ink.active : ink.disabled,
                   ),
                   onPressed: canEdit ? () => _openTagEditor(player) : null,
+                ),
+                const SizedBox(width: 10),
+                SleepTimerControl(
+                  player: player,
+                  iconColor: ink.active,
                 ),
                 const SizedBox(width: 10),
                 IconButton(

@@ -9,6 +9,7 @@ import 'package:just_audio/just_audio.dart' show PlayerState;
 
 import 'audio/notification_art_uri.dart';
 import 'audio/player_controller.dart';
+import 'audio/sleep_timer_controller.dart';
 import 'features/shell/main_shell.dart';
 import 'features/shell/now_playing_escape_bridge.dart';
 import 'platform/android_home_widget_bridge.dart';
@@ -265,6 +266,7 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
     _player.removeListener(_onPlayerControllerChanged);
     _themeTimer?.cancel();
     _player.dispose();
+    SleepTimerController.instance.dispose();
     super.dispose();
   }
 

@@ -215,6 +215,10 @@ class PlayerController extends ChangeNotifier {
   /// [processingStateStream] may deliver [ProcessingState.completed] late; ignore briefly
   /// after [stopForExternalFileEdit] even after [_suppressTrackCompletedAdvance] clears.
   DateTime? _ignoreSpuriousPlaybackCompletedUntil;
+
+  /// When true, the next natural track completion pauses instead of advancing the queue.
+  bool _stopAtTrackEndForSleepTimer = false;
+  VoidCallback? _sleepTimerTrackEndNotifier;
   List<int> _activeSourceOrder = <int>[];
   double _preferredVolume = 1.0;
 
@@ -564,9 +568,23 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  void setStopAtTrackEndForSleepTimer(bool enabled) {
+    _stopAtTrackEndForSleepTimer = enabled;
+  }
+
+  void registerSleepTimerTrackEndNotifier(VoidCallback? notifier) {
+    _sleepTimerTrackEndNotifier = notifier;
+  }
+
   Future<void> _handleTrackCompleted() async {
     if (_suppressTrackCompletedAdvance || _isLoadingSource) return;
     if (_playlist.isEmpty) return;
+    if (_stopAtTrackEndForSleepTimer) {
+      _stopAtTrackEndForSleepTimer = false;
+      _sleepTimerTrackEndNotifier?.call();
+      await pause();
+      return;
+    }
     if (_repeat == PlaylistRepeatMode.one) {
       await _player.seek(Duration.zero);
       await _playSafely(context: 'repeat-one play');
