@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="widget_title">MadPlayer</string>
+    <string name="widget_now_playlist">Now playing</string>
     <string name="widget_description">Now playing: artwork, seek progress, and playback controls.</string>
+    <string name="widget_glass_card_description">Glass player: large artwork, controls, and playback progress.</string>
     <string name="widget_idle_title">Nothing playing</string>
     <string name="widget_idle_subtitle">Open the app to play music</string>
     <string name="widget_unknown_title">Unknown title</string>
+    <string name="widget_unknown_artist">Unknown artist</string>
+    <string name="widget_unknown_album">Unknown album</string>
     <string name="widget_art_desc">Album art</string>
+    <string name="widget_open_app_desc">Open MadPlayer</string>
     <string name="widget_prev_desc">Previous track</string>
     <string name="widget_next_desc">Next track</string>
     <string name="widget_play_pause_desc">Play or pause</string>

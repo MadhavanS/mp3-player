@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Frosted glass track — matches the liquid glass card feel -->
     <item android:id="@android:id/background">
         <shape>
-            <corners android:radius="2dp" />
-            <solid android:color="#40FFFFFF" />
+            <corners android:radius="3dp" />
+            <solid android:color="#55FFFFFF" />
         </shape>
     </item>
-    <!-- Amber/yellow progress fill -->
     <item android:id="@android:id/progress">
         <clip>
             <shape>
-                <corners android:radius="2dp" />
-                <solid android:color="#FFCA28" />
+                <corners android:radius="3dp" />
+                <solid android:color="#FFFFFFFF" />
             </shape>
         </clip>
     </item>

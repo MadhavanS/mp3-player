@@ -128,6 +128,9 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
       hasTrack: track != null,
       title: track?.title ?? '',
       artist: track?.artist ?? '',
+      album: track == null || track.metaLine.toLowerCase() == 'mp3'
+          ? ''
+          : track.metaLine,
       artFilePath: artPath.isEmpty ? null : artPath,
       playing: _player.isPlaying,
       positionMs: _player.position.inMilliseconds,

@@ -1,88 +1,123 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Background is set directly here (dark theme default) so it always renders
+    even when the Kotlin runtime setBackgroundResource call is skipped by the
+    launcher.  The Kotlin code then overrides it for the light theme.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="12dp">
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_glass_dark"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="10dp">
 
+    <!-- Circular album art (bitmap is pre-cropped to circle in Kotlin) -->
+    <ImageView
+        android:id="@+id/widget_art"
+        android:layout_width="72dp"
+        android:layout_height="72dp"
+        android:contentDescription="@string/widget_art_desc"
+        android:scaleType="centerCrop"
+        android:src="@mipmap/ic_launcher" />
+
+    <!-- Right-hand content column -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:id="@+id/widget_text_column"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:layout_marginStart="12dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
 
-        <ImageView
-            android:id="@+id/widget_art"
-            android:layout_width="52dp"
-            android:layout_height="52dp"
-            android:contentDescription="@string/widget_art_desc"
-            android:padding="2dp"
-            android:scaleType="centerCrop"
-            android:src="@mipmap/ic_launcher" />
-
-        <LinearLayout
-            android:id="@+id/widget_text_column"
-            android:layout_width="0dp"
+        <!-- "Now playing" / app-name label -->
+        <TextView
+            android:id="@+id/widget_label"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="10dp"
-            android:layout_marginEnd="6dp"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_now_playlist"
+            android:textColor="#99FFFFFF"
+            android:textSize="10sp" />
+
+        <!-- Track title -->
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_title"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <!-- Progress bar -->
+        <ProgressBar
+            android:id="@+id/widget_progress"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="10dp"
+            android:max="1000"
+            android:progress="0"
+            android:progressDrawable="@drawable/widget_progress_drawable" />
+
+        <!-- Time labels: current (left) and total (right) — no bare <View> spacer -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:orientation="horizontal">
 
             <TextView
-                android:id="@+id/widget_title"
-                android:layout_width="match_parent"
+                android:id="@+id/widget_time_current"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:text="@string/widget_title"
-                android:textSize="15sp"
-                android:textStyle="bold" />
+                android:layout_weight="1"
+                android:gravity="start"
+                android:text="0:00"
+                android:textColor="#99FFFFFF"
+                android:textSize="9sp" />
 
             <TextView
-                android:id="@+id/widget_subtitle"
-                android:layout_width="match_parent"
+                android:id="@+id/widget_time_total"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textSize="12sp" />
-
-            <ProgressBar
-                android:id="@+id/widget_progress"
-                style="@android:style/Widget.ProgressBar.Horizontal"
-                android:layout_width="match_parent"
-                android:layout_height="4dp"
-                android:layout_marginTop="8dp"
-                android:max="1000"
-                android:progress="0"
-                android:progressDrawable="@drawable/widget_progress_drawable" />
+                android:gravity="end"
+                android:text="0:00"
+                android:textColor="#99FFFFFF"
+                android:textSize="9sp" />
         </LinearLayout>
 
+        <!-- Playback controls row -->
         <LinearLayout
             android:id="@+id/widget_controls_row"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
             android:orientation="horizontal">
 
             <ImageButton
                 android:id="@+id/widget_btn_prev"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
                 android:background="@android:color/transparent"
                 android:contentDescription="@string/widget_prev_desc"
-                android:padding="6dp"
+                android:padding="4dp"
                 android:scaleType="centerInside"
                 android:src="@drawable/widget_ic_skip_previous" />
 
             <ImageButton
                 android:id="@+id/widget_btn_play_pause"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="2dp"
-                android:layout_marginEnd="2dp"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
                 android:background="@drawable/widget_play_circle"
                 android:contentDescription="@string/widget_play_pause_desc"
                 android:padding="10dp"
@@ -91,11 +126,11 @@
 
             <ImageButton
                 android:id="@+id/widget_btn_next"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
                 android:background="@android:color/transparent"
                 android:contentDescription="@string/widget_next_desc"
-                android:padding="6dp"
+                android:padding="4dp"
                 android:scaleType="centerInside"
                 android:src="@drawable/widget_ic_skip_next" />
         </LinearLayout>

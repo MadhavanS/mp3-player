@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_glass_card_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="136dp"
+        android:background="@drawable/widget_glass_card_background"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="112dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/widget_glass_card_art"
+            android:layout_width="112dp"
+            android:layout_height="112dp"
+            android:contentDescription="@string/widget_art_desc"
+            android:scaleType="centerCrop"
+            android:src="@mipmap/ic_launcher" />
+
+        <LinearLayout
+            android:id="@+id/widget_glass_card_text_column"
+            android:layout_width="0dp"
+            android:layout_height="112dp"
+            android:layout_marginStart="16dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="top"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/widget_glass_card_title"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/widget_title"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="20sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/widget_glass_card_artist"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/widget_idle_subtitle"
+                        android:textColor="#B3FFFFFF"
+                        android:textSize="16sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/widget_glass_card_controls_row"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/widget_glass_card_btn_prev"
+                    android:layout_width="54dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="@string/widget_prev_desc"
+                    android:padding="6dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/widget_ic_skip_previous_white" />
+
+                <ImageButton
+                    android:id="@+id/widget_glass_card_btn_play_pause"
+                    android:layout_width="64dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="16dp"
+                    android:layout_marginEnd="16dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="@string/widget_play_pause_desc"
+                    android:padding="2dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/widget_ic_play" />
+
+                <ImageButton
+                    android:id="@+id/widget_glass_card_btn_next"
+                    android:layout_width="54dp"
+                    android:layout_height="48dp"
+                    android:background="@android:color/transparent"
+                    android:contentDescription="@string/widget_next_desc"
+                    android:padding="6dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/widget_ic_skip_next_white" />
+            </LinearLayout>
+
+            <ProgressBar
+                android:id="@+id/widget_glass_card_progress"
+                style="@android:style/Widget.ProgressBar.Horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="6dp"
+                android:layout_marginTop="8dp"
+                android:max="1000"
+                android:progress="0"
+                android:progressDrawable="@drawable/widget_glass_card_progress" />
+        </LinearLayout>
+        </LinearLayout>
+    </FrameLayout>
+</FrameLayout>

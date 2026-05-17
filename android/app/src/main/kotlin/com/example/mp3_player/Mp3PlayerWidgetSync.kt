@@ -10,6 +10,7 @@ internal object Mp3PlayerWidgetSync {
         p.putBoolean(Mp3PlayerWidgetPrefs.HAS_TRACK, args.bool(Mp3PlayerWidgetPrefs.HAS_TRACK))
         p.putString(Mp3PlayerWidgetPrefs.TITLE, args.string(Mp3PlayerWidgetPrefs.TITLE))
         p.putString(Mp3PlayerWidgetPrefs.ARTIST, args.string(Mp3PlayerWidgetPrefs.ARTIST))
+        p.putString(Mp3PlayerWidgetPrefs.ALBUM, args.string(Mp3PlayerWidgetPrefs.ALBUM))
         p.putString(Mp3PlayerWidgetPrefs.ART_PATH, args.string(Mp3PlayerWidgetPrefs.ART_PATH))
         p.putBoolean(Mp3PlayerWidgetPrefs.PLAYING, args.bool(Mp3PlayerWidgetPrefs.PLAYING))
         p.putLong(Mp3PlayerWidgetPrefs.POSITION_MS, args.long(Mp3PlayerWidgetPrefs.POSITION_MS))
@@ -18,6 +19,7 @@ internal object Mp3PlayerWidgetSync {
         p.putBoolean(Mp3PlayerWidgetPrefs.IS_DARK, args.bool(Mp3PlayerWidgetPrefs.IS_DARK, true))
         p.apply()
         Mp3PlayerAppWidget.refreshAll(context)
+        Mp3PlayerGlassCardWidget.refreshAll(context)
     }
 
     fun handlePlaybackProgress(context: Context, args: Map<*, *>) {
@@ -27,6 +29,7 @@ internal object Mp3PlayerWidgetSync {
         p.putLong(Mp3PlayerWidgetPrefs.DURATION_MS, args.long(Mp3PlayerWidgetPrefs.DURATION_MS))
         p.apply()
         Mp3PlayerAppWidget.refreshAll(context)
+        Mp3PlayerGlassCardWidget.refreshAll(context)
     }
 
     private fun Map<*, *>.bool(key: String, default: Boolean = false): Boolean {
