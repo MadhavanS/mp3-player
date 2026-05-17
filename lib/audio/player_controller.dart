@@ -713,6 +713,7 @@ class PlayerController extends ChangeNotifier {
     LibraryTabId? playbackOriginTab,
     String? playbackOriginUserPlaylistId,
     bool keepShuffleMode = false,
+    bool enableShuffle = false,
   }) async {
     if (playbackOriginTab != null) {
       _playbackOriginTab = playbackOriginTab;
@@ -724,6 +725,13 @@ class PlayerController extends ChangeNotifier {
     _playlist = List<TrackItem>.from(tracks);
     _index = _playlist.isEmpty ? 0 : startIndex.clamp(0, _playlist.length - 1);
     if (preserveShuffle) {
+      final cur = _index;
+      final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
+      order.remove(cur);
+      _shuffleOrder = [cur, ...order];
+      _shufflePos = 0;
+      _shuffle = true;
+    } else if (enableShuffle && tracks.length > 1) {
       final cur = _index;
       final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
       order.remove(cur);
@@ -837,6 +845,7 @@ class PlayerController extends ChangeNotifier {
     LibraryTabId? playbackOriginTab,
     String? playbackOriginUserPlaylistId,
     bool keepShuffleMode = false,
+    bool enableShuffle = false,
   }) async {
     await setPlaylist(
       tracks,
@@ -844,6 +853,7 @@ class PlayerController extends ChangeNotifier {
       playbackOriginTab: playbackOriginTab,
       playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
       keepShuffleMode: keepShuffleMode,
+      enableShuffle: enableShuffle,
     );
     // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
     // returns; [play] can no-op until [ProcessingState.ready].

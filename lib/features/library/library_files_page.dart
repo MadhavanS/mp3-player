@@ -15,9 +15,13 @@ class LibraryFilesPage extends StatefulWidget {
     required this.musicRoots,
     required this.onOverflow,
     required this.onOpenNowPlaying,
+    this.onRefreshLibrary,
   });
 
   final List<String> musicRoots;
+
+  /// Re-scans all music folders (same as Library refresh).
+  final Future<void> Function()? onRefreshLibrary;
 
   /// Same as shell mini player tap — opens full Now Playing.
   final VoidCallback onOpenNowPlaying;
@@ -144,6 +148,7 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
                   query: q,
                   onOverflow: widget.onOverflow,
                   onSongChosenFromExplorer: _onSongChosenFromExplorer,
+                  onRefreshLibrary: widget.onRefreshLibrary,
                 ),
               ),
               MiniPlayerBar(

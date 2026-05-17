@@ -1044,6 +1044,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           musicRoots: _folderPaths,
           onOverflow: _onLibraryTrackOverflow,
           onOpenNowPlaying: _openNowPlaying,
+          onRefreshLibrary: _refreshLibraryScan,
         ),
       ),
     );
@@ -1102,6 +1103,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                       ),
                     ),
                     ListTile(
+                      leading: const Icon(Icons.play_circle_rounded),
+                      title: const Text('Now playing'),
+                      enabled: current != null,
+                      onTap: current == null ? null : _onDrawerNowPlaying,
+                    ),
+                    ListTile(
                       leading: const Icon(Icons.library_music_rounded),
                       title: const Text('Library'),
                       selected: _page == _ShellPage.library,
@@ -1121,12 +1128,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                           unawaited(_openFilesExplorerScreen());
                         });
                       },
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.play_circle_rounded),
-                      title: const Text('Now playing'),
-                      enabled: current != null,
-                      onTap: current == null ? null : _onDrawerNowPlaying,
                     ),
                     ListTile(
                       leading: const Icon(Icons.settings_rounded),

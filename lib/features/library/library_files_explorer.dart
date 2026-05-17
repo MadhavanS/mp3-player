@@ -24,6 +24,7 @@ class LibraryFilesExplorer extends StatefulWidget {
     required this.query,
     required this.onOverflow,
     this.onSongChosenFromExplorer,
+    this.onRefreshLibrary,
   });
 
   final List<String> musicRoots;
@@ -44,6 +45,9 @@ class LibraryFilesExplorer extends StatefulWidget {
   final Future<void> Function(Set<String>? explicitTrackPathKeys)?
   onSongChosenFromExplorer;
 
+  /// Re-scans all configured music folders and updates the library DB.
+  final Future<void> Function()? onRefreshLibrary;
+
   @override
   State<LibraryFilesExplorer> createState() => LibraryFilesExplorerState();
 }
@@ -56,6 +60,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   Future<int>? _headerSongsFuture;
 
   LibraryTrackSortMode _sortMode = LibraryTrackSortMode.modifiedNewest;
+  bool _libraryRefreshing = false;
 
   @override
   void initState() {
@@ -219,6 +224,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     required VoidCallback? onBack,
     required Widget subtitleWidget,
     required VoidCallback? onHomeRoots,
+    Widget? headerPlaybackActions,
     Widget? trailingActions,
   }) {
     final showTitle = title != null && title.isNotEmpty;
@@ -257,6 +263,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                   ],
                 ),
               ),
+              if (headerPlaybackActions != null) headerPlaybackActions,
               if (!_atRoots && onHomeRoots != null)
                 IconButton(
                   tooltip: 'All folders',
@@ -403,13 +410,136 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     final folderScope = _currentDir;
     if (folderScope == null) return;
     final scanned = await scanMp3Files(folderScope, recursive: true);
-    await _playFolderTracks(context, scanned: scanned, startFilePath: filePath);
+    await _playFolderTracks(
+      context,
+      scanned: scanned,
+      startFilePath: filePath,
+      keepShuffleMode: true,
+    );
+  }
+
+  Future<List<String>> _collectMp3PathsForCurrentLocation() async {
+    if (_atRoots) {
+      final roots = _filteredRoots();
+      final combined = <String>[];
+      for (final r in roots) {
+        combined.addAll(await scanMp3Files(r, recursive: true));
+      }
+      return sortMp3PathsForFilesExplorer(combined, _sortMode);
+    }
+    final dir = _currentDir;
+    if (dir == null) return [];
+    final scanned = await scanMp3Files(dir, recursive: true);
+    return sortMp3PathsForFilesExplorer(scanned, _sortMode);
+  }
+
+  Future<void> _playCurrentLocation(
+    BuildContext context, {
+    required bool shuffle,
+  }) async {
+    final scanned = await _collectMp3PathsForCurrentLocation();
+    await _playFolderTracks(
+      context,
+      scanned: scanned,
+      shuffle: shuffle,
+      keepShuffleMode: false,
+    );
+  }
+
+  Future<void> _onRefreshLibrary() async {
+    final refresh = widget.onRefreshLibrary;
+    if (refresh == null || _libraryRefreshing) return;
+    setState(() => _libraryRefreshing = true);
+    try {
+      await refresh();
+      if (mounted) setState(_reloadCurrentFutures);
+    } finally {
+      if (mounted) setState(() => _libraryRefreshing = false);
+    }
+  }
+
+  Widget _headerToolbarActions(
+    BuildContext context, {
+    required AppPalette pal,
+    required Future<int>? songCountFuture,
+  }) {
+    final accent = context.controlAccent;
+    final disabledColor = pal.textMuted.withValues(alpha: 0.45);
+    final canRefresh =
+        widget.onRefreshLibrary != null && widget.musicRoots.isNotEmpty;
+
+    return FutureBuilder<int>(
+      future: songCountFuture,
+      builder: (context, snap) {
+        final count = snap.data;
+        final playEnabled =
+            snap.connectionState == ConnectionState.done && (count ?? 0) > 0;
+        final playColor = playEnabled ? accent : disabledColor;
+        final refreshColor = canRefresh && !_libraryRefreshing
+            ? accent
+            : disabledColor;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'Play all in this location',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              onPressed: playEnabled
+                  ? () => unawaited(
+                      _playCurrentLocation(context, shuffle: false),
+                    )
+                  : null,
+              icon: Icon(Icons.play_arrow_rounded, color: playColor, size: 28),
+            ),
+            IconButton(
+              tooltip: 'Shuffle play all in this location',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              onPressed: playEnabled
+                  ? () => unawaited(
+                      _playCurrentLocation(context, shuffle: true),
+                    )
+                  : null,
+              icon: Icon(Icons.shuffle_rounded, color: playColor, size: 24),
+            ),
+            IconButton(
+              tooltip: 'Refresh library',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              onPressed: canRefresh && !_libraryRefreshing
+                  ? () => unawaited(_onRefreshLibrary())
+                  : null,
+              icon: _libraryRefreshing
+                  ? SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: accent,
+                      ),
+                    )
+                  : Icon(
+                      Icons.refresh_rounded,
+                      color: refreshColor,
+                      size: 24,
+                    ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _playFolderTracks(
     BuildContext context, {
     required List<String> scanned,
     String? startFilePath,
+    bool shuffle = false,
+    bool keepShuffleMode = false,
   }) async {
     if (scanned.isEmpty) return;
 
@@ -431,7 +561,8 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
         tracks,
         startIndex: startIndex,
         playbackOriginTab: LibraryTabId.songs,
-        keepShuffleMode: true,
+        keepShuffleMode: keepShuffleMode,
+        enableShuffle: shuffle,
       );
       await player.seek(Duration.zero);
       return;
@@ -459,7 +590,8 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
       tracks,
       startIndex: startIndex,
       playbackOriginTab: LibraryTabId.songs,
-      keepShuffleMode: true,
+      keepShuffleMode: keepShuffleMode,
+      enableShuffle: shuffle,
     );
     await player.seek(Duration.zero);
   }
@@ -469,7 +601,11 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     String folderPath,
   ) async {
     final scanned = await scanMp3Files(folderPath, recursive: true);
-    await _playFolderTracks(context, scanned: scanned);
+    await _playFolderTracks(
+      context,
+      scanned: scanned,
+      keepShuffleMode: true,
+    );
   }
 
   Widget _folderPlayButton(BuildContext context, String folderPath) {
@@ -596,6 +732,11 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
             onBack: null,
             subtitleWidget: headerSubtitle,
             onHomeRoots: null,
+            headerPlaybackActions: _headerToolbarActions(
+              context,
+              pal: pal,
+              songCountFuture: songsSumFuture,
+            ),
             trailingActions: _sortMenuButton(pal),
           ),
           Expanded(
@@ -718,6 +859,11 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                   onBack: _goBack,
                   subtitleWidget: headerSubtitle,
                   onHomeRoots: resetToRoots,
+                  headerPlaybackActions: _headerToolbarActions(
+                    context,
+                    pal: pal,
+                    songCountFuture: _headerSongsFuture,
+                  ),
                   trailingActions: _sortMenuButton(pal),
                 ),
                 _breadcrumb(theme, pal),
