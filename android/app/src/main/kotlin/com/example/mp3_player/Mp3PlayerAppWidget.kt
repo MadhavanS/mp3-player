@@ -130,10 +130,10 @@ class Mp3PlayerAppWidget : AppWidgetProvider() {
                 )
                 views.setInt(R.id.widget_title, "setTextColor", textPrimary(isDark))
 
-                // Circular album art
-                val bitmap = loadCircularArtBitmap(artPath)
-                if (bitmap != null) {
-                    views.setImageViewBitmap(R.id.widget_art, bitmap)
+                // Circular album art or theme placeholder when no file art
+                val artBitmap = loadArtOrPlaceholder(prefs, artPath, hasTrack = true)
+                if (artBitmap != null) {
+                    views.setImageViewBitmap(R.id.widget_art, artBitmap)
                 } else {
                     views.setImageViewResource(R.id.widget_art, R.mipmap.ic_launcher)
                 }
@@ -202,6 +202,21 @@ class Mp3PlayerAppWidget : AppWidgetProvider() {
             val minutes = totalSec / 60
             val seconds = totalSec % 60
             return "$minutes:${seconds.toString().padStart(2, '0')}"
+        }
+
+        private fun loadArtOrPlaceholder(
+            prefs: android.content.SharedPreferences,
+            artPath: String,
+            hasTrack: Boolean,
+        ): Bitmap? {
+            val file = loadCircularArtBitmap(artPath)
+            if (file != null) return file
+            if (!hasTrack) return null
+            return WidgetArtPlaceholderBitmap.fromPrefs(
+                prefs,
+                256,
+                WidgetArtPlaceholderBitmap.Shape.CIRCLE,
+            )
         }
 
         /**

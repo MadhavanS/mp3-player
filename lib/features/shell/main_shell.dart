@@ -610,7 +610,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final pathToPreserve = preservePlaybackAfterRescan
         ? player.currentTrack?.filePath
         : null;
-    final wasPlaying = preservePlaybackAfterRescan && player.isPlaying;
+    // Capture before any await — reload paths can make [isPlaying] flicker false.
+    final wasPlaying = preservePlaybackAfterRescan &&
+        (player.isPlaying || player.audioPlayer.playing);
     final playbackPosition = preservePlaybackAfterRescan
         ? player.position
         : Duration.zero;
@@ -669,6 +671,26 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
       if (preservePlaybackAfterRescan) {
         if (keepCurrentQueue && player.playlist.isNotEmpty) {
+          final keptPlayback = player.refreshLibraryDuringPlayback(tracks);
+          if (keptPlayback) {
+            if (!kIsWeb && mounted) {
+              enrichPlaylistTracks(
+                tracks: tracks,
+                onTrackUpdated: (path, updated) {
+                  player.updateTrackByPath(
+                    path,
+                    updated,
+                    notify: CatalogNotifyMode.throttled,
+                    refreshNotificationArt: false,
+                  );
+                  unawaited(SongMetadataCache.saveTracks([updated]));
+                },
+              ).catchError((Object e, StackTrace st) {
+                debugPrint('enrichPlaylistTracks: $e\n$st');
+              });
+            }
+            return;
+          }
           await player.tryResyncQueueWithLibraryScan(
             tracks,
             resumePosition: playbackPosition,

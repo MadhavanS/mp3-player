@@ -746,6 +746,42 @@ class PlayerController extends ChangeNotifier {
     _sourceNeedsReload = false;
   }
 
+  /// Updates library rows and in-queue metadata after a rescan without reloading
+  /// [AudioPlayer]'s source — use for manual refresh while music is playing.
+  ///
+  /// Returns `true` when playback was left untouched (Songs-origin queue). Returns
+  /// `false` when the caller should use [tryResyncQueueWithLibraryScan] instead.
+  bool refreshLibraryDuringPlayback(List<TrackItem> catalogTracks) {
+    final origin = _playbackOriginTab;
+    if (origin != null && origin != LibraryTabId.songs) {
+      return false;
+    }
+    if (_playlist.isEmpty) return false;
+
+    final byKey = <String, TrackItem>{};
+    for (final t in catalogTracks) {
+      final fp = t.filePath?.trim();
+      if (fp == null || fp.isEmpty) continue;
+      final k = canonicalMusicLibraryPathKey(fp);
+      if (k.isNotEmpty) byKey[k] = t;
+    }
+    if (byKey.isEmpty) return true;
+
+    var changed = false;
+    for (var i = 0; i < _playlist.length; i++) {
+      final fp = _playlist[i].filePath?.trim();
+      if (fp == null || fp.isEmpty) continue;
+      final k = canonicalMusicLibraryPathKey(fp);
+      final fresh = byKey[k];
+      if (fresh != null && fresh != _playlist[i]) {
+        _playlist[i] = fresh;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
+    return true;
+  }
+
   /// After a disk scan, replace the queue with [tracks] when playback was started from
   /// the main Songs library (full-library queue). Preserves the current file, playback
   /// position, playing/paused state, and shuffle mode (rebuilding shuffle so new indices
@@ -1081,6 +1117,9 @@ class PlayerController extends ChangeNotifier {
       }
     }
   }
+
+  /// Re-push notification [MediaItem.artUri] (e.g. after theme change).
+  void scheduleNotificationArtRefresh() => _scheduleNotificationArtRefresh();
 
   void _scheduleNotificationArtRefresh() {
     if (kIsWeb) return;
@@ -1452,8 +1491,6 @@ class PlayerController extends ChangeNotifier {
       await Future.wait(
         artIndices.map((pi) async {
           if (pi < 0 || pi >= _playlist.length) return;
-          final bytes = _playlist[pi].albumArtBytes;
-          if (bytes == null || bytes.isEmpty) return;
           notificationArtUris[pi] =
               await uriForNotificationAlbumArt(_playlist[pi]);
         }),
@@ -1461,11 +1498,8 @@ class PlayerController extends ChangeNotifier {
       if (logical >= 0 &&
           logical < _playlist.length &&
           !notificationArtUris.containsKey(logical)) {
-        final bytes = logicalTrack.albumArtBytes;
-        if (bytes != null && bytes.isNotEmpty) {
-          notificationArtUris[logical] =
-              await uriForNotificationAlbumArt(logicalTrack);
-        }
+        notificationArtUris[logical] =
+            await uriForNotificationAlbumArt(logicalTrack);
       }
 
       for (final pi in sourceOrder) {

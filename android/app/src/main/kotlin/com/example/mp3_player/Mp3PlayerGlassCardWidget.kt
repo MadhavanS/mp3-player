@@ -97,9 +97,9 @@ class Mp3PlayerGlassCardWidget : AppWidgetProvider() {
                     album.ifBlank { context.getString(R.string.widget_unknown_album) },
                 )
 
-                val bitmap = loadRoundedArtBitmap(artPath)
-                if (bitmap != null) {
-                    views.setImageViewBitmap(R.id.widget_glass_card_art, bitmap)
+                val artBitmap = loadRoundedArtOrPlaceholder(prefs, artPath, hasTrack = true)
+                if (artBitmap != null) {
+                    views.setImageViewBitmap(R.id.widget_glass_card_art, artBitmap)
                 } else {
                     views.setImageViewResource(R.id.widget_glass_card_art, R.mipmap.ic_launcher)
                 }
@@ -135,6 +135,21 @@ class Mp3PlayerGlassCardWidget : AppWidgetProvider() {
             )
 
             appWidgetManager.updateAppWidget(appWidgetId, views)
+        }
+
+        private fun loadRoundedArtOrPlaceholder(
+            prefs: android.content.SharedPreferences,
+            artPath: String,
+            hasTrack: Boolean,
+        ): Bitmap? {
+            val file = loadRoundedArtBitmap(artPath)
+            if (file != null) return file
+            if (!hasTrack) return null
+            return WidgetArtPlaceholderBitmap.fromPrefs(
+                prefs,
+                320,
+                WidgetArtPlaceholderBitmap.Shape.ROUNDED_SQUARE,
+            )
         }
 
         private fun loadRoundedArtBitmap(path: String): Bitmap? {

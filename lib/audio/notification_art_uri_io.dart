@@ -8,6 +8,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/track_item.dart';
 import '../services/music_library_path_key.dart';
+import '../services/notification_art_theme_bridge.dart';
+import '../theme/track_art_placeholder.dart';
 
 /// Subdirectory under the temp dir — one cached PNG per track (not a shared file).
 const String _notifyArtCacheDirName = 'media_notify_art';
@@ -49,6 +51,18 @@ int _bytesFingerprint(Uint8List bytes) {
   );
 }
 
+int _placeholderFingerprint(TrackArtPlaceholderStyle style, TrackItem track) {
+  final c0 = track.artColors.isNotEmpty ? track.artColors.first.toARGB32() : 0;
+  final c1 = track.artColors.length > 1 ? track.artColors[1].toARGB32() : c0;
+  return Object.hash(
+    'placeholder',
+    style.index,
+    c0,
+    c1,
+    NotificationArtThemeBridge.palette().index,
+  );
+}
+
 /// Stable cache file name per track path (and art revision when cover bytes change).
 String _notificationArtCacheFileName(TrackItem track, int contentHash) {
   final fp = track.filePath?.trim() ?? '';
@@ -69,14 +83,30 @@ Future<Directory> _notificationArtCacheDirectory() async {
 }
 
 /// Returns a `file://` [Uri] for [audio_service] / [MediaItem.artUri] on Android.
+///
+/// Uses embedded cover when present; otherwise a theme-aligned placeholder PNG
+/// (same rules as [TrackAlbumArt] and the home-screen widget).
 Future<Uri?> uriForNotificationAlbumArt(TrackItem track) async {
   final bytes = track.albumArtBytes;
-  if (bytes == null || bytes.isEmpty) return null;
+  final Uint8List? forDisk;
+  final int contentHash;
 
-  final forDisk = await _encodeCoverForPlatformNotification(bytes);
-  if (forDisk == null || forDisk.isEmpty) return null;
+  if (bytes != null && bytes.isNotEmpty) {
+    forDisk = await _encodeCoverForPlatformNotification(bytes);
+    if (forDisk == null || forDisk.isEmpty) return null;
+    contentHash = _bytesFingerprint(forDisk);
+  } else {
+    final style = trackArtPlaceholderStyleFor(
+      NotificationArtThemeBridge.palette(),
+    );
+    forDisk = await rasterizeTrackArtPlaceholder(
+      style: style,
+      artColors: track.artColors,
+    );
+    if (forDisk == null || forDisk.isEmpty) return null;
+    contentHash = _placeholderFingerprint(style, track);
+  }
 
-  final contentHash = _bytesFingerprint(forDisk);
   final cacheDir = await _notificationArtCacheDirectory();
   final file = File(
     p.join(cacheDir.path, _notificationArtCacheFileName(track, contentHash)),

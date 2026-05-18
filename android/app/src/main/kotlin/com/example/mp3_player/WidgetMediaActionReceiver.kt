@@ -172,7 +172,7 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
             if (title.isNotBlank()) editor.putString(Mp3PlayerWidgetPrefs.TITLE, title)
             if (artist.isNotBlank()) editor.putString(Mp3PlayerWidgetPrefs.ARTIST, artist)
             if (album.isNotBlank()) editor.putString(Mp3PlayerWidgetPrefs.ALBUM, album)
-            if (artPath.isNotBlank()) editor.putString(Mp3PlayerWidgetPrefs.ART_PATH, artPath)
+            editor.putString(Mp3PlayerWidgetPrefs.ART_PATH, artPath)
             if (duration > 0L) editor.putLong(Mp3PlayerWidgetPrefs.DURATION_MS, duration)
             editor.putBoolean(Mp3PlayerWidgetPrefs.PLAYING, playing)
             editor.apply()

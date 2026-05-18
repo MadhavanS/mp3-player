@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,8 +16,10 @@ import 'platform/android_home_widget_bridge.dart';
 import 'services/accent_settings_store.dart';
 import 'services/font_settings_store.dart';
 import 'services/player_chrome_background_store.dart';
+import 'services/notification_art_theme_bridge.dart';
 import 'services/theme_settings_store.dart';
 import 'theme/accent_color_option.dart';
+import 'theme/track_art_placeholder.dart';
 import 'theme/app_font_option.dart';
 import 'theme/app_theme.dart';
 import 'theme/player_chrome_background.dart';
@@ -102,6 +104,19 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
     );
   }
 
+  void _syncNotificationArtThemeBridge() {
+    NotificationArtThemeBridge.palette =
+        () => _themeSetting.paletteAt(_themeClock);
+  }
+
+  void _onThemePaletteChanged() {
+    _syncNotificationArtThemeBridge();
+    _scheduleAndroidHomeWidgetSync();
+    if (_player.currentTrack != null) {
+      _player.scheduleNotificationArtRefresh();
+    }
+  }
+
   void _scheduleAndroidHomeWidgetSync() {
     if (!_syncAndroidHomeWidget) return;
     _androidWidgetSyncDebounce?.cancel();
@@ -117,28 +132,53 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
     final palForWidget = _materialPaletteFor(palette);
     final isDark = palForWidget.scaffoldBackground.computeLuminance() < 0.5;
 
+    // Widget: only pass a file path for embedded cover art. Theme placeholders are
+    // drawn on-device in [WidgetArtPlaceholderBitmap] (fast). Notification still
+    // rasterizes placeholders via [uriForNotificationAlbumArt].
     var artPath = '';
     if (track != null) {
-      final uri = await uriForNotificationAlbumArt(track);
-      if (uri != null && uri.isScheme('file')) {
-        artPath = uri.toFilePath();
+      final bytes = track.albumArtBytes;
+      if (bytes != null && bytes.isNotEmpty) {
+        try {
+          final uri = await uriForNotificationAlbumArt(track);
+          if (uri != null && uri.isScheme('file')) {
+            artPath = uri.toFilePath();
+          }
+        } catch (e, st) {
+          debugPrint('_pushAndroidHomeWidgetState art: $e\n$st');
+        }
       }
     }
 
-    await AndroidHomeWidgetBridge.sync(
-      hasTrack: track != null,
-      title: track?.title ?? '',
-      artist: track?.artist ?? '',
-      album: track == null || track.metaLine.toLowerCase() == 'mp3'
-          ? ''
-          : track.metaLine,
-      artFilePath: artPath.isEmpty ? null : artPath,
-      playing: _player.isPlaying,
-      positionMs: _player.position.inMilliseconds,
-      durationMs: _player.duration?.inMilliseconds ?? 0,
-      canSkipNext: _player.canSkipNext,
-      isDarkTheme: isDark,
-    );
+    final placeholderStyle = trackArtPlaceholderStyleFor(palette).wireName;
+    final c0 = track?.artColors.isNotEmpty == true
+        ? track!.artColors.first.toARGB32()
+        : 0;
+    final c1 = track != null && track.artColors.length > 1
+        ? track.artColors[1].toARGB32()
+        : c0;
+
+    try {
+      await AndroidHomeWidgetBridge.sync(
+        hasTrack: track != null,
+        title: track?.title ?? '',
+        artist: track?.artist ?? '',
+        album: track == null || track.metaLine.toLowerCase() == 'mp3'
+            ? ''
+            : track.metaLine,
+        artFilePath: artPath.isEmpty ? null : artPath,
+        artPlaceholderStyle: placeholderStyle,
+        artPlaceholderColor0Argb: c0,
+        artPlaceholderColor1Argb: c1,
+        playing: _player.isPlaying,
+        positionMs: _player.position.inMilliseconds,
+        durationMs: _player.duration?.inMilliseconds ?? 0,
+        canSkipNext: _player.canSkipNext,
+        isDarkTheme: isDark,
+      );
+    } catch (e, st) {
+      debugPrint('_pushAndroidHomeWidgetState sync: $e\n$st');
+    }
   }
 
   Future<void> _loadTheme() async {
@@ -172,7 +212,7 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
       _themeClock = DateTime.now();
     });
     _rescheduleThemeTimer();
-    _scheduleAndroidHomeWidgetSync();
+    _onThemePaletteChanged();
   }
 
   void _rescheduleThemeTimer() {
@@ -181,7 +221,7 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
     _themeTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) return;
       setState(() => _themeClock = DateTime.now());
-      _scheduleAndroidHomeWidgetSync();
+      _onThemePaletteChanged();
     });
   }
 
@@ -192,7 +232,7 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
     });
     await ThemeSettingsStore.save(setting);
     _rescheduleThemeTimer();
-    _scheduleAndroidHomeWidgetSync();
+    _onThemePaletteChanged();
   }
 
   Future<void> _setFontOption(AppFontOption option) async {
@@ -272,6 +312,7 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
 
   @override
   Widget build(BuildContext context) {
+    _syncNotificationArtThemeBridge();
     final resolved = _themeSetting.paletteAt(_themeClock);
     final paletteOverride =
         (resolved == AppThemePalette.julia ||
