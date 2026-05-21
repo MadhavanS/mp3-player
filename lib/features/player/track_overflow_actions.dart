@@ -225,6 +225,169 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
   }
 }
 
+/// Picks a user playlist and appends [filePaths] (list order preserved).
+Future<void> showUserPlaylistPickerAndAddPaths(
+  BuildContext context,
+  List<String> filePaths,
+) async {
+  final paths = filePaths
+      .map((p) => p.trim())
+      .where((p) => p.isNotEmpty)
+      .toList();
+  if (paths.isEmpty) {
+    if (context.mounted) {
+      ActionPillToast.show(context, 'No songs selected', uppercaseLabel: true);
+    }
+    return;
+  }
+  if (paths.length == 1) {
+    await _showUserPlaylistPickerAndAdd(context, paths.first);
+    return;
+  }
+
+  final playlists = await UserPlaylistsStore.loadAll();
+  if (!context.mounted) return;
+
+  final pal = context.palette;
+  final theme = Theme.of(context);
+
+  Future<void> createNewAndAdd(BuildContext sheetContext) async {
+    final name = await showCreatePlaylistNameDialogWithExistingNames(
+      context,
+      existingNames: playlists.map((p) => p.name).toSet(),
+    );
+    if (!sheetContext.mounted) return;
+    if (name == null || name.trim().isEmpty) return;
+    final trimmed = name.trim();
+    final id = await UserPlaylistsStore.createPlaylist(trimmed);
+    if (id == null) {
+      if (context.mounted) {
+        ActionPillToast.show(
+          context,
+          'Playlist name already exists. Please rename it.',
+          uppercaseLabel: true,
+        );
+      }
+      return;
+    }
+    final added = await UserPlaylistsStore.addPathsToPlaylist(id, paths);
+    if (context.mounted) {
+      final player = PlayerController.of(context);
+      for (final path in paths) {
+        await player.syncAddedSongToActiveUserPlaylistQueue(id, path);
+      }
+    }
+    if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+    if (!context.mounted) return;
+    ActionPillToast.show(
+      context,
+      added > 0
+          ? 'Added $added song${added == 1 ? '' : 's'} to $trimmed'
+          : 'All selected songs are already in $trimmed',
+      uppercaseLabel: true,
+    );
+  }
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: pal.surface,
+    showDragHandle: true,
+    builder: (ctx) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 8, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Add ${paths.length} songs to playlist',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        color: pal.textPrimary,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => createNewAndAdd(ctx),
+                    child: const Text('Create new'),
+                  ),
+                ],
+              ),
+            ),
+            if (playlists.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: Text(
+                  'No playlists yet. Tap Create new to make one and add these songs.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: pal.textSecondary,
+                  ),
+                ),
+              )
+            else
+              SizedBox(
+                height: min(
+                  MediaQuery.sizeOf(ctx).height * 0.5,
+                  120 + playlists.length * 56.0,
+                ),
+                child: ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  itemCount: playlists.length,
+                  itemBuilder: (context, i) {
+                    final pl = playlists[i];
+                    return ListTile(
+                      leading: Icon(
+                        Icons.queue_music_rounded,
+                        color: context.controlAccent,
+                      ),
+                      title: Text(
+                        pl.name,
+                        style: TextStyle(color: pal.textPrimary),
+                      ),
+                      subtitle: Text(
+                        '${pl.paths.length} songs',
+                        style: TextStyle(color: pal.textSecondary),
+                      ),
+                      onTap: () async {
+                        final added = await UserPlaylistsStore.addPathsToPlaylist(
+                          pl.id,
+                          paths,
+                        );
+                        if (context.mounted) {
+                          final player = PlayerController.of(context);
+                          for (final path in paths) {
+                            await player.syncAddedSongToActiveUserPlaylistQueue(
+                              pl.id,
+                              path,
+                            );
+                          }
+                        }
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                        if (!context.mounted) return;
+                        ActionPillToast.show(
+                          context,
+                          added > 0
+                              ? 'Added $added song${added == 1 ? '' : 's'} to ${pl.name}'
+                              : 'All selected songs are already in ${pl.name}',
+                          uppercaseLabel: true,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 Future<void> _showUserPlaylistPickerAndAdd(
   BuildContext context,
   String filePath,

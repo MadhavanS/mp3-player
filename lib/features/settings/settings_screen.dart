@@ -108,10 +108,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _libraryTabRows = rows);
   }
 
-  Future<void> _persistLibraryTabRows(List<LibraryTabRow> rows) async {
+  Future<void> _persistLibraryTabRows(
+    List<LibraryTabRow> rows, {
+    VoidCallback? onUpdated,
+  }) async {
     await LibraryTabsStore.saveConfig(rows);
     final next = await LibraryTabsStore.loadConfig();
     if (mounted) setState(() => _libraryTabRows = next);
+    onUpdated?.call();
+  }
+
+  String _libraryTabsSummary() {
+    final rows = _libraryTabRows;
+    if (rows == null) return 'Loading…';
+    final enabled = rows.where((r) => r.enabled).length;
+    return '$enabled of ${rows.length} tabs enabled';
   }
 
   Future<void> _loadRecentListLimits() async {
@@ -177,7 +188,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _onLibraryTabsReorder(int oldIndex, int newIndex) {
+  void _onLibraryTabsReorder(
+    int oldIndex,
+    int newIndex, {
+    VoidCallback? onUpdated,
+  }) {
     final rows = _libraryTabRows;
     if (rows == null) return;
     final next = List<LibraryTabRow>.from(rows);
@@ -185,10 +200,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (ni > oldIndex) ni -= 1;
     final item = next.removeAt(oldIndex);
     next.insert(ni, item);
-    unawaited(_persistLibraryTabRows(next));
+    unawaited(_persistLibraryTabRows(next, onUpdated: onUpdated));
   }
 
-  void _setLibraryTabEnabled(int index, bool enabled) {
+  void _setLibraryTabEnabled(
+    int index,
+    bool enabled, {
+    VoidCallback? onUpdated,
+  }) {
     final rows = _libraryTabRows;
     if (rows == null) return;
     final next = List<LibraryTabRow>.from(rows);
@@ -204,7 +223,142 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     }
     next[index] = LibraryTabRow(id: next[index].id, enabled: enabled);
-    unawaited(_persistLibraryTabRows(next));
+    unawaited(_persistLibraryTabRows(next, onUpdated: onUpdated));
+  }
+
+  Future<void> _showLibraryTabsSettingsDialog() async {
+    if (_libraryTabRows == null) await _loadLibraryTabRows();
+    if (!mounted) return;
+
+    final theme = Theme.of(context);
+    final pal = context.palette;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            void refreshDialog() => setDialogState(() {});
+
+            return AlertDialog(
+              backgroundColor: pal.surface,
+              title: Text(
+                'Library',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: pal.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Choose which tabs appear on the Library screen and drag to reorder them.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: pal.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildLibraryTabsReorderList(
+                        theme,
+                        pal,
+                        onUpdated: refreshDialog,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: context.controlAccent,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Done'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildLibraryTabsReorderList(
+    ThemeData theme,
+    AppPalette pal, {
+    VoidCallback? onUpdated,
+  }) {
+    if (_libraryTabRows == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Center(
+          child: CircularProgressIndicator(color: context.controlAccent),
+        ),
+      );
+    }
+
+    final rows = _libraryTabRows!;
+    return SizedBox(
+      height: rows.length * 72.0,
+      child: ReorderableListView.builder(
+        buildDefaultDragHandles: false,
+        itemCount: rows.length,
+        onReorder: _busy
+            ? (_, __) {}
+            : (oldIndex, newIndex) => _onLibraryTabsReorder(
+                  oldIndex,
+                  newIndex,
+                  onUpdated: onUpdated,
+                ),
+        itemBuilder: (ctx, i) {
+          final row = rows[i];
+          final enabledCount = rows.where((r) => r.enabled).length;
+          final lastEnabled = row.enabled && enabledCount <= 1;
+          return Material(
+            key: ValueKey(row.id.wireValue),
+            color: Colors.transparent,
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 0,
+                vertical: 4,
+              ),
+              leading: ReorderableDragStartListener(
+                index: i,
+                child: Icon(
+                  Icons.drag_handle_rounded,
+                  color: pal.textMuted.withValues(alpha: 0.85),
+                ),
+              ),
+              title: Text(
+                row.id.shortTitle,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: pal.textPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              trailing: PlayerAdaptiveSwitch(
+                value: row.enabled,
+                onChanged: _busy || lastEnabled
+                    ? null
+                    : (v) => _setLibraryTabEnabled(
+                          i,
+                          v,
+                          onUpdated: onUpdated,
+                        ),
+                activeColor: context.controlAccent,
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   String? _normalizePickPath(String raw) {
@@ -474,7 +628,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           subtitle: Text(
-            'Scan paths and Library tabs',
+            'Scan paths and library options',
             style: theme.textTheme.bodySmall?.copyWith(
               color: pal.textMuted.withValues(alpha: 0.95),
             ),
@@ -1115,76 +1269,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         const SizedBox(height: 28),
         Divider(color: pal.dividerOnHero),
-        const SizedBox(height: 16),
-        Text(
-          'Library tabs',
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: pal.onScaffold,
-            fontWeight: FontWeight.w600,
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            Icons.library_music_outlined,
+            color: pal.onScaffold.withValues(alpha: 0.88),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Choose which tabs appear on the Library screen and drag to reorder them.',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: pal.textSecondary.withValues(alpha: 0.95),
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (_libraryTabRows == null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: CircularProgressIndicator(color: context.controlAccent),
-            ),
-          )
-        else
-          SizedBox(
-            height: _libraryTabRows!.length * 72.0,
-            child: ReorderableListView.builder(
-              buildDefaultDragHandles: false,
-              itemCount: _libraryTabRows!.length,
-              onReorder: _busy ? (_, __) {} : _onLibraryTabsReorder,
-              itemBuilder: (ctx, i) {
-                final row = _libraryTabRows![i];
-                final enabledCount = _libraryTabRows!
-                    .where((r) => r.enabled)
-                    .length;
-                final lastEnabled = row.enabled && enabledCount <= 1;
-                return Material(
-                  key: ValueKey(row.id.wireValue),
-                  color: Colors.transparent,
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 0,
-                      vertical: 4,
-                    ),
-                    leading: ReorderableDragStartListener(
-                      index: i,
-                      child: Icon(
-                        Icons.drag_handle_rounded,
-                        color: pal.onScaffold.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    title: Text(
-                      row.id.shortTitle,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: pal.onScaffold,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    trailing: PlayerAdaptiveSwitch(
-                      value: row.enabled,
-                      onChanged: _busy || lastEnabled
-                          ? null
-                          : (v) => _setLibraryTabEnabled(i, v),
-                      activeColor: context.controlAccent,
-                    ),
-                  ),
-                );
-              },
+          title: Text(
+            'Library',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: pal.onScaffold,
+              fontWeight: FontWeight.w600,
             ),
           ),
+          subtitle: Text(
+            _libraryTabsSummary(),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.textMuted.withValues(alpha: 0.9),
+            ),
+          ),
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            color: pal.textMuted.withValues(alpha: 0.75),
+          ),
+          onTap: _busy ? null : _showLibraryTabsSettingsDialog,
+        ),
         const SizedBox(height: 24),
       ],
     );

@@ -222,26 +222,13 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     final ivy = context.appliedThemePalette == AppThemePalette.ivy;
     final silver = context.appliedThemePalette == AppThemePalette.silver;
     
-    if (ivy) {
-      return PopupMenuButton<String>(
-        tooltip: 'More',
-        child: const LiquidGlassRingIconButton(
-          icon: Icons.more_horiz_rounded,
-          onPressed: null, // PopupMenuButton handles the tap
-          size: 44,
-          iconSize: 22,
-          highlighted: false,
-        ),
-        itemBuilder: (ctx) => _softBlurRestMenuEntries(track),
-        onSelected: (v) => unawaited(_onSoftBlurTailOverflowSelected(player, v)),
-      );
-    }
-
     return PopupMenuButton<String>(
       tooltip: 'More',
       icon: Icon(
-        silver ? Icons.more_vert : Icons.more_vert_rounded,
-        color: actionColor,
+        ivy
+            ? Icons.more_horiz_rounded
+            : (silver ? Icons.more_vert : Icons.more_vert_rounded),
+        color: ivy ? context.controlAccent : actionColor,
         size: silver ? 34 : 24,
       ),
       itemBuilder: (ctx) => _softBlurRestMenuEntries(track),
@@ -491,18 +478,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               minWidth: 200,
                               maxWidth: 248,
                             ),
-                            icon: ivy 
-                              ? const LiquidGlassRingIconButton(
-                                  icon: Icons.more_vert_rounded,
-                                  onPressed: null,
-                                  size: 40,
-                                  iconSize: 20,
-                                  highlighted: false,
-                                )
-                              : Icon(
-                                  Icons.more_vert_rounded,
-                                  color: navIconColor,
-                                ),
+                            icon: Icon(
+                              Icons.more_vert_rounded,
+                              color: ivy
+                                  ? context.controlAccent
+                                  : navIconColor,
+                            ),
                             onSelected: (action) {
                               unawaited(
                                 applyTrackOverflowAction(

@@ -85,6 +85,21 @@ class UserPlaylistsStore {
     await _save(list);
   }
 
+  /// Appends each path in [paths] that is not already in the playlist (canonical keys).
+  /// Returns how many paths were newly added.
+  static Future<int> addPathsToPlaylist(
+    String playlistId,
+    List<String> paths,
+  ) async {
+    var added = 0;
+    for (final path in paths) {
+      if (await addPathToPlaylist(playlistId, path)) {
+        added++;
+      }
+    }
+    return added;
+  }
+
   /// Appends [path] if not already present (canonical path comparison). Returns whether it was added.
   static Future<bool> addPathToPlaylist(String playlistId, String path) async {
     final raw = path.trim();

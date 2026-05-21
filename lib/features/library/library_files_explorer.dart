@@ -13,7 +13,6 @@ import '../../services/library_track_sort.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/music_library_path_key.dart';
 import '../../theme/app_theme.dart';
-import '../../widgets/liquid_glass.dart';
 import '../../widgets/track_album_art.dart';
 import '../player/track_overflow_actions.dart';
 
@@ -133,18 +132,12 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
     return PopupMenuButton<LibraryTrackSortMode>(
       tooltip: 'Sort songs',
-      icon: isIvy
-          ? const LiquidGlassRingIconButton(
-              icon: Icons.sort_rounded,
-              onPressed: null,
-              size: 38,
-              iconSize: 20,
-              highlighted: false,
-            )
-          : Icon(
-              Icons.sort_rounded,
-              color: pal.onScaffold.withValues(alpha: 0.85),
-            ),
+      icon: Icon(
+        Icons.sort_rounded,
+        color: isIvy
+            ? const Color(0xFF1C1C1E)
+            : pal.onScaffold.withValues(alpha: 0.85),
+      ),
       padding: EdgeInsets.zero,
       onSelected: (m) async => LibraryTrackSortStore.save(m),
       itemBuilder: (context) {

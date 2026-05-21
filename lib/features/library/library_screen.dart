@@ -20,6 +20,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/daisy_background.dart';
 import '../../widgets/liquid_glass.dart';
 import '../../widgets/track_album_art.dart';
+import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
 import 'playing_queue_tab.dart';
@@ -220,6 +221,9 @@ class LibraryScreenState extends State<LibraryScreen>
 
   LibraryTrackSortMode _songSortMode = LibraryTrackSortMode.modifiedNewest;
 
+  bool _songsMultiSelectMode = false;
+  final Set<String> _songsSelectedPathKeys = {};
+
   /// After returning from Files, focus the Songs tab.
   void switchToSongsTab() {
     if (!mounted) return;
@@ -354,6 +358,10 @@ class LibraryScreenState extends State<LibraryScreen>
     if (!mounted) return;
     if (_tabController.indexIsChanging) return;
     setState(() {
+      if (_currentLibraryTabId != LibraryTabId.songs && _songsMultiSelectMode) {
+        _songsMultiSelectMode = false;
+        _songsSelectedPathKeys.clear();
+      }
       if (_currentLibraryTabId == LibraryTabId.recentlyPlayed) {
         _recentListRevision++;
       }
@@ -361,6 +369,104 @@ class LibraryScreenState extends State<LibraryScreen>
     if (_currentLibraryTabId == LibraryTabId.favourites) {
       unawaited(FavoriteSongsStore.pruneMissingPaths());
     }
+  }
+
+  void _exitSongsMultiSelectMode() {
+    if (!_songsMultiSelectMode && _songsSelectedPathKeys.isEmpty) return;
+    setState(() {
+      _songsMultiSelectMode = false;
+      _songsSelectedPathKeys.clear();
+    });
+  }
+
+  void _enterSongsMultiSelectMode({String? initialPath}) {
+    setState(() {
+      _songsMultiSelectMode = true;
+      _songsSelectedPathKeys.clear();
+      if (initialPath != null) {
+        final k = canonicalMusicLibraryPathKey(initialPath);
+        if (k.isNotEmpty) _songsSelectedPathKeys.add(k);
+      }
+    });
+  }
+
+  void _toggleSongsSelection(String? path) {
+    if (path == null || path.isEmpty) return;
+    final k = canonicalMusicLibraryPathKey(path);
+    if (k.isEmpty) return;
+    setState(() {
+      if (_songsSelectedPathKeys.contains(k)) {
+        _songsSelectedPathKeys.remove(k);
+      } else {
+        _songsSelectedPathKeys.add(k);
+      }
+    });
+  }
+
+  bool _isSongPathSelected(String? path) {
+    if (path == null || path.isEmpty) return false;
+    final k = canonicalMusicLibraryPathKey(path);
+    return k.isNotEmpty && _songsSelectedPathKeys.contains(k);
+  }
+
+  List<String> _orderedSelectedPaths(List<String> orderedPaths) {
+    return orderedPaths
+        .where((p) => _isSongPathSelected(p))
+        .toList();
+  }
+
+  void _selectAllVisibleSongs(List<String> orderedPaths) {
+    setState(() {
+      for (final p in orderedPaths) {
+        final k = canonicalMusicLibraryPathKey(p);
+        if (k.isNotEmpty) _songsSelectedPathKeys.add(k);
+      }
+    });
+  }
+
+  Future<void> _playSelectedSongs(
+    BuildContext context,
+    List<String> orderedPaths, {
+    Set<String>? pathKeyScope,
+  }) async {
+    final selected = _orderedSelectedPaths(orderedPaths);
+    if (selected.isEmpty) {
+      if (context.mounted) {
+        ActionPillToast.show(
+          context,
+          'Select at least one song',
+          uppercaseLabel: true,
+        );
+      }
+      return;
+    }
+    _exitSongsMultiSelectMode();
+    await _playOrderedPathsFrom(
+      context,
+      selected,
+      0,
+      playbackOriginTab: LibraryTabId.songs,
+      pathKeyScope: pathKeyScope,
+    );
+  }
+
+  Future<void> _addSelectedSongsToPlaylist(
+    BuildContext context,
+    List<String> orderedPaths,
+  ) async {
+    final selected = _orderedSelectedPaths(orderedPaths);
+    if (selected.isEmpty) {
+      if (context.mounted) {
+        ActionPillToast.show(
+          context,
+          'Select at least one song',
+          uppercaseLabel: true,
+        );
+      }
+      return;
+    }
+    await showUserPlaylistPickerAndAddPaths(context, selected);
+    if (mounted) _exitSongsMultiSelectMode();
   }
 
   @override
@@ -1406,7 +1512,17 @@ class LibraryScreenState extends State<LibraryScreen>
             final pal = context.palette;
             final hint = _searchHintForTab(_currentLibraryTabId);
 
-            return DaisyBackground(
+            final onSongsTab = _currentLibraryTabId == LibraryTabId.songs;
+            final inSongsSelect =
+                onSongsTab && _songsMultiSelectMode;
+
+            return PopScope(
+              canPop: !inSongsSelect,
+              onPopInvokedWithResult: (didPop, _) {
+                if (didPop) return;
+                _exitSongsMultiSelectMode();
+              },
+              child: DaisyBackground(
               baseColor: pal.scaffoldBackground,
               child: SafeArea(
                 child: Column(
@@ -1417,77 +1533,143 @@ class LibraryScreenState extends State<LibraryScreen>
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          IconButton(
-                            icon: const Icon(Icons.menu_rounded),
-                            color: pal.onScaffold,
-                            tooltip: 'Open menu',
-                            onPressed: widget.onOpenDrawer,
-                          ),
-                          Expanded(
-                            child: TextField(
-                              key: librarySearchFieldKey,
-                              controller: _searchController,
-                              textInputAction: TextInputAction.search,
-                              keyboardType: TextInputType.text,
-                              onSubmitted: (_) =>
-                                  FocusManager.instance.primaryFocus?.unfocus(),
-                              onTapOutside: (_) =>
-                                  FocusManager.instance.primaryFocus?.unfocus(),
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: pal.onScaffold,
-                                fontSize: 15,
-                              ),
-                              decoration: _searchDecoration(
-                                pal,
-                                theme,
-                                hintText: hint,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.refresh_rounded),
-                            color: pal.onScaffold,
-                            tooltip: 'Refresh library',
-                            onPressed: widget.onRefreshLibrary,
-                          ),
-                          if (_currentLibraryTabId == LibraryTabId.songs)
-                            PopupMenuButton<LibraryTrackSortMode>(
-                              tooltip: 'Sort songs',
-                              icon: (context.appliedThemePalette == AppThemePalette.ivy)
-                                  ? const LiquidGlassRingIconButton(
-                                      icon: Icons.sort_rounded,
-                                      onPressed: null,
-                                      size: 38,
-                                      iconSize: 20,
-                                      highlighted: false,
-                                    )
-                                  : Icon(
-                                      Icons.sort_rounded,
-                                      color: pal.onScaffold,
-                                    ),
-                              padding: EdgeInsets.zero,
-                              onSelected: (mode) async {
-                                await LibraryTrackSortStore.save(mode);
-                              },
-                              itemBuilder: (context) {
-                                final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
-                                return [
-                                  for (final mode in LibraryTrackSortMode.values)
-                                    CheckedPopupMenuItem<LibraryTrackSortMode>(
-                                      value: mode,
-                                      checked: mode == _songSortMode,
-                                      child: Text(
-                                        mode.menuLabel,
-                                        style: isIvy 
-                                            ? const TextStyle(color: Colors.white, fontWeight: FontWeight.w600) 
-                                            : null,
-                                      ),
-                                    ),
-                                ];
-                              },
+                          if (inSongsSelect)
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded),
+                              color: pal.onScaffold,
+                              tooltip: 'Cancel selection',
+                              onPressed: _exitSongsMultiSelectMode,
                             )
                           else
-                            const SizedBox(width: 48),
+                            IconButton(
+                              icon: const Icon(Icons.menu_rounded),
+                              color: pal.onScaffold,
+                              tooltip: 'Open menu',
+                              onPressed: widget.onOpenDrawer,
+                            ),
+                          Expanded(
+                            child: inSongsSelect
+                                ? Text(
+                                    _songsSelectedPathKeys.isEmpty
+                                        ? 'Select songs'
+                                        : '${_songsSelectedPathKeys.length} selected',
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      color: pal.onScaffold,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  )
+                                : TextField(
+                                    key: librarySearchFieldKey,
+                                    controller: _searchController,
+                                    textInputAction: TextInputAction.search,
+                                    keyboardType: TextInputType.text,
+                                    onSubmitted: (_) =>
+                                        FocusManager.instance.primaryFocus
+                                            ?.unfocus(),
+                                    onTapOutside: (_) =>
+                                        FocusManager.instance.primaryFocus
+                                            ?.unfocus(),
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: pal.onScaffold,
+                                      fontSize: 15,
+                                    ),
+                                    decoration: _searchDecoration(
+                                      pal,
+                                      theme,
+                                      hintText: hint,
+                                    ),
+                                  ),
+                          ),
+                          if (inSongsSelect) ...[
+                            TextButton(
+                              onPressed: songsTabIndices.isEmpty
+                                  ? null
+                                  : () {
+                                      final paths = songsTabIndices
+                                          .map((i) => tracks[i].filePath)
+                                          .whereType<String>()
+                                          .toList();
+                                      final allSelected = paths.isNotEmpty &&
+                                          paths.every(_isSongPathSelected);
+                                      setState(() {
+                                        if (allSelected) {
+                                          _songsSelectedPathKeys.clear();
+                                        } else {
+                                          _selectAllVisibleSongs(paths);
+                                        }
+                                      });
+                                    },
+                              child: Text(
+                                songsTabIndices.isEmpty
+                                    ? 'All'
+                                    : () {
+                                        final paths = songsTabIndices
+                                            .map((i) => tracks[i].filePath)
+                                            .whereType<String>()
+                                            .toList();
+                                        final allSelected = paths.isNotEmpty &&
+                                            paths.every(_isSongPathSelected);
+                                        return allSelected ? 'None' : 'All';
+                                      }(),
+                                style: TextStyle(
+                                  color: context.controlAccent,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ] else ...[
+                            IconButton(
+                              icon: const Icon(Icons.refresh_rounded),
+                              color: pal.onScaffold,
+                              tooltip: 'Refresh library',
+                              onPressed: widget.onRefreshLibrary,
+                            ),
+                            if (onSongsTab) ...[
+                              IconButton(
+                                icon: const Icon(Icons.checklist_rounded),
+                                color: pal.onScaffold,
+                                tooltip: 'Select songs',
+                                onPressed: _enterSongsMultiSelectMode,
+                              ),
+                              PopupMenuButton<LibraryTrackSortMode>(
+                                tooltip: 'Sort songs',
+                                icon: Icon(
+                                  Icons.sort_rounded,
+                                  color: context.appliedThemePalette ==
+                                          AppThemePalette.ivy
+                                      ? const Color(0xFF1C1C1E)
+                                      : pal.onScaffold,
+                                ),
+                                padding: EdgeInsets.zero,
+                                onSelected: (mode) async {
+                                  await LibraryTrackSortStore.save(mode);
+                                },
+                                itemBuilder: (context) {
+                                  final isIvy = context.appliedThemePalette ==
+                                      AppThemePalette.ivy;
+                                  return [
+                                    for (final mode
+                                        in LibraryTrackSortMode.values)
+                                      CheckedPopupMenuItem<
+                                          LibraryTrackSortMode>(
+                                        value: mode,
+                                        checked: mode == _songSortMode,
+                                        child: Text(
+                                          mode.menuLabel,
+                                          style: isIvy
+                                              ? const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                )
+                                              : null,
+                                        ),
+                                      ),
+                                  ];
+                                },
+                              ),
+                            ] else
+                              const SizedBox(width: 48),
+                          ],
                         ],
                       ),
                     ),
@@ -1560,6 +1742,7 @@ class LibraryScreenState extends State<LibraryScreen>
                   ],
                 ),
               ),
+            ),
             );
           },
         );
@@ -2360,11 +2543,18 @@ class LibraryScreenState extends State<LibraryScreen>
         .toList();
 
     final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+    final inSelect = _songsMultiSelectMode;
+    const kSelectionBarHeight = 72.0;
 
-    return ListView.separated(
+    final list = ListView.separated(
       controller: _songsScrollController,
       cacheExtent: 4000,
-      padding: EdgeInsets.fromLTRB(0, ivy ? 4 : 0, 0, ivy ? 8 : 8),
+      padding: EdgeInsets.fromLTRB(
+        0,
+        ivy ? 4 : 0,
+        0,
+        (ivy ? 8 : 8) + (inSelect ? kSelectionBarHeight : 0),
+      ),
       itemCount: filteredIndices.length,
       separatorBuilder: (_, __) => ivy
           ? const SizedBox(height: 5)
@@ -2373,18 +2563,24 @@ class LibraryScreenState extends State<LibraryScreen>
         final catalogIndex = filteredIndices[i];
         final track = tracks[catalogIndex];
         final path = track.filePath;
-        final selected = _isCurrentTrackPath(player, path);
+        final nowPlaying = _isCurrentTrackPath(player, path);
+        final multiSelected = _isSongPathSelected(path);
         final plIndex = path != null && path.isNotEmpty
             ? _playlistIndexForPath(player, path)
             : -1;
         return _TrackTile(
           track: track,
-          selected: selected,
-          showPlayingIcon: selected,
-          rowKey: selected && _isActiveTab(LibraryTabId.songs)
+          selected: inSelect ? multiSelected : nowPlaying,
+          showPlayingIcon: !inSelect && nowPlaying,
+          selectionMode: inSelect,
+          rowKey: nowPlaying && _isActiveTab(LibraryTabId.songs)
               ? _scrollAnchorSongs
               : null,
           onTap: () {
+            if (inSelect) {
+              _toggleSongsSelection(path);
+              return;
+            }
             unawaited(
               _playOrderedPathsFrom(
                 context,
@@ -2395,26 +2591,123 @@ class LibraryScreenState extends State<LibraryScreen>
               ),
             );
           },
-          onOverflowAction: (action) {
-            unawaited(
-              _onTrackOverflow(
-                context,
-                player,
-                plIndex >= 0 ? plIndex : -1,
-                action,
-                playbackOriginTab: LibraryTabId.songs,
-                outsideQueue: plIndex < 0
-                    ? TrackOverflowQueueContext(
-                        tracks: filteredTracks,
-                        index: i,
-                        playbackOriginTab: LibraryTabId.songs,
-                      )
-                    : null,
-              ),
-            );
-          },
+          onLongPress: path == null || path.isEmpty
+              ? null
+              : () {
+                  if (!inSelect) {
+                    _enterSongsMultiSelectMode(initialPath: path);
+                  } else {
+                    _toggleSongsSelection(path);
+                  }
+                },
+          onOverflowAction: inSelect
+              ? null
+              : (action) {
+                  unawaited(
+                    _onTrackOverflow(
+                      context,
+                      player,
+                      plIndex >= 0 ? plIndex : -1,
+                      action,
+                      playbackOriginTab: LibraryTabId.songs,
+                      outsideQueue: plIndex < 0
+                          ? TrackOverflowQueueContext(
+                              tracks: filteredTracks,
+                              index: i,
+                              playbackOriginTab: LibraryTabId.songs,
+                            )
+                          : null,
+                    ),
+                  );
+                },
         );
       },
+    );
+
+    if (!inSelect) return list;
+
+    return Stack(
+      alignment: Alignment.bottomCenter,
+      children: [
+        list,
+        _SongsMultiSelectActionBar(
+          enabled: _songsSelectedPathKeys.isNotEmpty,
+          onPlay: () => unawaited(
+            _playSelectedSongs(
+              context,
+              orderedPaths,
+              pathKeyScope: browsePathKeys,
+            ),
+          ),
+          onAddToPlaylist: () => unawaited(
+            _addSelectedSongsToPlaylist(context, orderedPaths),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SongsMultiSelectActionBar extends StatelessWidget {
+  const _SongsMultiSelectActionBar({
+    required this.enabled,
+    required this.onPlay,
+    required this.onAddToPlaylist,
+  });
+
+  final bool enabled;
+  final VoidCallback onPlay;
+  final VoidCallback onAddToPlaylist;
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = context.palette;
+    final theme = Theme.of(context);
+    final accent = context.controlAccent;
+
+    return Material(
+      elevation: 8,
+      color: pal.surface,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: enabled ? onPlay : null,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('Play'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: enabled ? onAddToPlaylist : null,
+                  icon: Icon(Icons.playlist_add_rounded, color: accent),
+                  label: Text(
+                    'Playlist',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: accent.withValues(alpha: 0.6)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2424,9 +2717,11 @@ class _TrackTile extends StatelessWidget {
     required this.track,
     required this.selected,
     this.showPlayingIcon = false,
+    this.selectionMode = false,
     this.rowKey,
     required this.onTap,
-    required this.onOverflowAction,
+    this.onLongPress,
+    this.onOverflowAction,
   });
 
   final TrackItem track;
@@ -2434,9 +2729,11 @@ class _TrackTile extends StatelessWidget {
 
   /// When true (Songs tab), shows a play icon next to the title for the now-playing row.
   final bool showPlayingIcon;
+  final bool selectionMode;
   final Key? rowKey;
   final VoidCallback onTap;
-  final void Function(TrackOverflowAction action) onOverflowAction;
+  final VoidCallback? onLongPress;
+  final void Function(TrackOverflowAction action)? onOverflowAction;
 
   @override
   Widget build(BuildContext context) {
@@ -2448,6 +2745,21 @@ class _TrackTile extends StatelessWidget {
     final row = Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+        if (selectionMode) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Icon(
+              selected
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: selected
+                  ? accent
+                  : pal.textMuted.withValues(alpha: 0.85),
+              size: 26,
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
         TrackAlbumArt(track: track, display: TrackArtDisplay.list),
         const SizedBox(width: 16),
         Expanded(
@@ -2510,11 +2822,12 @@ class _TrackTile extends StatelessWidget {
             ],
           ),
         ),
-        TrackOverflowMenuWithFavourite(
-          pal: pal,
-          track: track,
-          onSelected: onOverflowAction,
-        ),
+        if (onOverflowAction != null)
+          TrackOverflowMenuWithFavourite(
+            pal: pal,
+            track: track,
+            onSelected: onOverflowAction!,
+          ),
       ],
     );
 
@@ -2522,12 +2835,15 @@ class _TrackTile extends StatelessWidget {
       return Padding(
         key: rowKey,
         padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: LiquidGlassLayerCard(
-          emphasized: selected,
-          accentColor: accent,
-          plateTint: accent,
-          onTap: onTap,
-          child: row,
+        child: GestureDetector(
+          onLongPress: onLongPress,
+          child: LiquidGlassLayerCard(
+            emphasized: selected,
+            accentColor: accent,
+            plateTint: accent,
+            onTap: onTap,
+            child: row,
+          ),
         ),
       );
     }
@@ -2539,6 +2855,7 @@ class _TrackTile extends StatelessWidget {
           : Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: row,
