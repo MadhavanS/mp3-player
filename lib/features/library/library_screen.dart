@@ -1453,22 +1453,38 @@ class LibraryScreenState extends State<LibraryScreen>
                           if (_currentLibraryTabId == LibraryTabId.songs)
                             PopupMenuButton<LibraryTrackSortMode>(
                               tooltip: 'Sort songs',
-                              icon: Icon(
-                                Icons.sort_rounded,
-                                color: pal.onScaffold,
-                              ),
+                              icon: (context.appliedThemePalette == AppThemePalette.ivy)
+                                  ? const LiquidGlassRingIconButton(
+                                      icon: Icons.sort_rounded,
+                                      onPressed: null,
+                                      size: 38,
+                                      iconSize: 20,
+                                      highlighted: false,
+                                    )
+                                  : Icon(
+                                      Icons.sort_rounded,
+                                      color: pal.onScaffold,
+                                    ),
                               padding: EdgeInsets.zero,
                               onSelected: (mode) async {
                                 await LibraryTrackSortStore.save(mode);
                               },
-                              itemBuilder: (context) => [
-                                for (final mode in LibraryTrackSortMode.values)
-                                  CheckedPopupMenuItem<LibraryTrackSortMode>(
-                                    value: mode,
-                                    checked: mode == _songSortMode,
-                                    child: Text(mode.menuLabel),
-                                  ),
-                              ],
+                              itemBuilder: (context) {
+                                final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
+                                return [
+                                  for (final mode in LibraryTrackSortMode.values)
+                                    CheckedPopupMenuItem<LibraryTrackSortMode>(
+                                      value: mode,
+                                      checked: mode == _songSortMode,
+                                      child: Text(
+                                        mode.menuLabel,
+                                        style: isIvy 
+                                            ? const TextStyle(color: Colors.white, fontWeight: FontWeight.w600) 
+                                            : null,
+                                      ),
+                                    ),
+                                ];
+                              },
                             )
                           else
                             const SizedBox(width: 48),
@@ -1477,44 +1493,49 @@ class LibraryScreenState extends State<LibraryScreen>
                     ),
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: TabBar(
-                        key: ObjectKey(_tabController),
-                        controller: _tabController,
-                        isScrollable: true,
-                        padding: const EdgeInsets.only(left: 2, right: 8),
-                        labelPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                        ),
-                        tabAlignment: TabAlignment.start,
-                        indicatorColor: pal.onScaffold,
-                        indicatorWeight: 2.8,
-                        indicatorSize: TabBarIndicatorSize.label,
-                        labelColor: pal.onScaffold,
-                        unselectedLabelColor: pal.textMuted.withValues(
-                          alpha: 0.76,
-                        ),
-                        dividerColor: pal.onScaffold.withValues(alpha: 0.14),
-                        dividerHeight: 1,
-                        labelStyle: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.2,
-                          fontSize: 15,
-                        ),
-                        unselectedLabelStyle: theme.textTheme.titleSmall
-                            ?.copyWith(
-                              fontWeight: FontWeight.w500,
-                              letterSpacing: -0.2,
-                              fontSize: 15,
+                      child: context.appliedThemePalette == AppThemePalette.ivy
+                          ? _IvyLibrarySegmentedTabBar(
+                              controller: _tabController,
+                              tabs: _visibleTabs,
+                            )
+                          : TabBar(
+                              key: ObjectKey(_tabController),
+                              controller: _tabController,
+                              isScrollable: true,
+                              padding: const EdgeInsets.only(left: 2, right: 8),
+                              labelPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                              ),
+                              tabAlignment: TabAlignment.start,
+                              indicatorColor: pal.onScaffold,
+                              indicatorWeight: 2.8,
+                              indicatorSize: TabBarIndicatorSize.label,
+                              labelColor: pal.onScaffold,
+                              unselectedLabelColor: pal.textMuted.withValues(
+                                alpha: 0.76,
+                              ),
+                              dividerColor: pal.onScaffold.withValues(alpha: 0.14),
+                              dividerHeight: 1,
+                              labelStyle: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.2,
+                                fontSize: 15,
+                              ),
+                              unselectedLabelStyle: theme.textTheme.titleSmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                    letterSpacing: -0.2,
+                                    fontSize: 15,
+                                  ),
+                              splashFactory: NoSplash.splashFactory,
+                              overlayColor: WidgetStateProperty.all<Color>(
+                                Colors.transparent,
+                              ),
+                              tabs: [
+                                for (final id in _visibleTabs)
+                                  Tab(text: id.shortTitle),
+                              ],
                             ),
-                        splashFactory: NoSplash.splashFactory,
-                        overlayColor: WidgetStateProperty.all<Color>(
-                          Colors.transparent,
-                        ),
-                        tabs: [
-                          for (final id in _visibleTabs)
-                            Tab(text: id.shortTitle),
-                        ],
-                      ),
                     ),
                     Expanded(
                       child: TabBarView(
@@ -2421,7 +2442,7 @@ class _TrackTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final pal = context.palette;
-    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+    final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
     final accent = context.controlAccent;
 
     final row = Row(
@@ -2438,9 +2459,11 @@ class _TrackTile extends StatelessWidget {
                     ? track.metaLine
                     : '${track.metaLine} · ${track.genres}',
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: ivy ? const Color(0xFF1C1C1E) : pal.textMuted.withValues(alpha: 0.9),
+                  color: isIvy 
+                      ? const Color(0xFF1C1C1E)
+                      : pal.textMuted.withValues(alpha: 0.9),
                   fontSize: 10,
-                  fontWeight: ivy ? FontWeight.w600 : FontWeight.normal,
+                  fontWeight: isIvy ? FontWeight.w600 : FontWeight.normal,
                 ),
               ),
               const SizedBox(height: 4),
@@ -2451,7 +2474,7 @@ class _TrackTile extends StatelessWidget {
                     Icon(
                       Icons.play_arrow_rounded,
                       size: 22,
-                      color: ivy ? accent : context.controlAccent,
+                      color: isIvy ? accent : context.controlAccent,
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -2461,11 +2484,11 @@ class _TrackTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleMedium?.copyWith(
-                        color: ivy
+                        color: isIvy
                             ? const Color(0xFF1C1C1E)
                             : pal.onScaffold,
                         fontSize: 15,
-                        fontWeight: ivy ? FontWeight.w600 : null,
+                        fontWeight: isIvy ? FontWeight.w600 : null,
                       ),
                     ),
                   ),
@@ -2477,11 +2500,11 @@ class _TrackTile extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: ivy
+                  color: isIvy
                       ? const Color(0xFF48484A)
                       : pal.textSecondary.withValues(alpha: 0.95),
                   fontSize: 13,
-                  fontWeight: ivy ? FontWeight.w500 : null,
+                  fontWeight: isIvy ? FontWeight.w500 : null,
                 ),
               ),
             ],
@@ -2495,7 +2518,7 @@ class _TrackTile extends StatelessWidget {
       ],
     );
 
-    if (ivy) {
+    if (isIvy) {
       return Padding(
         key: rowKey,
         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -2520,6 +2543,73 @@ class _TrackTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: row,
         ),
+      ),
+    );
+  }
+}
+
+class _IvyLibrarySegmentedTabBar extends StatelessWidget {
+  const _IvyLibrarySegmentedTabBar({
+    required this.controller,
+    required this.tabs,
+  });
+
+  final TabController controller;
+  final List<LibraryTabId> tabs;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      height: 42,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFC8C8D2).withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(21),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.12),
+          width: 0.8,
+        ),
+      ),
+      child: TabBar(
+        controller: controller,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
+        dividerColor: Colors.transparent,
+        indicatorSize: TabBarIndicatorSize.tab,
+        labelColor: const Color(0xFF1C1C1E),
+        unselectedLabelColor: const Color(0xFF48484A),
+        indicator: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 18),
+        labelStyle: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          fontSize: 14,
+        ),
+        unselectedLabelStyle: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+        ),
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: WidgetStateProperty.all<Color>(Colors.transparent),
+        tabs: [
+          for (final id in tabs)
+            Tab(
+              height: 34,
+              child: Text(id.shortTitle),
+            ),
+        ],
       ),
     );
   }

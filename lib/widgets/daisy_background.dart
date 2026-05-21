@@ -26,7 +26,10 @@ class DaisyBackground extends StatelessWidget {
       return ColoredBox(color: baseColor, child: child);
     }
     if (ivy) {
-      return _IvyLiquidGlassBackground(baseColor: baseColor, child: child);
+      return _IvyLiquidGlassBackground(
+        baseColor: baseColor,
+        child: child,
+      );
     }
     return Stack(
       fit: StackFit.expand,
@@ -71,7 +74,7 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
     super.initState();
     _flow = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 22),
+      duration: const Duration(seconds: 25),
     )..repeat();
   }
 
@@ -86,7 +89,7 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Bottom-most layer: The animated liquid
+        // Bottom-most layer: The animated liquid and fibers
         AnimatedBuilder(
           animation: _flow,
           builder: (context, _) {
@@ -98,19 +101,19 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
             );
           },
         ),
-        // Middle layer: The "inner plate (scrim)" - frosted glass effect
+        // Glass Layer 1: Screen-wide frosted plate
         ClipRect(
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 32, sigmaY: 32),
+            filter: ImageFilter.blur(sigmaX: 36, sigmaY: 32),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Colors.white.withValues(alpha: 0.45),
-                    Colors.white.withValues(alpha: 0.12),
-                    Colors.white.withValues(alpha: 0.28),
+                    Colors.white.withValues(alpha: 0.48),
+                    Colors.white.withValues(alpha: 0.14),
+                    Colors.white.withValues(alpha: 0.32),
                   ],
                   stops: const [0.0, 0.5, 1.0],
                 ),
@@ -118,7 +121,54 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
             ),
           ),
         ),
-        // Top-most layer: "outer glass shell" with specular reflections
+        // Glass Layer 2: Inner floating pane (ambient occlusion shadows)
+        Center(
+          child: FractionallySizedBox(
+            widthFactor: 0.94,
+            heightFactor: 0.88,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(48),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 32,
+                    offset: const Offset(0, 12),
+                  ),
+                  BoxShadow(
+                    color: Colors.white.withValues(alpha: 0.5),
+                    blurRadius: 0.5,
+                    offset: const Offset(0, -0.5),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(48),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(48),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.white.withValues(alpha: 0.18),
+                          Colors.white.withValues(alpha: 0.05),
+                        ],
+                      ),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.25),
+                        width: 0.8,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Top-most layer: Specular reflections and corner glints
         const CustomPaint(painter: _IvyGlassPlaneSpecularPainter()),
         widget.child,
       ],
@@ -126,9 +176,12 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
   }
 }
 
-/// Slow organic liquid blobs + waves (bottom-heavy, reference-style).
+/// Slow organic liquid blobs + flowing fibers/wires (achromatic reference).
 class _IvyLiquidFlowPainter extends CustomPainter {
-  _IvyLiquidFlowPainter({required this.base, required this.phase});
+  _IvyLiquidFlowPainter({
+    required this.base,
+    required this.phase,
+  });
 
   final Color base;
   final double phase;
@@ -138,9 +191,10 @@ class _IvyLiquidFlowPainter extends CustomPainter {
     final rect = Offset.zero & size;
     final t = phase * 2 * math.pi;
 
-    canvas.drawRect(rect, Paint()..color = base);
+    // Solid achromatic base
+    canvas.drawRect(rect, Paint()..color = const Color(0xFFF2F2F5));
 
-    // Deep base gradient for the "liquid" container
+    // Deep base gradient
     canvas.drawRect(
       rect,
       Paint()
@@ -148,13 +202,33 @@ class _IvyLiquidFlowPainter extends CustomPainter {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            const Color(0xFFF8F8FA),
-            base,
-            const Color(0xFFE2E2E8),
+            const Color(0xFFFBFBFE),
+            const Color(0xFFE8E8EC),
+            const Color(0xFFDCDCE2),
           ],
           stops: const [0.0, 0.45, 1.0],
         ).createShader(rect),
     );
+
+    // Flowing "fibers" or "wires" (curved paths)
+    final wirePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = const Color(0xFFC8C8D2).withValues(alpha: 0.22);
+    
+    void drawWire(double startY, double amp, double freq, double offset) {
+      final path = Path();
+      path.moveTo(0, startY);
+      for (var x = 0.0; x <= size.width; x += 10) {
+        final y = startY + amp * math.sin(x * freq + t * 0.4 + offset);
+        path.lineTo(x, y);
+      }
+      canvas.drawPath(path, wirePaint);
+    }
+
+    drawWire(size.height * 0.2, 45, 0.005, 0);
+    drawWire(size.height * 0.45, 60, 0.003, 1.2);
+    drawWire(size.height * 0.75, 40, 0.006, 2.5);
 
     void blob({
       required double cx,
@@ -177,100 +251,43 @@ class _IvyLiquidFlowPainter extends CustomPainter {
       );
     }
 
-    // Larger, softer white blobs to match the "liquid card" reference
+    // Large, subtle achromatic blobs
     blob(
-      cx: size.width * (0.3 + 0.08 * math.sin(t * 0.4)),
-      cy: size.height * (0.2 + 0.12 * math.cos(t * 0.3)),
+      cx: size.width * (0.35 + 0.06 * math.sin(t * 0.35)),
+      cy: size.height * (0.25 + 0.1 * math.cos(t * 0.25)),
+      rx: size.width * 0.8,
+      ry: size.height * 0.6,
+      color: Colors.white.withValues(alpha: 0.75),
+    );
+
+    blob(
+      cx: size.width * (0.75 + 0.08 * math.cos(t * 0.45)),
+      cy: size.height * (0.65 + 0.07 * math.sin(t * 0.35)),
       rx: size.width * 0.7,
       ry: size.height * 0.5,
-      color: Colors.white.withValues(alpha: 0.65),
+      color: const Color(0xFFE4E4E8).withValues(alpha: 0.65),
     );
 
     blob(
-      cx: size.width * (0.8 + 0.1 * math.cos(t * 0.5)),
-      cy: size.height * (0.6 + 0.08 * math.sin(t * 0.4)),
-      rx: size.width * 0.6,
-      ry: size.height * 0.4,
-      color: const Color(0xFFECECEF).withValues(alpha: 0.7),
-    );
-
-    blob(
-      cx: size.width * (0.4 + 0.05 * math.sin(t * 0.6)),
-      cy: size.height * (0.8 + 0.05 * math.cos(t * 0.5)),
-      rx: size.width * 0.8,
-      ry: size.height * 0.5,
-      color: const Color(0xFFF2F2F5).withValues(alpha: 0.6),
-    );
-
-    _drawLiquidWave(
-      canvas,
-      size,
-      baseY: size.height * 0.65,
-      amplitude: size.height * 0.08,
-      phase: t,
-      color: Colors.white.withValues(alpha: 0.45),
-    );
-
-    _drawLiquidWave(
-      canvas,
-      size,
-      baseY: size.height * 0.82,
-      amplitude: size.height * 0.06,
-      phase: t + 1.8,
+      cx: size.width * (0.45 + 0.05 * math.sin(t * 0.55)),
+      cy: size.height * (0.85 + 0.04 * math.cos(t * 0.45)),
+      rx: size.width * 0.9,
+      ry: size.height * 0.55,
       color: const Color(0xFFF0F0F4).withValues(alpha: 0.55),
     );
 
-    // Subtle overall highlight sheen
+    // Vignette / depth
     canvas.drawRect(
       rect,
       Paint()
         ..shader = RadialGradient(
-          center: const Alignment(-0.6, -0.7),
-          radius: 1.4,
+          center: Alignment.center,
+          radius: 1.5,
           colors: [
-            Colors.white.withValues(alpha: 0.25),
             Colors.transparent,
+            Colors.black.withValues(alpha: 0.02),
           ],
         ).createShader(rect),
-    );
-  }
-
-  void _drawLiquidWave(
-    Canvas canvas,
-    Size size, {
-    required double baseY,
-    required double amplitude,
-    required double phase,
-    required Color color,
-  }) {
-    final path = Path()..moveTo(0, size.height);
-    const segments = 6;
-    final segW = size.width / segments;
-    for (var i = 0; i <= segments; i++) {
-      final x = i * segW;
-      final y = baseY +
-          amplitude * math.sin((i / segments) * math.pi * 2 + phase);
-      if (i == 0) {
-        path.lineTo(0, y);
-      } else {
-        final prevX = (i - 1) * segW;
-        final prevY = baseY +
-            amplitude * math.sin(((i - 1) / segments) * math.pi * 2 + phase);
-        final cx = (prevX + x) / 2;
-        path.quadraticBezierTo(cx, (prevY + y) / 2, x, y);
-      }
-    }
-    path.lineTo(size.width, size.height);
-    path.close();
-
-    canvas.drawPath(
-      path,
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [color, color.withValues(alpha: 0.15)],
-        ).createShader(Rect.fromLTWH(0, baseY - amplitude, size.width, size.height)),
     );
   }
 

@@ -214,20 +214,35 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     return out;
   }
 
-  /// Play / playlist / delete entries only (edit, fav, site stay as top icon buttons).
   Widget _softBlurTailOverflowMenu({
     required PlayerController player,
     required TrackItem track,
     required Color actionColor,
   }) {
+    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+    final silver = context.appliedThemePalette == AppThemePalette.silver;
+    
+    if (ivy) {
+      return PopupMenuButton<String>(
+        tooltip: 'More',
+        child: const LiquidGlassRingIconButton(
+          icon: Icons.more_horiz_rounded,
+          onPressed: null, // PopupMenuButton handles the tap
+          size: 44,
+          iconSize: 22,
+          highlighted: false,
+        ),
+        itemBuilder: (ctx) => _softBlurRestMenuEntries(track),
+        onSelected: (v) => unawaited(_onSoftBlurTailOverflowSelected(player, v)),
+      );
+    }
+
     return PopupMenuButton<String>(
       tooltip: 'More',
       icon: Icon(
-        context.appliedThemePalette == AppThemePalette.silver
-            ? Icons.more_vert
-            : Icons.more_vert_rounded,
+        silver ? Icons.more_vert : Icons.more_vert_rounded,
         color: actionColor,
-        size: context.appliedThemePalette == AppThemePalette.silver ? 34 : 24,
+        size: silver ? 34 : 24,
       ),
       itemBuilder: (ctx) => _softBlurRestMenuEntries(track),
       onSelected: (v) => unawaited(_onSoftBlurTailOverflowSelected(player, v)),
@@ -463,6 +478,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                       ListenableBuilder(
                         listenable: FavoriteSongsStore.revision,
                         builder: (context, _) {
+                          final ivy = context.appliedThemePalette == AppThemePalette.ivy;
                           final p = cur.filePath ?? '';
                           final favOk = trackCanToggleFavorite(cur);
                           final isFav =
@@ -475,10 +491,18 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               minWidth: 200,
                               maxWidth: 248,
                             ),
-                            icon: Icon(
-                              Icons.more_vert_rounded,
-                              color: navIconColor,
-                            ),
+                            icon: ivy 
+                              ? const LiquidGlassRingIconButton(
+                                  icon: Icons.more_vert_rounded,
+                                  onPressed: null,
+                                  size: 40,
+                                  iconSize: 20,
+                                  highlighted: false,
+                                )
+                              : Icon(
+                                  Icons.more_vert_rounded,
+                                  color: navIconColor,
+                                ),
                             onSelected: (action) {
                               unawaited(
                                 applyTrackOverflowAction(
@@ -929,45 +953,42 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               accentColor: accent,
               inactiveColor: shuffleOff,
               disabledColor: _kIvyIconDisabled,
-              highlighted: shuffleActive,
+              highlighted: false,
               active: shuffleActive,
             ),
-            LiquidGlassRingIconButton(
+            LiquidGlassCircleButton(
               icon: Icons.skip_previous,
               onPressed: () => player.skipPrevious(),
               size: 56,
               iconSize: 26,
-              accentColor: accent,
-              inactiveColor: _kIvyIconDisabled,
-              highlighted: true,
-              active: true,
+              iconColor: _kIvyInk,
+              disabledColor: _kIvyIconDisabled,
+              highlighted: false,
             ),
             ListenableBuilder(
               listenable: player,
-              builder: (context, _) => LiquidGlassRingIconButton(
+              builder: (context, _) => LiquidGlassCircleButton(
                 icon: player.isPlaying ? Icons.pause : Icons.play_arrow,
                 onPressed: player.transportCommandInFlight
                     ? null
                     : () => player.togglePlayPause(),
-                size: 76,
-                iconSize: 32,
-                accentColor: accent,
-                inactiveColor: _kIvyIconDisabled,
-                highlighted: true,
-                active: true,
+                size: 82,
+                iconSize: 36,
+                iconColor: Colors.white,
+                disabledColor: _kIvyIconDisabled,
+                highlighted: true, // This will trigger the dark capsule "Sattes" look
               ),
             ),
             ListenableBuilder(
               listenable: player,
-              builder: (context, _) => LiquidGlassRingIconButton(
+              builder: (context, _) => LiquidGlassCircleButton(
                 icon: Icons.skip_next,
                 onPressed: player.canSkipNext ? () => player.skipNext() : null,
                 size: 56,
                 iconSize: 26,
-                accentColor: accent,
-                inactiveColor: _kIvyIconDisabled,
-                highlighted: player.canSkipNext,
-                active: player.canSkipNext,
+                iconColor: _kIvyInk,
+                disabledColor: _kIvyIconDisabled,
+                highlighted: false,
               ),
             ),
             LiquidGlassRingIconButton(
@@ -980,7 +1001,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               accentColor: accent,
               inactiveColor: shuffleOff,
               disabledColor: _kIvyIconDisabled,
-              highlighted: repeatActive,
+              highlighted: false,
               active: repeatActive,
             ),
           ],
@@ -2147,52 +2168,13 @@ class _NowPlayingAlbumArtCard extends StatefulWidget {
 }
 
 class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
-  late Color _titleColor;
-
   bool get _darkFrosted => widget.theme.brightness == Brightness.dark;
 
   @override
-  void initState() {
-    super.initState();
-    _titleColor = provisionalNowPlayingTitleColor(
-      track: widget.track,
-      darkFrostedBackground: _darkFrosted,
-    );
-    _scheduleResolve();
-  }
-
-  @override
-  void didUpdateWidget(covariant _NowPlayingAlbumArtCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.track.filePath != widget.track.filePath ||
-        !identical(oldWidget.track.albumArtBytes, widget.track.albumArtBytes) ||
-        oldWidget.theme.brightness != widget.theme.brightness) {
-      _titleColor = provisionalNowPlayingTitleColor(
-        track: widget.track,
-        darkFrostedBackground: _darkFrosted,
-      );
-      _scheduleResolve();
-    }
-  }
-
-  void _scheduleResolve() {
-    final path = widget.track.filePath;
-    final bytesId = identityHashCode(widget.track.albumArtBytes);
-    resolveNowPlayingTitleColor(
-      track: widget.track,
-      darkFrostedBackground: _darkFrosted,
-    ).then((c) {
-      if (!mounted) return;
-      if (widget.track.filePath != path ||
-          identityHashCode(widget.track.albumArtBytes) != bytesId) {
-        return;
-      }
-      setState(() => _titleColor = c);
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final accent = context.controlAccent;
+    final titleColor = tuneTitleColorForFrostedCard(accent, _darkFrosted);
+    
     final outerR = widget.playerChrome ? 32.0 : 24.0;
     final isDark = widget.theme.brightness == Brightness.dark;
     final blurSigma = widget.playerChrome ? 26.0 : 18.0;
@@ -2209,13 +2191,13 @@ class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
     final theme = widget.theme;
     final titleStyle = theme.textTheme.titleLarge?.copyWith(
       height: 1.25,
-      color: _titleColor,
+      color: titleColor,
     );
     final artistStyle = theme.textTheme.bodyMedium?.copyWith(
-      color: _titleColor.withValues(alpha: isDark ? 0.78 : 0.72),
+      color: titleColor.withValues(alpha: isDark ? 0.78 : 0.72),
     );
     final albumStyle = theme.textTheme.bodySmall?.copyWith(
-      color: _titleColor.withValues(alpha: isDark ? 0.66 : 0.62),
+      color: titleColor.withValues(alpha: isDark ? 0.66 : 0.62),
       fontWeight: FontWeight.w500,
     );
     final artistName = widget.track.artist.trim();

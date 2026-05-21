@@ -402,7 +402,7 @@ class _PlayerAudioHandler extends BaseAudioHandler
               index = event.currentIndex ?? _justAudioEvent.currentIndex;
               _justAudioEvent = event;
               customEvent.add(event);
-              _broadcastState();
+              _scheduleBroadcastStateFromStream();
               return event;
             })
             .map((event) => TrackInfo(event.currentIndex, event.duration))
@@ -623,6 +623,17 @@ class _PlayerAudioHandler extends BaseAudioHandler
   bool get hasNext => nextIndex != null;
   bool get hasPrevious => previousIndex != null;
 
+  Timer? _streamBroadcastDebounce;
+
+  /// Coalesce rapid playback-event updates; play/pause still broadcast immediately.
+  void _scheduleBroadcastStateFromStream() {
+    _streamBroadcastDebounce?.cancel();
+    _streamBroadcastDebounce = Timer(const Duration(milliseconds: 40), () {
+      _streamBroadcastDebounce = null;
+      _broadcastStateIfActive();
+    });
+  }
+
   int? getRelativeIndex(int offset) {
     if (currentQueue.isEmpty || index == null) return null;
     if (_repeatMode == AudioServiceRepeatMode.one) return index;
@@ -663,26 +674,32 @@ class _PlayerAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> play() async {
+  Future<void> play() => _lock.synchronized(_playLocked);
+
+  Future<void> _playLocked() async {
     if (_justAudioEvent.processingState == ProcessingStateMessage.completed) {
       await (await _player).seek(
         SeekRequest(position: Duration.zero, index: 0),
       );
     }
-    if (!_playing) {
-      _updatePosition();
-      customEvent.add(_PlayingEvent(_playing = true));
-      _broadcastState();
-      await (await _player).play(PlayRequest());
-    }
+    if (_playing) return;
+    await (await _player).play(PlayRequest());
+    _playing = true;
+    _updatePosition();
+    customEvent.add(_PlayingEvent(true));
+    _broadcastState();
   }
 
   @override
-  Future<void> pause() async {
-    _updatePosition();
-    customEvent.add(_PlayingEvent(_playing = false));
-    _broadcastState();
+  Future<void> pause() => _lock.synchronized(_pauseLocked);
+
+  Future<void> _pauseLocked() async {
+    if (!_playing) return;
     await (await _player).pause(PauseRequest());
+    _playing = false;
+    _updatePosition();
+    customEvent.add(_PlayingEvent(false));
+    _broadcastState();
   }
 
   void _updatePosition() {

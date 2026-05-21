@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
@@ -25,6 +26,7 @@ import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/player_chrome_background.dart';
 import '../../widgets/action_pill_toast.dart';
+import '../../widgets/daisy_background.dart';
 import '../library/library_files_page.dart';
 import '../library/library_screen.dart';
 import '../player/mini_player_bar.dart';
@@ -1108,61 +1110,26 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           child: Scaffold(
             key: _scaffoldKey,
             backgroundColor: pal.scaffoldBackground,
-            drawer: Drawer(
-              backgroundColor: pal.surface,
-              child: SafeArea(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                      child: Text(
-                        'MadPlayer',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          color: context.controlAccent,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.play_circle_rounded),
-                      title: const Text('Now playing'),
-                      enabled: current != null,
-                      onTap: current == null ? null : _onDrawerNowPlaying,
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.library_music_rounded),
-                      title: const Text('Library'),
-                      selected: _page == _ShellPage.library,
-                      onTap: () {
-                        Navigator.pop(context);
-                        _goLibrary();
-                      },
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.folder_rounded),
-                      title: const Text('Files'),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _goLibrary();
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          unawaited(_openFilesExplorerScreen());
-                        });
-                      },
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.settings_rounded),
-                      title: const Text('Settings'),
-                      selected: _page == _ShellPage.settings,
-                      onTap: () {
-                        Navigator.pop(context);
-                        _goSettings();
-                      },
-                    ),
-                  ],
-                ),
-              ),
+            drawer: _GlossyDrawer(
+              currentPage: _page,
+              hasCurrentTrack: current != null,
+              onNowPlaying: _onDrawerNowPlaying,
+              onLibrary: () {
+                Navigator.pop(context);
+                _goLibrary();
+              },
+              onFiles: () {
+                Navigator.pop(context);
+                _goLibrary();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  unawaited(_openFilesExplorerScreen());
+                });
+              },
+              onSettings: () {
+                Navigator.pop(context);
+                _goSettings();
+              },
             ),
             body: Stack(
               children: [
@@ -1288,6 +1255,178 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           ),
         );
       },
+    );
+  }
+}
+
+class _GlossyDrawer extends StatelessWidget {
+  const _GlossyDrawer({
+    required this.onNowPlaying,
+    required this.onLibrary,
+    required this.onFiles,
+    required this.onSettings,
+    required this.currentPage,
+    required this.hasCurrentTrack,
+  });
+
+  final VoidCallback onNowPlaying;
+  final VoidCallback onLibrary;
+  final VoidCallback onFiles;
+  final VoidCallback onSettings;
+  final _ShellPage currentPage;
+  final bool hasCurrentTrack;
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = context.palette;
+    final theme = Theme.of(context);
+    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+
+    return Drawer(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      child: DaisyBackground(
+        baseColor: pal.surface,
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+                child: Text(
+                  'MadPlayer',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: ivy ? const Color(0xFF1C1C1E) : pal.onScaffold,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+              ),
+              Divider(
+                indent: 24,
+                endIndent: 24,
+                thickness: 0.8,
+                color: pal.onScaffold.withValues(alpha: 0.12),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
+                    _GlossyDrawerTile(
+                      icon: Icons.play_circle_outline_rounded,
+                      label: 'Now playing',
+                      onTap: hasCurrentTrack ? onNowPlaying : null,
+                      selected: false,
+                    ),
+                    _GlossyDrawerTile(
+                      icon: Icons.library_music_outlined,
+                      label: 'Library',
+                      onTap: onLibrary,
+                      selected: currentPage == _ShellPage.library,
+                    ),
+                    _GlossyDrawerTile(
+                      icon: Icons.folder_open_rounded,
+                      label: 'Files',
+                      onTap: onFiles,
+                      selected: false,
+                    ),
+                    _GlossyDrawerTile(
+                      icon: Icons.settings_outlined,
+                      label: 'Settings',
+                      onTap: onSettings,
+                      selected: currentPage == _ShellPage.settings,
+                    ),
+                  ],
+                ),
+              ),
+              Divider(
+                indent: 24,
+                endIndent: 24,
+                thickness: 0.8,
+                color: pal.onScaffold.withValues(alpha: 0.12),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                child: _GlossyDrawerTile(
+                  icon: Icons.exit_to_app_rounded,
+                  label: 'Log Out',
+                  onTap: () => SystemNavigator.pop(),
+                  selected: false,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GlossyDrawerTile extends StatelessWidget {
+  const _GlossyDrawerTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    required this.selected,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+    final pal = context.palette;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: selected
+                  ? (ivy
+                      ? Colors.white.withValues(alpha: 0.5)
+                      : pal.onScaffold.withValues(alpha: 0.1))
+                  : null,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: selected
+                      ? (ivy ? const Color(0xFF1C1C1E) : context.controlAccent)
+                      : (ivy
+                          ? const Color(0xFF48484A)
+                          : pal.onScaffold.withValues(alpha: 0.7)),
+                  size: 26,
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: selected
+                        ? (ivy ? const Color(0xFF1C1C1E) : pal.onScaffold)
+                        : (ivy
+                            ? const Color(0xFF48484A)
+                            : pal.onScaffold.withValues(alpha: 0.8)),
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: 16,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

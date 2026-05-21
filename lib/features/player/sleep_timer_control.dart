@@ -33,6 +33,7 @@ class SleepTimerControl extends StatelessWidget {
         final palette = context.appliedThemePalette;
         final leah = palette == AppThemePalette.leah;
         final ivy = palette == AppThemePalette.ivy;
+        
         final color = active && leah
             ? _kLeahNpIconActive
             : active

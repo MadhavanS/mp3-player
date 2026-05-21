@@ -375,10 +375,20 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
     required Color thumbColor,
     required Color inactiveTrack,
   }) {
-    return LiquidGlassConvexSurface(
-      borderRadius: borderRadius,
-      blurSigma: 20,
-      child: Material(
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        border: Border(
+          top: BorderSide(
+            color: accent.withValues(alpha: 0.72),
+            width: 2.2,
+          ),
+        ),
+      ),
+      child: LiquidGlassConvexSurface(
+        borderRadius: borderRadius,
+        blurSigma: 20,
+        child: Material(
         color: Colors.transparent,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -508,8 +518,9 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildProgressSlider({
     required Color accent,
@@ -519,7 +530,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
   }) {
     final daisy = context.appliedThemePalette == AppThemePalette.daisy;
     final leah = context.appliedThemePalette == AppThemePalette.leah;
-    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+    final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
 
     return StreamBuilder<Duration>(
       stream: widget.controller.audioPlayer.positionStream,
@@ -537,7 +548,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
 
             return PlayerAdaptiveSlider(
               value: p,
-              appearance: ivy
+              appearance: isIvy
                   ? PlayerSliderAppearance.ivy
                   : PlayerSliderAppearance.miniPill,
               activeColor: (daisy || leah) ? iconColor : accent,

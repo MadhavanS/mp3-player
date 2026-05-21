@@ -117,5 +117,5 @@ Future<bool> ensureCanWriteLibraryFiles(BuildContext context) async {
 /// Opens a directory picker. On Android this often goes through the Storage Access
 /// Framework; the result should be an absolute path when the plug-in can map the tree.
 Future<String?> pickMusicDirectory() async {
-  return FilePicker.platform.getDirectoryPath(dialogTitle: 'Choose music folder');
+  return FilePicker.getDirectoryPath(dialogTitle: 'Choose music folder');
 }

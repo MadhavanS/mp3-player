@@ -17,8 +17,8 @@ Future<void> main() async {
           'Playback controls while the app is in the background.',
       // PNG mipmaps are reliable as FGS small icons; vectors can fail on some OEMs.
       androidNotificationIcon: 'mipmap/ic_launcher',
-      androidNotificationOngoing: true,
-      androidStopForegroundOnPause: true,
+      androidNotificationOngoing: false,
+      androidStopForegroundOnPause: false,
       preloadArtwork: true,
       // Large embedded movie-poster art can fail or OOM in the Android notification pipeline.
       artDownscaleWidth: 512,

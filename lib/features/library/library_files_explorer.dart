@@ -13,6 +13,7 @@ import '../../services/library_track_sort.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/music_library_path_key.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/liquid_glass.dart';
 import '../../widgets/track_album_art.dart';
 import '../player/track_overflow_actions.dart';
 
@@ -129,22 +130,39 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   }
 
   Widget _sortMenuButton(AppPalette pal) {
+    final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
     return PopupMenuButton<LibraryTrackSortMode>(
       tooltip: 'Sort songs',
-      icon: Icon(
-        Icons.sort_rounded,
-        color: pal.onScaffold.withValues(alpha: 0.85),
-      ),
+      icon: isIvy
+          ? const LiquidGlassRingIconButton(
+              icon: Icons.sort_rounded,
+              onPressed: null,
+              size: 38,
+              iconSize: 20,
+              highlighted: false,
+            )
+          : Icon(
+              Icons.sort_rounded,
+              color: pal.onScaffold.withValues(alpha: 0.85),
+            ),
       padding: EdgeInsets.zero,
       onSelected: (m) async => LibraryTrackSortStore.save(m),
-      itemBuilder: (context) => [
-        for (final mode in LibraryTrackSortMode.values)
-          CheckedPopupMenuItem<LibraryTrackSortMode>(
-            value: mode,
-            checked: mode == _sortMode,
-            child: Text(mode.menuLabel),
-          ),
-      ],
+      itemBuilder: (context) {
+        final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
+        return [
+          for (final mode in LibraryTrackSortMode.values)
+            CheckedPopupMenuItem<LibraryTrackSortMode>(
+              value: mode,
+              checked: mode == _sortMode,
+              child: Text(
+                mode.menuLabel,
+                style: isIvy 
+                    ? const TextStyle(color: Colors.white, fontWeight: FontWeight.w600) 
+                    : null,
+              ),
+            ),
+        ];
+      },
     );
   }
 

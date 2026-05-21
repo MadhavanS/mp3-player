@@ -560,6 +560,7 @@ abstract final class AppTheme {
         palette == AppThemePalette.daisy ||
         palette == AppThemePalette.ivy;
     final isDaisy = palette == AppThemePalette.daisy;
+    final isIvy = palette == AppThemePalette.ivy;
     final cardRadius = isMusicChromePalette ? 20.0 : 12.0;
     final buttonRadius =
         BorderRadius.circular(isMusicChromePalette ? 18 : 12);
@@ -622,18 +623,26 @@ abstract final class AppTheme {
         dividerColor: ext.onScaffold.withValues(alpha: 0.12),
       ),
       popupMenuTheme: PopupMenuThemeData(
-        color: isDaisy ? const Color(0xFFE5D8C4) : ext.surface,
+        color: isDaisy
+            ? const Color(0xFFE5D8C4)
+            : (isIvy
+                ? const Color(0xFF0D1117).withValues(alpha: 0.72)
+                : ext.surface),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(isIvy ? 20 : 14),
           side: BorderSide(
             color: isDaisy
                 ? const Color(0xFF2B2117).withValues(alpha: 0.72)
-                : ext.onScaffold.withValues(alpha: 0.14),
-            width: isDaisy ? 1.2 : 1,
+                : (isIvy
+                    ? Colors.white.withValues(alpha: 0.15)
+                    : ext.onScaffold.withValues(alpha: 0.14)),
+            width: isDaisy || isIvy ? 1.2 : 1,
           ),
         ),
         textStyle: TextStyle(
-          color: isDaisy ? const Color(0xFF2B2117) : ext.textPrimary,
+          color: isDaisy
+              ? const Color(0xFF2B2117)
+              : (isIvy ? Colors.white : ext.textPrimary),
           fontSize: 16,
           fontWeight: FontWeight.w600,
         ),

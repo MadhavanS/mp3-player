@@ -46,11 +46,11 @@ class BackdropGlassStyle {
 
   /// Circular / compact controls — `LiquidButton` uses tighter blur + lens.
   static const button = BackdropGlassStyle(
-    blurSigma: 8,
-    lensStrength: 0.78,
-    surfaceAlpha: 0.54,
+    blurSigma: 10,
+    lensStrength: 0.82,
+    surfaceAlpha: 0.58,
     vibrancy: 1.12,
-    elevation: 0.75,
+    elevation: 0.85,
   );
 
   final double blurSigma;
@@ -108,15 +108,15 @@ class LiquidGlassSurface extends StatelessWidget {
     if (elevation <= 0) return const [];
     return [
       BoxShadow(
-        color: Colors.black.withValues(alpha: 0.14),
-        blurRadius: 24 * elevation,
-        offset: Offset(0, 10 * elevation),
-        spreadRadius: -2,
+        color: Colors.black.withValues(alpha: 0.18),
+        blurRadius: 28 * elevation,
+        offset: Offset(0, 12 * elevation),
+        spreadRadius: -4,
       ),
       BoxShadow(
-        color: Colors.black.withValues(alpha: 0.06),
-        blurRadius: 8 * elevation,
-        offset: Offset(0, 3 * elevation),
+        color: Colors.black.withValues(alpha: 0.08),
+        blurRadius: 10 * elevation,
+        offset: Offset(0, 4 * elevation),
       ),
     ];
   }
@@ -1206,6 +1206,16 @@ class LiquidGlassCircleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (highlighted) {
+      return LiquidGlassCapsuleButton(
+        icon: icon,
+        onPressed: onPressed,
+        width: size,
+        height: size,
+        iconSize: iconSize,
+        dark: true,
+      );
+    }
     return LiquidGlassRingIconButton(
       icon: icon,
       onPressed: onPressed,
@@ -1215,6 +1225,127 @@ class LiquidGlassCircleButton extends StatelessWidget {
       inactiveColor: disabledColor,
       highlighted: highlighted,
       active: true,
+    );
+  }
+}
+
+/// Dark capsule button ("Sattes" reference) or light glass tile ("tiers" reference).
+class LiquidGlassCapsuleButton extends StatelessWidget {
+  const LiquidGlassCapsuleButton({
+    super.key,
+    required this.icon,
+    this.label,
+    required this.onPressed,
+    this.width,
+    this.height = 54,
+    this.iconSize = 24,
+    this.dark = false,
+    this.padding = const EdgeInsets.symmetric(horizontal: 18),
+  });
+
+  final IconData icon;
+  final String? label;
+  final VoidCallback? onPressed;
+  final double? width;
+  final double height;
+  final double iconSize;
+  final bool dark;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    
+    final baseColor = dark 
+        ? const Color(0xFF7A7E85) // Muted slate-grey from reference
+        : const Color(0xFFF2F2F5);
+    final shadowColor = dark 
+        ? Colors.black.withValues(alpha: 0.35) 
+        : Colors.black.withValues(alpha: 0.12);
+    final textColor = dark ? Colors.white : const Color(0xFF48484A);
+
+    Widget content = Padding(
+      padding: padding,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: iconSize, color: textColor.withValues(alpha: enabled ? 1 : 0.4)),
+          if (label != null) ...[
+            const SizedBox(width: 8),
+            Text(
+              label!,
+              style: TextStyle(
+                color: textColor.withValues(alpha: enabled ? 1 : 0.4),
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    return Opacity(
+      opacity: enabled ? 1 : 0.85,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(height / 2),
+          boxShadow: [
+            BoxShadow(
+              color: shadowColor,
+              blurRadius: dark ? 24 : 16,
+              offset: Offset(0, dark ? 8 : 4),
+              spreadRadius: dark ? -2 : -4,
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(height / 2),
+          child: Material(
+            color: baseColor,
+            child: InkWell(
+              onTap: onPressed,
+              child: Stack(
+                fit: StackFit.passthrough,
+                children: [
+                  // Top specular sheen
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.white.withValues(alpha: dark ? 0.18 : 0.65),
+                            Colors.transparent,
+                          ],
+                          stops: const [0.0, 0.45],
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Internal Rim
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(height / 2),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: dark ? 0.1 : 0.8),
+                          width: 0.8,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Center(child: content),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

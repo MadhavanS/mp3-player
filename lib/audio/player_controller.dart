@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb, listEquals;
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
@@ -126,7 +127,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> _ensurePlayingWithRetries({
     required String context,
     required int generation,
-    int attempts = 12,
+    int attempts = 5,
   }) async {
     for (var i = 0; i < attempts; i++) {
       if (_playControlGeneration != generation) return;
@@ -134,12 +135,13 @@ class PlayerController extends ChangeNotifier {
         await _playSafely(context: context);
       } catch (e, st) {
         if (_isInterruptedAbort(e)) {
-          await Future<void>.delayed(const Duration(milliseconds: 50));
+          await Future<void>.delayed(const Duration(milliseconds: 150));
           continue;
         }
         debugPrint('$context attempt $i: $e\n$st');
       }
-      await Future<void>.delayed(const Duration(milliseconds: 45));
+      // Wait longer between retries to avoid overwhelming the audio engine
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       if (_playControlGeneration != generation) return;
       if (_player.playing) return;
     }
@@ -159,13 +161,20 @@ class PlayerController extends ChangeNotifier {
       _onProcessingState(state.processingState);
       final playing = state.playing;
       final proc = state.processingState;
+
+      // When the player becomes paused (e.g. via notification button or auto-pause),
+      // invalidate any in-flight retry loops so they don't overwrite the pause.
+      if (!playing && _lastDispatchedPlaying) {
+        _invalidatePlayResumeRetries();
+      }
+
       if (!_playerUiDispatchInitialized ||
           playing != _lastDispatchedPlaying ||
           proc != _lastDispatchedProcessing) {
         _playerUiDispatchInitialized = true;
         _lastDispatchedPlaying = playing;
         _lastDispatchedProcessing = proc;
-        notifyListeners();
+        _schedulePlayerUiNotify();
       }
     });
     _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
@@ -235,6 +244,7 @@ class PlayerController extends ChangeNotifier {
   bool _playerUiDispatchInitialized = false;
   bool _lastDispatchedPlaying = false;
   ProcessingState _lastDispatchedProcessing = ProcessingState.idle;
+  bool _playerUiNotifyScheduled = false;
 
   void _notifyCatalogListeners(CatalogNotifyMode mode) {
     switch (mode) {
@@ -564,7 +574,12 @@ class PlayerController extends ChangeNotifier {
     }
     _previousProcessing = state;
     if (enteredComplete) {
-      unawaited(_handleTrackCompleted());
+      // Use a short delay to avoid re-entrancy issues where calling player
+      // methods from within a stream listener context crashes or no-ops.
+      Future.delayed(const Duration(milliseconds: 50), () {
+        if (_isLoadingSource) return;
+        _handleTrackCompleted();
+      });
     }
   }
 
@@ -580,9 +595,20 @@ class PlayerController extends ChangeNotifier {
     if (_suppressTrackCompletedAdvance || _isLoadingSource) return;
     if (_playlist.isEmpty) return;
     if (_stopAtTrackEndForSleepTimer) {
+      debugPrint('Sleep timer (end of song) triggered by natural completion');
       _stopAtTrackEndForSleepTimer = false;
-      _sleepTimerTrackEndNotifier?.call();
-      await pause();
+      final notifier = _sleepTimerTrackEndNotifier;
+      _sleepTimerTrackEndNotifier = null;
+      notifier?.call();
+      
+      try {
+        _invalidatePlayResumeRetries();
+        await _player.pause();
+      } catch (e) {
+        debugPrint('Sleep timer natural stop failed: $e');
+      }
+      
+      notifyListeners();
       return;
     }
     if (_repeat == PlaylistRepeatMode.one) {
@@ -649,6 +675,62 @@ class PlayerController extends ChangeNotifier {
         _postLoadExpectedConcatIndex != 0) {
       return;
     }
+
+    // Sleep timer "end of song": ConcatenatingAudioSource auto-advances to the
+    // next index before ProcessingState.completed arrives, so intercept the
+    // advance here and pause before the new track starts.
+    if (_stopAtTrackEndForSleepTimer) {
+      final order = _activeSourceOrder.isNotEmpty
+          ? _activeSourceOrder
+          : _effectiveQueueOrder();
+      final currentConcatIdx = order.indexOf(_logicalPlaylistIndex());
+      final isAutoAdvance =
+          currentConcatIdx >= 0 && concatIdx != currentConcatIdx;
+      if (isAutoAdvance) {
+        debugPrint('Sleep timer (end of song) intercepting auto-advance: '
+            'from $currentConcatIdx to $concatIdx');
+        _stopAtTrackEndForSleepTimer = false;
+        final notifier = _sleepTimerTrackEndNotifier;
+        _sleepTimerTrackEndNotifier = null;
+        notifier?.call();
+
+        // Authoritative pause and seek back to the end of the previous track
+        // so we don't start playing the next one in the background.
+        // We use a delay to exit the current stream listener context and avoid 
+        // "Bad state: Cannot fire new event" while ensure player state has settled.
+        Future.delayed(const Duration(milliseconds: 20), () async {
+          try {
+            _invalidatePlayResumeRetries();
+            // Force pause at the platform level bypassing the transport lock.
+            await _player.pause();
+            
+            // Re-sync logical index if the auto-advance had already moved it
+            _applyConcatIndexChanged(currentConcatIdx);
+            
+            // Seek to the end of the finish song to ensure we aren't at the
+            // beginning of the NEXT song. We seek to the actual duration instead
+            // of a placeholder like '1 day' to avoid '1440:00' timer display issues.
+            final trackDur = _player.duration;
+            if (trackDur != null && trackDur > Duration.zero) {
+              await _player.seek(trackDur, index: currentConcatIdx);
+            } else {
+              // Fallback if duration isn't available yet
+              await _player.seek(const Duration(seconds: 1), index: currentConcatIdx);
+            }
+            
+            // Final safety pause.
+            await _player.pause();
+            notifyListeners();
+          } catch (e) {
+            debugPrint('Sleep timer stop failed: $e');
+          }
+        });
+
+        notifyListeners();
+        return;
+      }
+    }
+
     if (_applyConcatIndexChanged(concatIdx)) {
       notifyListeners();
       _prewarmPlaybackAlbumArt();
@@ -1710,10 +1792,24 @@ class PlayerController extends ChangeNotifier {
   // wait), so the button is never disabled longer than the native call takes.
   static const int _transportCommandMaxMs = 600;
 
+  // When a second tap arrives while the lock is held, remember the most recent
+  // desired state so it can be applied as soon as the lock is released.
+  bool? _pendingToggleTarget; // true = play, false = pause
+
+  /// Coalesce stream-driven UI updates (e.g. notification play/pause) to one frame.
+  void _schedulePlayerUiNotify() {
+    if (_playerUiNotifyScheduled) return;
+    _playerUiNotifyScheduled = true;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      _playerUiNotifyScheduled = false;
+      notifyListeners();
+    });
+  }
+
   Future<void> _runTransportCommand(Future<void> Function() action) async {
     if (_transportCommandInFlight) return;
     _transportCommandInFlight = true;
-    notifyListeners();
+    _schedulePlayerUiNotify();
     try {
       await action().timeout(
         const Duration(milliseconds: _transportCommandMaxMs),
@@ -1722,23 +1818,46 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {
     } finally {
       _transportCommandInFlight = false;
-      notifyListeners();
+      final pending = _pendingToggleTarget;
+      _pendingToggleTarget = null;
+      if (pending != null) {
+        // Replay the missed tap: the player state may have settled by now.
+        unawaited(
+          pending ? play() : pause(),
+        );
+      } else {
+        _schedulePlayerUiNotify();
+      }
     }
   }
 
-  Future<void> play() => _runTransportCommand(
-        () => _playSafely(context: 'play'),
-      );
+  Future<void> play() async {
+    try {
+      await _playSafely(context: 'play');
+    } catch (_) {}
+    _schedulePlayerUiNotify();
+  }
 
   Future<void> pause() async {
     _invalidatePlayResumeRetries();
-    await _runTransportCommand(() => _player.pause());
+    // Direct pause for snappy notification / system controls (no transport lock).
+    try {
+      await _player.pause();
+    } catch (_) {}
+    _schedulePlayerUiNotify();
   }
 
   Future<void> togglePlayPause() async {
-    if (_player.playing) {
-      _invalidatePlayResumeRetries();
-      await _runTransportCommand(() => _player.pause());
+    // Use [isPlaying] (ORs _retainPlayingUiForShuffleReload) so a momentary
+    // [_player.playing == false] during source reload picks the right branch.
+    final wantPause = isPlaying;
+    if (_transportCommandInFlight) {
+      // Defer: keep the most recent intent; earlier deferred intents are overwritten.
+      _pendingToggleTarget = !wantPause;
+      return;
+    }
+    if (wantPause) {
+      await pause();
     } else {
       await _runTransportCommand(
         () => _playSafely(context: 'togglePlayPause.play'),

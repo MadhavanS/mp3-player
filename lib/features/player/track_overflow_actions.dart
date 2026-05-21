@@ -47,17 +47,34 @@ Widget _compactOverflowMenuRow({
   Color? iconColor,
   Color? labelColor,
 }) {
-  return ListTile(
-    dense: true,
-    visualDensity: VisualDensity.compact,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-    minLeadingWidth: 28,
-    horizontalTitleGap: 12,
-    leading: Icon(icon, size: 20, color: iconColor),
-    title: Text(
-      label,
-      style: TextStyle(fontSize: 14, color: labelColor),
-    ),
+  return Builder(
+    builder: (context) {
+      final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+      final ink = ivy ? Colors.white : const Color(0xFF1C1C1E);
+      final muted = ivy 
+          ? Colors.white.withValues(alpha: 0.7) 
+          : const Color(0xFF48484A);
+      
+      final effectiveIconColor = iconColor ?? (ivy ? muted : null);
+      final effectiveLabelColor = labelColor ?? (ivy ? ink : null);
+
+      return ListTile(
+        dense: true,
+        visualDensity: VisualDensity.compact,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        minLeadingWidth: 28,
+        horizontalTitleGap: 12,
+        leading: Icon(icon, size: 20, color: effectiveIconColor),
+        title: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14, 
+            color: effectiveLabelColor,
+            fontWeight: ivy ? FontWeight.w600 : null,
+          ),
+        ),
+      );
+    },
   );
 }
 

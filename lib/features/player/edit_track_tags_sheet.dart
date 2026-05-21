@@ -164,7 +164,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   }
 
   Future<void> _pickCover() async {
-    final r = await FilePicker.platform.pickFiles(
+    final r = await FilePicker.pickFiles(
       type: FileType.image,
       allowMultiple: false,
       withData: true,

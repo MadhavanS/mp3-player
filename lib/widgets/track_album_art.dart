@@ -398,7 +398,7 @@ class TrackAlbumArt extends StatelessWidget {
         end: Alignment.bottomRight,
         colors: [
           Colors.white.withValues(alpha: 0.82),
-          Colors.white.withValues(alpha: 0.38),
+          const Color(0xFFF2F2F5).withValues(alpha: 0.38),
         ],
       ),
       boxShadow: boxShadows,
