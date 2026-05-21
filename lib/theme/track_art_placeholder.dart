@@ -10,12 +10,14 @@ enum TrackArtPlaceholderStyle {
   gradient,
   silver,
   daisy,
+  ivy,
 }
 
 extension TrackArtPlaceholderStyleWire on TrackArtPlaceholderStyle {
   String get wireName => switch (this) {
         TrackArtPlaceholderStyle.daisy => 'daisy',
         TrackArtPlaceholderStyle.silver => 'silver',
+        TrackArtPlaceholderStyle.ivy => 'ivy',
         TrackArtPlaceholderStyle.gradient => 'gradient',
       };
 }
@@ -24,6 +26,7 @@ TrackArtPlaceholderStyle trackArtPlaceholderStyleFor(AppThemePalette palette) {
   return switch (palette) {
     AppThemePalette.daisy => TrackArtPlaceholderStyle.daisy,
     AppThemePalette.silver => TrackArtPlaceholderStyle.silver,
+    AppThemePalette.ivy => TrackArtPlaceholderStyle.ivy,
     _ => TrackArtPlaceholderStyle.gradient,
   };
 }
@@ -49,6 +52,13 @@ Future<Uint8List?> rasterizeTrackArtPlaceholder({
       end = Alignment.bottomCenter;
     case TrackArtPlaceholderStyle.silver:
       colors = const [Color(0xFFC4C0BA), Color(0xFFB8B4AE)];
+      begin = Alignment.topLeft;
+      end = Alignment.bottomRight;
+    case TrackArtPlaceholderStyle.ivy:
+      colors = [
+        const Color(0xFFF2F2F5),
+        const Color(0xFFD8D8DC),
+      ];
       begin = Alignment.topLeft;
       end = Alignment.bottomRight;
     case TrackArtPlaceholderStyle.gradient:
@@ -81,6 +91,12 @@ Future<Uint8List?> rasterizeTrackArtPlaceholder({
         ..style = PaintingStyle.stroke
         ..strokeWidth = (s / 90.0).clamp(3.0, 8.0)
         ..color = const Color(0xFF0A0A0A);
+      canvas.drawRect(rect.deflate(stroke.strokeWidth / 2), stroke);
+    case TrackArtPlaceholderStyle.ivy:
+      final stroke = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = (s / 128.0).clamp(2.0, 6.0)
+        ..color = Colors.white.withValues(alpha: 0.72);
       canvas.drawRect(rect.deflate(stroke.strokeWidth / 2), stroke);
     case TrackArtPlaceholderStyle.gradient:
       break;

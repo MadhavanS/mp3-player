@@ -8,6 +8,9 @@ import 'sleep_timer_dialog.dart';
 /// Dark rose for active Leah NP chrome icons (matches favourite when saved).
 const Color _kLeahNpIconActive = Color(0xFF9C3F6E);
 
+/// Inactive Ivy NP icons (off toggles, unfavourited, sleep idle).
+const Color _kIvyInactiveIcon = Color(0xFFC8C8CE);
+
 /// Opens the sleep timer dialog from Now Playing.
 class SleepTimerControl extends StatelessWidget {
   const SleepTimerControl({
@@ -27,8 +30,16 @@ class SleepTimerControl extends StatelessWidget {
       listenable: SleepTimerController.instance,
       builder: (context, _) {
         final active = SleepTimerController.instance.isActive;
-        final leah = context.appliedThemePalette == AppThemePalette.leah;
-        final color = active && leah ? _kLeahNpIconActive : iconColor;
+        final palette = context.appliedThemePalette;
+        final leah = palette == AppThemePalette.leah;
+        final ivy = palette == AppThemePalette.ivy;
+        final color = active && leah
+            ? _kLeahNpIconActive
+            : active
+            ? (ivy ? context.controlAccent : iconColor)
+            : ivy
+            ? _kIvyInactiveIcon
+            : iconColor;
         return IconButton(
           tooltip: active ? 'Sleep timer on' : 'Sleep timer',
           iconSize: iconSize,

@@ -65,6 +65,9 @@ class TrackAlbumArt extends StatelessWidget {
     if (context.appliedThemePalette == AppThemePalette.silver) {
       return _silverPlaceholderDecoration(context);
     }
+    if (context.appliedThemePalette == AppThemePalette.ivy) {
+      return _ivyPlaceholderDecoration(context);
+    }
     return _gradientDecoration(context);
   }
 
@@ -346,5 +349,61 @@ class TrackAlbumArt extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Ivy: frosted glass tile with soft neutral rim.
+  Widget _ivyPlaceholderDecoration(BuildContext context) {
+    final r = _effectiveRadius(context);
+    final br = r <= 0 ? BorderRadius.zero : BorderRadius.circular(r);
+    final isMini = display == TrackArtDisplay.mini;
+    final shape = isMini ? BoxShape.circle : BoxShape.rectangle;
+    final outline = Border.all(
+      color: Colors.white.withValues(alpha: 0.72),
+      width: 1.2,
+    );
+
+    final List<BoxShadow> boxShadows = showShadow
+        ? switch (display) {
+            TrackArtDisplay.mini => [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            TrackArtDisplay.list => const [],
+            TrackArtDisplay.full => [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 24,
+                  offset: const Offset(0, 14),
+                ),
+              ],
+            TrackArtDisplay.nowPlaying => [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 16,
+                  offset: const Offset(0, 9),
+                ),
+              ],
+          }
+        : const <BoxShadow>[];
+
+    final deco = BoxDecoration(
+      shape: shape,
+      borderRadius: isMini ? null : br,
+      border: outline,
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withValues(alpha: 0.82),
+          Colors.white.withValues(alpha: 0.38),
+        ],
+      ),
+      boxShadow: boxShadows,
+    );
+
+    return Container(width: _size, height: _size, decoration: deco);
   }
 }

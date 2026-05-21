@@ -17,6 +17,7 @@ import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/player_chrome_background.dart';
 import '../../widgets/daisy_background.dart';
+import '../../widgets/player_adaptive_controls.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -777,7 +778,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (widget.themeSetting == AppThemeSetting.julia ||
             widget.themeSetting == AppThemeSetting.leah ||
             widget.themeSetting == AppThemeSetting.silver ||
-            widget.themeSetting == AppThemeSetting.daisy) ...[
+            widget.themeSetting == AppThemeSetting.daisy ||
+            widget.themeSetting == AppThemeSetting.ivy) ...[
           const SizedBox(height: 20),
           Text(
             'Background',
@@ -1171,11 +1173,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    trailing: Switch.adaptive(
+                    trailing: PlayerAdaptiveSwitch(
                       value: row.enabled,
                       onChanged: _busy || lastEnabled
                           ? null
                           : (v) => _setLibraryTabEnabled(i, v),
+                      activeColor: context.controlAccent,
                     ),
                   ),
                 );

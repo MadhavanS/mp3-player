@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter, Paint, Radius, Rect, RRect;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
@@ -13,6 +13,8 @@ import '../../theme/album_art_title_color.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/daisy_background.dart';
+import '../../widgets/liquid_glass.dart';
+import '../../widgets/player_adaptive_controls.dart';
 import '../../widgets/track_album_art.dart';
 import '../shell/now_playing_escape_bridge.dart';
 import 'edit_track_tags_sheet.dart';
@@ -23,50 +25,25 @@ import 'track_overflow_actions.dart';
 
 /// Silver full-art player: ink, inactive seek track, timestamps, disabled icons.
 const Color _kSilverInk = Color(0xFF0A0A0A);
-const Color _kSilverSeekInactive = Color(0xFFCBC7C1);
 const Color _kSilverTimeGray = Color(0xFFA8A49E);
 const Color _kSilverIconDisabled = Color(0xFFB8B4AE);
 const Color _kLeahPinkActive = Color(0xFF9C3F6E);
 const Color _kLeahPinkSoft = Color(0xFFE7B5CC);
 
+// Ivy liquid-glass colors (neutral achromatic, reference-style)
+const Color _kIvyInk = Color(0xFF1C1C1E);
+/// Muted chrome (sliders, inactive icons) — not for body text on glass.
+const Color _kIvyMuted = Color(0xFFAEAEB2);
+/// Artist / secondary labels on frosted light backgrounds.
+const Color _kIvySecondaryText = Color(0xFF48484A);
+/// Inactive Ivy icons (shuffle/repeat off, favourite off, sleep off).
+const Color _kIvyInactiveIcon = Color(0xFFC8C8CE);
+const Color _kIvyIconDisabled = Color(0xFFC7C7CC);
+
 String _formatDuration(Duration d) {
   final m = d.inMinutes;
   final s = d.inSeconds % 60;
   return '$m:${s.toString().padLeft(2, '0')}';
-}
-
-/// Thin vertical tick for the soft-blur seek bar (not a round thumb).
-final class _SoftBlurSeekThumbShape extends SliderComponentShape {
-  const _SoftBlurSeekThumbShape({required this.color});
-
-  final Color color;
-  static const double _w = 3;
-  static const double _h = 14;
-
-  @override
-  Size getPreferredSize(bool isEnabled, bool isDiscrete) => const Size(_w, _h);
-
-  @override
-  void paint(
-    PaintingContext context,
-    Offset center, {
-    required Animation<double> activationAnimation,
-    required Animation<double> enableAnimation,
-    required bool isDiscrete,
-    required TextPainter labelPainter,
-    required RenderBox parentBox,
-    required SliderThemeData sliderTheme,
-    required TextDirection textDirection,
-    required double value,
-    required double textScaleFactor,
-    required Size sizeWithOverflow,
-  }) {
-    final t = enableAnimation.value;
-    final c = Color.lerp(color.withValues(alpha: 0.4), color, t)!;
-    final rect = Rect.fromCenter(center: center, width: _w, height: _h);
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(0.5));
-    context.canvas.drawRRect(rrect, Paint()..color = c);
-  }
 }
 
 class NowPlayingScreen extends StatefulWidget {
@@ -301,6 +278,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         final isFav = canFav && FavoriteSongsStore.isFavorite(path);
         final silver = _isSilverNp(context);
         final leah = _isLeahNp(context);
+        final ivy = _isIvyNp(context);
         final julia = context.appliedThemePalette == AppThemePalette.julia;
         final favIcon = isFav
             ? (silver ? Icons.favorite : Icons.favorite_rounded)
@@ -332,15 +310,21 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         ? _kSilverIconDisabled.withValues(alpha: 0.55)
                         : (leah
                               ? _kLeahPinkSoft.withValues(alpha: 0.5)
+                              : ivy
+                              ? _kIvyIconDisabled
                               : pal.textSecondary.withValues(alpha: 0.35)))
                   : isFav
                   ? (silver
                         ? _kSilverInk
-                        : (leah ? _kLeahPinkActive : context.controlAccent))
+                        : (leah
+                              ? _kLeahPinkActive
+                              : context.controlAccent))
                   : (silver
                         ? _kSilverTimeGray
                         : (leah
                               ? _kLeahPinkSoft
+                              : ivy
+                              ? _kIvyInactiveIcon
                               : (julia
                                     ? pal.onScaffold.withValues(alpha: 0.9)
                                     : pal.textSecondary.withValues(
@@ -535,7 +519,19 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     double iconSize = 28,
     bool filled = false,
     bool silverInkRings = false,
+    bool liquidGlass = false,
   }) {
+    if (liquidGlass) {
+      return LiquidGlassCircleButton(
+        icon: icon,
+        onPressed: onPressed,
+        size: size,
+        iconSize: iconSize,
+        iconColor: color,
+        disabledColor: color.withValues(alpha: 0.38),
+        prominence: filled ? 0.72 : 0.52,
+      );
+    }
     if (silverInkRings) {
       final ring = onPressed == null ? _kSilverIconDisabled : _kSilverInk;
       final ink = onPressed == null ? _kSilverIconDisabled : _kSilverInk;
@@ -583,6 +579,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   bool _isDaisyNp(BuildContext context) =>
       context.appliedThemePalette == AppThemePalette.daisy;
 
+  bool _isIvyNp(BuildContext context) =>
+      context.appliedThemePalette == AppThemePalette.ivy;
+
   /// Daisy full-art controls sit on warm paper. Inactive toggles (shuffle/repeat
   /// off) must read clearly softer than ink — blend toward [AppPalette.surface],
   /// not only [textMuted], or they still look “on” in screenshots.
@@ -607,38 +606,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     return raw;
   }
 
-  Widget _softBlurSeekSliderTheme({
-    required BuildContext context,
-    required AppPalette pal,
-    required Color accent,
-    required Widget child,
-  }) {
-    if (_isSilverNp(context)) {
-      return SliderTheme(
-        data: SliderTheme.of(context).copyWith(
-          trackHeight: 4,
-          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-          overlayShape: SliderComponentShape.noOverlay,
-          activeTrackColor: _kSilverInk,
-          inactiveTrackColor: _kSilverSeekInactive,
-          thumbColor: _kSilverInk,
-          padding: EdgeInsets.zero,
-        ),
-        child: child,
-      );
-    }
-    return SliderTheme(
-      data: SliderTheme.of(context).copyWith(
-        trackHeight: 3,
-        thumbShape: _SoftBlurSeekThumbShape(color: accent),
-        overlayShape: SliderComponentShape.noOverlay,
-        activeTrackColor: accent,
-        inactiveTrackColor: accent.withValues(alpha: 0.28),
-        thumbColor: accent,
-        padding: EdgeInsets.zero,
-      ),
-      child: child,
-    );
+  PlayerSliderAppearance _npSliderAppearance(BuildContext context) {
+    if (_isSilverNp(context)) return PlayerSliderAppearance.silver;
+    if (_isIvyNp(context)) return PlayerSliderAppearance.ivy;
+    return PlayerSliderAppearance.softBlur;
   }
 
   TextStyle _fullArtTimeLabelStyle(
@@ -660,6 +631,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         color: _kLeahPinkActive,
         fontSize: 13,
         fontWeight: FontWeight.w700,
+        letterSpacing: 0.2,
+      );
+    }
+    if (_isIvyNp(context)) {
+      return theme.textTheme.labelSmall!.copyWith(
+        color: accent,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
         letterSpacing: 0.2,
       );
     }
@@ -692,6 +671,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         height: 1.25,
       );
     }
+    if (_isIvyNp(context)) {
+      return theme.textTheme.headlineSmall!.copyWith(
+        color: _kIvyInk,
+        fontWeight: FontWeight.w700,
+        fontSize: 28,
+        height: 1.25,
+      );
+    }
     return theme.textTheme.headlineSmall!.copyWith(
       color: pal.onScaffold,
       fontSize: 28,
@@ -706,6 +693,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     AppPalette pal, {
     required double fontSize,
     required double onScaffoldAlpha,
+    bool albumMeta = false,
   }) {
     if (_isSilverNp(context)) {
       return theme.textTheme.titleMedium!.copyWith(
@@ -718,6 +706,13 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       return theme.textTheme.titleMedium!.copyWith(
         color: _kLeahPinkActive.withValues(alpha: 0.94),
         fontWeight: FontWeight.w600,
+        fontSize: fontSize,
+      );
+    }
+    if (_isIvyNp(context)) {
+      return theme.textTheme.titleMedium!.copyWith(
+        color: albumMeta ? _kIvyInk : _kIvySecondaryText,
+        fontWeight: albumMeta ? FontWeight.w600 : FontWeight.w500,
         fontSize: fontSize,
       );
     }
@@ -736,52 +731,55 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     required double artWidth,
   }) {
     final accent = _fullArtSeekAccent(context, pal);
+    final ivy = _isIvyNp(context);
     final iconTint = _isLeahNp(context)
         ? _kLeahPinkSoft
+        : ivy
+        ? accent.withValues(alpha: 0.75)
         : accent.withValues(alpha: 0.9);
+    final volumeRow = Row(
+      children: [
+        Icon(
+          Icons.volume_down_outlined,
+          color: iconTint,
+          size: _isSilverNp(context) ? 34 : 23,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: StreamBuilder<double>(
+              stream: player.volumeStream,
+              initialData: player.volume,
+              builder: (context, snap) {
+                final v = (snap.data ?? 1.0).clamp(0.0, 1.0);
+                return PlayerAdaptiveSlider(
+                  value: v,
+                  onChanged: (nv) => unawaited(player.setVolume(nv)),
+                  appearance: _npSliderAppearance(context),
+                  activeColor: accent,
+                  inactiveColor: ivy
+                      ? _kIvyMuted.withValues(alpha: 0.45)
+                      : null,
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Icon(
+          Icons.volume_up_outlined,
+          color: iconTint,
+          size: _isSilverNp(context) ? 34 : 23,
+        ),
+      ],
+    );
     return Center(
       child: SizedBox(
         width: artWidth,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(0, 2, 0, 2),
-          child: Row(
-            children: [
-              Icon(
-                Icons.volume_down_outlined,
-                color: iconTint,
-                size: _isSilverNp(context) ? 34 : 23,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: StreamBuilder<double>(
-                    stream: player.volumeStream,
-                    initialData: player.volume,
-                    builder: (context, snap) {
-                      final v = (snap.data ?? 1.0).clamp(0.0, 1.0);
-                      return _softBlurSeekSliderTheme(
-                        context: context,
-                        pal: pal,
-                        accent: accent,
-                        child: Slider(
-                          padding: EdgeInsets.zero,
-                          value: v,
-                          onChanged: (nv) => unawaited(player.setVolume(nv)),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Icon(
-                Icons.volume_up_outlined,
-                color: iconTint,
-                size: _isSilverNp(context) ? 34 : 23,
-              ),
-            ],
-          ),
+          child: volumeRow,
         ),
       ),
     );
@@ -884,10 +882,19 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     final accent = _fullArtSeekAccent(context, pal);
     final silver = _isSilverNp(context);
     final leah = _isLeahNp(context);
+    final ivy = _isIvyNp(context);
     final muted = silver
         ? _kSilverTimeGray
-        : (leah ? _kLeahPinkSoft : pal.onScaffold.withValues(alpha: 0.5));
-    final shuffleOff = silver ? _kSilverIconDisabled : muted;
+        : leah
+        ? _kLeahPinkSoft
+        : ivy
+        ? _kIvyMuted
+        : pal.onScaffold.withValues(alpha: 0.5);
+    final shuffleOff = silver
+        ? _kSilverIconDisabled
+        : ivy
+        ? _kIvyInactiveIcon
+        : muted;
     if (silver) {
       return SizedBox(
         width: artWidth,
@@ -901,6 +908,82 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             muted: muted,
             shuffleOff: shuffleOff,
           ),
+        ),
+      );
+    }
+    if (ivy) {
+      final shuffleActive = player.playlist.length >= 2 && player.shuffleEnabled;
+      final repeatActive = player.repeatMode != PlaylistRepeatMode.off;
+      return SizedBox(
+        width: artWidth,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            LiquidGlassRingIconButton(
+              icon: Icons.shuffle,
+              onPressed: player.playlist.length < 2
+                  ? null
+                  : () => _notifyShuffle(player),
+              size: 48,
+              iconSize: 22,
+              accentColor: accent,
+              inactiveColor: shuffleOff,
+              disabledColor: _kIvyIconDisabled,
+              highlighted: shuffleActive,
+              active: shuffleActive,
+            ),
+            LiquidGlassRingIconButton(
+              icon: Icons.skip_previous,
+              onPressed: () => player.skipPrevious(),
+              size: 56,
+              iconSize: 26,
+              accentColor: accent,
+              inactiveColor: _kIvyIconDisabled,
+              highlighted: true,
+              active: true,
+            ),
+            ListenableBuilder(
+              listenable: player,
+              builder: (context, _) => LiquidGlassRingIconButton(
+                icon: player.isPlaying ? Icons.pause : Icons.play_arrow,
+                onPressed: player.transportCommandInFlight
+                    ? null
+                    : () => player.togglePlayPause(),
+                size: 76,
+                iconSize: 32,
+                accentColor: accent,
+                inactiveColor: _kIvyIconDisabled,
+                highlighted: true,
+                active: true,
+              ),
+            ),
+            ListenableBuilder(
+              listenable: player,
+              builder: (context, _) => LiquidGlassRingIconButton(
+                icon: Icons.skip_next,
+                onPressed: player.canSkipNext ? () => player.skipNext() : null,
+                size: 56,
+                iconSize: 26,
+                accentColor: accent,
+                inactiveColor: _kIvyIconDisabled,
+                highlighted: player.canSkipNext,
+                active: player.canSkipNext,
+              ),
+            ),
+            LiquidGlassRingIconButton(
+              icon: player.repeatMode == PlaylistRepeatMode.one
+                  ? Icons.repeat_one
+                  : Icons.repeat,
+              onPressed: () => _notifyRepeat(player),
+              size: 48,
+              iconSize: 22,
+              accentColor: accent,
+              inactiveColor: shuffleOff,
+              disabledColor: _kIvyIconDisabled,
+              highlighted: repeatActive,
+              active: repeatActive,
+            ),
+          ],
         ),
       );
     }
@@ -992,15 +1075,24 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         artistName.isNotEmpty && artistName.toLowerCase() != 'unknown artist';
     final silver = _isSilverNp(context);
     final leah = _isLeahNp(context);
+    final ivy = _isIvyNp(context);
     final actionColor = silver
         ? _kSilverInk
-        : (leah ? _kLeahPinkSoft : pal.onScaffold.withValues(alpha: 0.92));
+        : leah
+        ? _kLeahPinkSoft
+        : ivy
+        ? context.controlAccent
+        : pal.onScaffold.withValues(alpha: 0.92);
     final accent = _fullArtSeekAccent(context, pal);
     final artWidth = _fullArtHeroWidth(context);
     final topIconEnabled = silver ? _kSilverInk : actionColor;
     final topIconDisabled = silver
         ? _kSilverIconDisabled
-        : (leah ? _kLeahPinkSoft.withValues(alpha: 0.6) : pal.textSecondary);
+        : leah
+        ? _kLeahPinkSoft.withValues(alpha: 0.6)
+        : ivy
+        ? _kIvyIconDisabled
+        : pal.textSecondary;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1032,7 +1124,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               ),
               SleepTimerControl(
                 player: player,
-                iconColor: topIconEnabled,
+                iconColor: ivy ? _kIvyInactiveIcon : topIconEnabled,
                 iconSize: silver ? 34 : 28,
               ),
               _favoriteButton(pal, track),
@@ -1108,6 +1200,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 pal,
                 fontSize: 15,
                 onScaffoldAlpha: 0.82,
+                albumMeta: true,
               ),
             ),
           ),
@@ -1128,29 +1221,28 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   final sliderValue =
                       _dragPositionFraction ??
                       (totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0);
-                  return Column(
+                  final seekColumn = Column(
                     children: [
-                      _softBlurSeekSliderTheme(
-                        context: context,
-                        pal: pal,
-                        accent: accent,
-                        child: Slider(
-                          padding: EdgeInsets.zero,
-                          value: sliderValue.clamp(0.0, 1.0),
-                          onChanged: totalMs > 0
-                              ? (v) => setState(() => _dragPositionFraction = v)
-                              : null,
-                          onChangeEnd: totalMs > 0
-                              ? (v) {
-                                  player.seek(
-                                    Duration(
-                                      milliseconds: (v * totalMs).round(),
-                                    ),
-                                  );
-                                  setState(() => _dragPositionFraction = null);
-                                }
-                              : null,
-                        ),
+                      PlayerAdaptiveSlider(
+                        value: sliderValue.clamp(0.0, 1.0),
+                        appearance: _npSliderAppearance(context),
+                        activeColor: accent,
+                        inactiveColor: ivy
+                            ? _kIvyMuted.withValues(alpha: 0.45)
+                            : null,
+                        onChanged: totalMs > 0
+                            ? (v) => setState(() => _dragPositionFraction = v)
+                            : null,
+                        onChangeEnd: totalMs > 0
+                            ? (v) {
+                                player.seek(
+                                  Duration(
+                                    milliseconds: (v * totalMs).round(),
+                                  ),
+                                );
+                                setState(() => _dragPositionFraction = null);
+                              }
+                            : null,
                       ),
                       Row(
                         children: [
@@ -1177,6 +1269,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                       ),
                     ],
                   );
+                  return seekColumn;
                 },
               );
             },
@@ -1258,34 +1351,24 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                       (totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0);
                   return Column(
                     children: [
-                      SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          trackHeight: 2,
-                          thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 5,
-                          ),
-                          overlayShape: SliderComponentShape.noOverlay,
-                          activeTrackColor: accent,
-                          inactiveTrackColor: accent.withValues(alpha: 0.35),
-                          thumbColor: accent,
-                          padding: EdgeInsets.zero,
-                        ),
-                        child: Slider(
-                          value: sliderValue.clamp(0.0, 1.0),
-                          onChanged: totalMs > 0
-                              ? (v) => setState(() => _dragPositionFraction = v)
-                              : null,
-                          onChangeEnd: totalMs > 0
-                              ? (v) {
-                                  player.seek(
-                                    Duration(
-                                      milliseconds: (v * totalMs).round(),
-                                    ),
-                                  );
-                                  setState(() => _dragPositionFraction = null);
-                                }
-                              : null,
-                        ),
+                      PlayerAdaptiveSlider(
+                        value: sliderValue.clamp(0.0, 1.0),
+                        appearance: PlayerSliderAppearance.daisy,
+                        activeColor: accent,
+                        inactiveColor: accent.withValues(alpha: 0.35),
+                        onChanged: totalMs > 0
+                            ? (v) => setState(() => _dragPositionFraction = v)
+                            : null,
+                        onChangeEnd: totalMs > 0
+                            ? (v) {
+                                player.seek(
+                                  Duration(
+                                    milliseconds: (v * totalMs).round(),
+                                  ),
+                                );
+                                setState(() => _dragPositionFraction = null);
+                              }
+                            : null,
                       ),
                       Row(
                         children: [
@@ -1611,9 +1694,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                             .labelSmall,
                                                       ),
                                                       Expanded(
-                                                        child: Slider(
+                                                        child: PlayerAdaptiveSlider(
                                                           value: sliderValue
                                                               .clamp(0.0, 1.0),
+                                                          appearance:
+                                                              PlayerSliderAppearance
+                                                                  .softBlur,
+                                                          activeColor: context
+                                                              .controlAccent,
                                                           onChanged: totalMs > 0
                                                               ? (v) => setState(
                                                                   () =>

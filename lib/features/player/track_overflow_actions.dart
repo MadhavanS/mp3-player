@@ -16,6 +16,7 @@ import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
+import '../../widgets/player_adaptive_controls.dart';
 import 'edit_track_tags_sheet.dart';
 import 'site_rename_standalone_dialog.dart';
 
@@ -504,33 +505,16 @@ Future<void> applyTrackOverflowAction(
       if (path == null || path.isEmpty) return;
 
       final basename = p.basename(path);
-      final confirmed = await showDialog<bool>(
+      final confirmed = await showPlayerConfirmDialog(
         context: context,
-        builder: (ctx) {
-          final scheme = Theme.of(ctx).colorScheme;
-          return AlertDialog(
-            title: const Text('Delete from device?'),
-            content: Text(
-              'This permanently removes the file from storage.\n'
-              '$basename\n\n'
-              'This cannot be undone.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                style: FilledButton.styleFrom(
-                  backgroundColor: scheme.error,
-                  foregroundColor: scheme.onError,
-                ),
-                child: const Text('Delete'),
-              ),
-            ],
-          );
-        },
+        title: 'Delete from device?',
+        message:
+            'This permanently removes the file from storage.\n'
+            '$basename\n\n'
+            'This cannot be undone.',
+        cancelLabel: 'Cancel',
+        confirmLabel: 'Delete',
+        destructive: true,
       );
       if (confirmed != true || !context.mounted) return;
 

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'player_chrome_background.dart';
 
 /// Which palette is actually applied (after resolving [AppThemeSetting.automatic]).
-enum AppThemePalette { light, dark, grey, julia, leah, silver, daisy }
+enum AppThemePalette { light, dark, grey, julia, leah, silver, daisy, ivy }
 
 /// User-selectable appearance in Settings.
 ///
@@ -22,6 +22,8 @@ enum AppThemeSetting {
   silver,
   /// Beige paper + grain inspired full-art player (Daisy).
   daisy,
+  /// Neutral liquid-glass with frosted white surfaces (Ivy).
+  ivy,
   automatic,
 }
 
@@ -32,6 +34,7 @@ const List<AppThemeSetting> appearanceThemeChoices = <AppThemeSetting>[
   AppThemeSetting.leah,
   AppThemeSetting.silver,
   AppThemeSetting.daisy,
+  AppThemeSetting.ivy,
 ];
 
 extension AppThemeSettingResolve on AppThemeSetting {
@@ -52,6 +55,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
         return AppThemePalette.silver;
       case AppThemeSetting.daisy:
         return AppThemePalette.daisy;
+      case AppThemeSetting.ivy:
+        return AppThemePalette.ivy;
       case AppThemeSetting.automatic:
         final h = localNow.hour;
         return (h >= 6 && h < 20)
@@ -68,6 +73,7 @@ extension AppThemeSettingResolve on AppThemeSetting {
     AppThemeSetting.leah => 'Leah',
     AppThemeSetting.silver => 'Silver',
     AppThemeSetting.daisy => 'Daisy',
+    AppThemeSetting.ivy => 'Ivy',
     AppThemeSetting.automatic => 'Automatic (by time)',
   };
 
@@ -83,6 +89,8 @@ extension AppThemeSettingResolve on AppThemeSetting {
       'Soft paper-grey surfaces and monochrome full-art player',
     AppThemeSetting.daisy =>
       'Warm beige textured look with black player controls',
+    AppThemeSetting.ivy =>
+      'Frosted liquid glass with neutral grey tones',
     AppThemeSetting.automatic => 'Light during the day, dark at night',
   };
 }
@@ -196,6 +204,18 @@ class AppPalette extends ThemeExtension<AppPalette> {
     textMuted: Color(0xFF665E52),
   );
 
+  /// Neutral liquid-glass with frosted white surfaces (Ivy).
+  static const AppPalette ivy = AppPalette(
+    scaffoldBackground: Color(0xFFE8E8EC),
+    surface: Color(0xFFF2F2F5),
+    primary: Color(0xFF1C1C1E),
+    accent: Color(0xFF8E8E93),
+    onScaffold: Color(0xFF1C1C1E),
+    textPrimary: Color(0xFF1C1C1E),
+    textSecondary: Color(0xFF636366),
+    textMuted: Color(0xFFAEAEB2),
+  );
+
   /// Line under Settings → Background when “Default” is selected.
   static String chromeBackgroundKindDetail(
     PlayerChromeBackgroundKind kind,
@@ -213,6 +233,8 @@ class AppPalette extends ThemeExtension<AppPalette> {
         'Warm gray paper in-house scaffold and surfaces.',
       AppThemeSetting.daisy =>
         'Warm paper-beige in-house scaffold and surfaces.',
+      AppThemeSetting.ivy =>
+        'Neutral frosted-glass scaffold and surfaces.',
       _ => kind.subtitle,
     };
   }
@@ -225,6 +247,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     return switch (paletteKey) {
       AppThemePalette.julia => AppPalette.julia,
       AppThemePalette.leah => AppPalette.leah,
+      AppThemePalette.ivy => AppPalette.ivy,
       AppThemePalette.silver => base.copyWith(
         scaffoldBackground: const Color(0xFFC8C4BC),
         surface: const Color(0xFFD5D1C8),
@@ -233,10 +256,10 @@ class AppPalette extends ThemeExtension<AppPalette> {
         textMuted: const Color(0xFF7E7A74),
         onScaffold: const Color(0xFF0A0A0A),
       ),
-      AppThemePalette.daisy => AppPalette.daisy,
-      _ => base,
-    };
-  }
+    AppThemePalette.daisy => AppPalette.daisy,
+    _ => base,
+  };
+}
 
   static AppPalette forPalette(AppThemePalette p) => switch (p) {
     AppThemePalette.light => AppPalette.light,
@@ -246,6 +269,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     AppThemePalette.leah => AppPalette.leah,
     AppThemePalette.silver => AppPalette.silver,
     AppThemePalette.daisy => AppPalette.daisy,
+    AppThemePalette.ivy => AppPalette.ivy,
   };
 
   /// Adjusts Julia / Leah / Silver / Daisy palettes for background tone (not accent).
@@ -258,13 +282,24 @@ class AppPalette extends ThemeExtension<AppPalette> {
     if (paletteKey != AppThemePalette.julia &&
         paletteKey != AppThemePalette.leah &&
         paletteKey != AppThemePalette.silver &&
-        paletteKey != AppThemePalette.daisy) {
+        paletteKey != AppThemePalette.daisy &&
+        paletteKey != AppThemePalette.ivy) {
       return base;
     }
     switch (kind) {
       case PlayerChromeBackgroundKind.themeDefault:
         return _chromeThemeDefaultPalette(paletteKey, base);
       case PlayerChromeBackgroundKind.dark:
+        if (paletteKey == AppThemePalette.ivy) {
+          return base.copyWith(
+            scaffoldBackground: const Color(0xFFD8D8DC),
+            surface: const Color(0xFFE4E4E8),
+            textPrimary: const Color(0xFF1C1C1E),
+            textSecondary: const Color(0xFF48484A),
+            textMuted: const Color(0xFF8E8E93),
+            onScaffold: const Color(0xFF1C1C1E),
+          );
+        }
         if (paletteKey == AppThemePalette.silver) {
           return base.copyWith(
             scaffoldBackground: const Color(0xFFD8D4CD),
@@ -315,6 +350,16 @@ class AppPalette extends ThemeExtension<AppPalette> {
             textSecondary: const Color(0xFF3E372D),
             textMuted: const Color(0xFF6A6152),
             onScaffold: const Color(0xFF131313),
+          );
+        }
+        if (paletteKey == AppThemePalette.ivy) {
+          return base.copyWith(
+            scaffoldBackground: const Color(0xFFF0F0F4),
+            surface: const Color(0xFFFAFAFC),
+            textPrimary: const Color(0xFF1C1C1E),
+            textSecondary: const Color(0xFF636366),
+            textMuted: const Color(0xFFAEAEB2),
+            onScaffold: const Color(0xFF1C1C1E),
           );
         }
         return base.copyWith(
@@ -454,13 +499,15 @@ extension AppThemeContext on BuildContext {
       appliedThemePalette == AppThemePalette.julia ||
       appliedThemePalette == AppThemePalette.leah ||
       appliedThemePalette == AppThemePalette.silver ||
-      appliedThemePalette == AppThemePalette.daisy;
+      appliedThemePalette == AppThemePalette.daisy ||
+      appliedThemePalette == AppThemePalette.ivy;
 
   /// Leah- or Silver-style full-art Now Playing (not Julia).
   bool get usesFullArtNowPlayingLayout =>
       appliedThemePalette == AppThemePalette.leah ||
       appliedThemePalette == AppThemePalette.silver ||
-      appliedThemePalette == AppThemePalette.daisy;
+      appliedThemePalette == AppThemePalette.daisy ||
+      appliedThemePalette == AppThemePalette.ivy;
 }
 
 extension AppThemeSettingPreviewStripe on AppThemeSetting {
@@ -490,7 +537,8 @@ abstract final class AppTheme {
       AppThemePalette.julia ||
       AppThemePalette.leah ||
       AppThemePalette.silver ||
-      AppThemePalette.daisy =>
+      AppThemePalette.daisy ||
+      AppThemePalette.ivy =>
         ext.scaffoldBackground.computeLuminance() > 0.45
             ? Brightness.light
             : Brightness.dark,
@@ -509,7 +557,8 @@ abstract final class AppTheme {
     final isMusicChromePalette = palette == AppThemePalette.julia ||
         palette == AppThemePalette.leah ||
         palette == AppThemePalette.silver ||
-        palette == AppThemePalette.daisy;
+        palette == AppThemePalette.daisy ||
+        palette == AppThemePalette.ivy;
     final isDaisy = palette == AppThemePalette.daisy;
     final cardRadius = isMusicChromePalette ? 20.0 : 12.0;
     final buttonRadius =

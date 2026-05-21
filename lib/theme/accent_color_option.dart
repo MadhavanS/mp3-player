@@ -53,6 +53,7 @@ extension AppAccentColorOptionResolve on AppAccentColorOption {
       AppThemePalette.leah => const Color(0xFFEC4899),
       AppThemePalette.silver => const Color(0xFFC8C8C8),
       AppThemePalette.daisy => const Color(0xFF151515),
+      AppThemePalette.ivy => const Color(0xFF1C1C1E),
       AppThemePalette.light => const Color(0xFF2563EB),
       AppThemePalette.dark => const Color(0xFF79B8FF),
       AppThemePalette.grey => const Color(0xFF38BDF8),

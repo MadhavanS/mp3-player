@@ -18,6 +18,7 @@ import '../../services/recently_played_store.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/daisy_background.dart';
+import '../../widgets/liquid_glass.dart';
 import '../../widgets/track_album_art.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
@@ -2337,13 +2338,16 @@ class LibraryScreenState extends State<LibraryScreen>
         .whereType<String>()
         .toList();
 
+    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+
     return ListView.separated(
       controller: _songsScrollController,
       cacheExtent: 4000,
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.fromLTRB(0, ivy ? 4 : 0, 0, ivy ? 8 : 8),
       itemCount: filteredIndices.length,
-      separatorBuilder: (_, __) =>
-          Divider(height: 1, color: pal.dividerOnHero, indent: 88),
+      separatorBuilder: (_, __) => ivy
+          ? const SizedBox(height: 5)
+          : Divider(height: 1, color: pal.dividerOnHero, indent: 88),
       itemBuilder: (context, i) {
         final catalogIndex = filteredIndices[i];
         final track = tracks[catalogIndex];
@@ -2417,6 +2421,93 @@ class _TrackTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final pal = context.palette;
+    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+    final accent = context.controlAccent;
+
+    final row = Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        TrackAlbumArt(track: track, display: TrackArtDisplay.list),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                track.genres.isEmpty
+                    ? track.metaLine
+                    : '${track.metaLine} · ${track.genres}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: ivy ? const Color(0xFF1C1C1E) : pal.textMuted.withValues(alpha: 0.9),
+                  fontSize: 10,
+                  fontWeight: ivy ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (showPlayingIcon) ...[
+                    Icon(
+                      Icons.play_arrow_rounded,
+                      size: 22,
+                      color: ivy ? accent : context.controlAccent,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: ivy
+                            ? const Color(0xFF1C1C1E)
+                            : pal.onScaffold,
+                        fontSize: 15,
+                        fontWeight: ivy ? FontWeight.w600 : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(
+                track.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: ivy
+                      ? const Color(0xFF48484A)
+                      : pal.textSecondary.withValues(alpha: 0.95),
+                  fontSize: 13,
+                  fontWeight: ivy ? FontWeight.w500 : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+        TrackOverflowMenuWithFavourite(
+          pal: pal,
+          track: track,
+          onSelected: onOverflowAction,
+        ),
+      ],
+    );
+
+    if (ivy) {
+      return Padding(
+        key: rowKey,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: LiquidGlassLayerCard(
+          emphasized: selected,
+          accentColor: accent,
+          plateTint: accent,
+          onTap: onTap,
+          child: row,
+        ),
+      );
+    }
 
     return Material(
       key: rowKey,
@@ -2427,69 +2518,7 @@ class _TrackTile extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              TrackAlbumArt(track: track, display: TrackArtDisplay.list),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      track.genres.isEmpty
-                          ? track.metaLine
-                          : '${track.metaLine} · ${track.genres}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: pal.textMuted.withValues(alpha: 0.9),
-                        fontSize: 10,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        if (showPlayingIcon) ...[
-                          Icon(
-                            Icons.play_arrow_rounded,
-                            size: 22,
-                            color: context.controlAccent,
-                          ),
-                          const SizedBox(width: 6),
-                        ],
-                        Expanded(
-                          child: Text(
-                            track.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: pal.onScaffold,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      track.artist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: pal.textSecondary.withValues(alpha: 0.95),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              TrackOverflowMenuWithFavourite(
-                pal: pal,
-                track: track,
-                onSelected: onOverflowAction,
-              ),
-            ],
-          ),
+          child: row,
         ),
       ),
     );

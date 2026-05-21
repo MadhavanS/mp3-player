@@ -32,6 +32,8 @@ abstract final class ThemeSettingsStore {
         return AppThemeSetting.silver;
       case 'daisy':
         return AppThemeSetting.daisy;
+      case 'ivy':
+        return AppThemeSetting.ivy;
       case 'liya':
         return AppThemeSetting.silver;
       case 'automatic':

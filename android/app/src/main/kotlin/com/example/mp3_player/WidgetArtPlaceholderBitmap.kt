@@ -12,6 +12,7 @@ import android.graphics.Shader
  * Theme-aligned placeholder when there is no album art file, matching Flutter [TrackAlbumArt]:
  * - `daisy`: warm vertical paper tones + outline
  * - `silver`: cool grey diagonal + dark stroke
+ * - `ivy`: frosted white-to-steel-blue vertical gradient + soft blue border
  * - `gradient`: diagonal gradient from [color0] to [color1] (per-track [TrackItem.artColors])
  */
 internal object WidgetArtPlaceholderBitmap {
@@ -62,6 +63,19 @@ internal object WidgetArtPlaceholderBitmap {
                     Shader.TileMode.CLAMP,
                 )
             }
+            "ivy" -> {
+                val c0 = 0xFFF2F2F5.toInt()
+                val c1 = 0xFFD8D8DC.toInt()
+                fill.shader = LinearGradient(
+                    0f,
+                    0f,
+                    s.toFloat(),
+                    s.toFloat(),
+                    intArrayOf(c0, c1),
+                    null,
+                    Shader.TileMode.CLAMP,
+                )
+            }
             else -> {
                 val c0safe = if (color0 == 0) 0xFFA18CD1.toInt() else color0
                 val c1safe = if (color1 == 0) c0safe else color1
@@ -93,6 +107,11 @@ internal object WidgetArtPlaceholderBitmap {
             "silver" -> {
                 stroke.strokeWidth = maxOf(3f, s / 90f)
                 stroke.color = 0xFF0A0A0A.toInt()
+                drawShapeOutline(canvas, stroke, s, shape)
+            }
+            "ivy" -> {
+                stroke.strokeWidth = maxOf(2f, s / 128f)
+                stroke.color = 0xB8FFFFFF.toInt()
                 drawShapeOutline(canvas, stroke, s, shape)
             }
             else -> { /* gradient: no border */ }

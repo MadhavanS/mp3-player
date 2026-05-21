@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'liquid_glass.dart';
 
 /// Root [Navigator] — assign to [MaterialApp.navigatorKey] so overlays can show
 /// after modal routes ([showModalBottomSheet], dialogs) dispose their context.
@@ -19,6 +20,9 @@ abstract final class ActionPillToast {
     }
     if (applied == AppThemePalette.daisy) {
       return (bg: const Color(0xFFCAB89E), fg: const Color(0xFF0A0A0A));
+    }
+    if (applied == AppThemePalette.ivy) {
+      return (bg: Colors.transparent, fg: const Color(0xFF1C1C1E));
     }
     final bg = context.controlAccent;
     if (applied == AppThemePalette.leah) {
@@ -44,6 +48,8 @@ abstract final class ActionPillToast {
       case AppThemePalette.julia:
         return 64;
       case AppThemePalette.leah:
+        return 175;
+      case AppThemePalette.ivy:
         return 175;
       case AppThemePalette.light:
       case AppThemePalette.dark:
@@ -97,6 +103,7 @@ abstract final class ActionPillToast {
     final colors = _pillColorsFor(context);
     final pillBg = colors.bg;
     final pillFg = colors.fg;
+    final ivyPill = context.appliedThemePalette == AppThemePalette.ivy;
 
     dismiss();
 
@@ -113,6 +120,23 @@ abstract final class ActionPillToast {
           fontSize: uppercaseLabel ? 11 : 12,
         );
 
+        final pillContent = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: pillFg),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: textStyle,
+              ),
+            ),
+          ],
+        );
+
         return Positioned.fill(
           child: Align(
             alignment: Alignment.bottomCenter,
@@ -123,41 +147,36 @@ abstract final class ActionPillToast {
                   color: Colors.transparent,
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 360),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: pillBg,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.28),
-                            blurRadius: 12,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(icon, size: 18, color: pillFg),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: Text(
-                                label,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: textStyle,
-                              ),
+                    child: ivyPill
+                        ? LiquidGlassSurface(
+                            borderRadius: BorderRadius.circular(24),
+                            style: BackdropGlassStyle.card,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
+                            child: pillContent,
+                          )
+                        : DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: pillBg,
+                              borderRadius: BorderRadius.circular(24),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.28),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              child: pillContent,
+                            ),
+                          ),
                   ),
                 ),
               ),
