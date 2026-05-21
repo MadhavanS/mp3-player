@@ -835,9 +835,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           builder: (context, _) => IconButton(
             tooltip: player.isPlaying ? 'Pause' : 'Play',
             style: flat,
-            onPressed: player.transportCommandInFlight
-                ? null
-                : () => player.togglePlayPause(),
+            onPressed: () => player.togglePlayPause(),
             icon: Icon(
               player.isPlaying ? Icons.pause : Icons.play_arrow,
               size: 38,
@@ -950,9 +948,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               listenable: player,
               builder: (context, _) => LiquidGlassCircleButton(
                 icon: player.isPlaying ? Icons.pause : Icons.play_arrow,
-                onPressed: player.transportCommandInFlight
-                    ? null
-                    : () => player.togglePlayPause(),
+                onPressed: () => player.togglePlayPause(),
                 size: 82,
                 iconSize: 36,
                 iconColor: Colors.white,
@@ -1021,9 +1017,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               icon: player.isPlaying
                   ? Icons.pause_rounded
                   : Icons.play_arrow_rounded,
-              onPressed: player.transportCommandInFlight
-                ? null
-                : () => player.togglePlayPause(),
+              onPressed: () => player.togglePlayPause(),
               color: accent,
               size: 80,
               iconSize: 38,
@@ -1443,9 +1437,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 side: BorderSide(color: ink.active, width: 1.2),
                 fixedSize: const Size(84, 84),
               ),
-              onPressed: player.transportCommandInFlight
-                ? null
-                : () => player.togglePlayPause(),
+              onPressed: () => player.togglePlayPause(),
               icon: Icon(
                 player.isPlaying
                     ? Icons.pause_rounded
@@ -1801,10 +1793,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                           76,
                                                         ),
                                                       ),
-                                                      onPressed: player.transportCommandInFlight
-                                                          ? null
-                                                          : () => player
-                                                                .togglePlayPause(),
+                                                      onPressed: () => player
+                                                          .togglePlayPause(),
                                                       icon: Icon(
                                                         playing
                                                             ? Icons
@@ -1951,10 +1941,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                             ),
                                                         elevation: 0,
                                                       ),
-                                                      onPressed: player.transportCommandInFlight
-                                                          ? null
-                                                          : () => player
-                                                                .togglePlayPause(),
+                                                      onPressed: () => player
+                                                          .togglePlayPause(),
                                                       icon: Icon(
                                                         playing
                                                             ? Icons

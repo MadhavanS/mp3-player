@@ -79,13 +79,14 @@ class PlayerController extends ChangeNotifier {
   Future<void> _resumePlaybackAfterLoad({
     String context = 'resumeAfterLoad',
   }) async {
+    if (_playbackPausedByUser) return;
     _invalidatePlayResumeRetries();
     final generation = _playControlGeneration;
     await _waitForPlayerPreparedAfterSourceChange();
-    if (_playControlGeneration != generation) return;
+    if (_playbackPausedByUser || _playControlGeneration != generation) return;
     // One event-loop turn; helps desktop embedders finish native load callbacks.
     await Future<void>.delayed(Duration.zero);
-    if (_playControlGeneration != generation) return;
+    if (_playbackPausedByUser || _playControlGeneration != generation) return;
     await _ensurePlayingWithRetries(
       context: context,
       generation: generation,
@@ -130,7 +131,7 @@ class PlayerController extends ChangeNotifier {
     int attempts = 5,
   }) async {
     for (var i = 0; i < attempts; i++) {
-      if (_playControlGeneration != generation) return;
+      if (_playbackPausedByUser || _playControlGeneration != generation) return;
       try {
         await _playSafely(context: context);
       } catch (e, st) {
@@ -142,7 +143,9 @@ class PlayerController extends ChangeNotifier {
       }
       // Wait longer between retries to avoid overwhelming the audio engine
       await Future<void>.delayed(const Duration(milliseconds: 200));
-      if (_playControlGeneration != generation) return;
+      if (_playbackPausedByUser || _playControlGeneration != generation) {
+        return;
+      }
       if (_player.playing) return;
     }
     debugPrint(
@@ -166,6 +169,10 @@ class PlayerController extends ChangeNotifier {
       // invalidate any in-flight retry loops so they don't overwrite the pause.
       if (!playing && _lastDispatchedPlaying) {
         _invalidatePlayResumeRetries();
+        _playbackPausedByUser = true;
+      }
+      if (playing && !_lastDispatchedPlaying) {
+        _playbackPausedByUser = false;
       }
 
       if (!_playerUiDispatchInitialized ||
@@ -191,7 +198,9 @@ class PlayerController extends ChangeNotifier {
   StreamSubscription<AudioDevicesChangedEvent>? _devicesChangedSub;
   Timer? _notificationArtRefreshDebounce;
   bool _notificationArtRefreshInProgress = false;
-  bool _transportCommandInFlight = false;
+
+  /// Set when the user explicitly pauses; blocks [_resumePlaybackAfterLoad] until play.
+  bool _playbackPausedByUser = false;
 
   /// True when we paused because another app (or the OS) took transient audio focus
   /// (e.g. phone call). Cleared after we attempt resume.
@@ -216,6 +225,10 @@ class PlayerController extends ChangeNotifier {
   DateTime? _postLoadConcatGuardUntil;
   int? _postLoadExpectedConcatIndex;
   bool _sourceNeedsReload = false;
+
+  /// While [skipNext]/[skipPrevious] update [_index] and reload/seek, ignore
+  /// [currentIndexStream] so the UI is not advanced before audio catches up.
+  bool _manualQueueAdvance = false;
 
   /// [AudioPlayer.stop] can report [ProcessingState.completed] on some platforms.
   /// That must not run [skipNext] while we only released the decoder for a disk edit.
@@ -545,7 +558,6 @@ class PlayerController extends ChangeNotifier {
   }
 
   bool get isPlaying => _player.playing || _retainPlayingUiForShuffleReload;
-  bool get transportCommandInFlight => _transportCommandInFlight;
   Duration get position => _player.position;
   Duration? get duration => _player.duration;
 
@@ -659,6 +671,7 @@ class PlayerController extends ChangeNotifier {
 
   void _onConcatIndexChanged(int? concatIdx) {
     if (concatIdx == null) return;
+    if (_manualQueueAdvance) return;
     if (_postLoadConcatGuardUntil != null &&
         !DateTime.now().isBefore(_postLoadConcatGuardUntil!)) {
       _postLoadConcatGuardUntil = null;
@@ -732,10 +745,17 @@ class PlayerController extends ChangeNotifier {
     }
 
     if (_applyConcatIndexChanged(concatIdx)) {
-      notifyListeners();
-      _prewarmPlaybackAlbumArt();
-      _scheduleNotificationArtRefresh();
+      unawaited(_syncUiAfterQueueIndexChange());
     }
+  }
+
+  /// Notify UI after the native player has prepared the new queue index.
+  Future<void> _syncUiAfterQueueIndexChange() async {
+    if (_manualQueueAdvance) return;
+    await _waitForPlayerPreparedAfterSourceChange();
+    _prewarmPlaybackAlbumArt();
+    _scheduleNotificationArtRefresh();
+    notifyListeners();
   }
 
   void _prewarmPlaybackAlbumArt() {
@@ -921,13 +941,12 @@ class PlayerController extends ChangeNotifier {
     await _loadCurrent(initialPosition: resumePosition, stopBeforeLoad: false);
     _sourceNeedsReload = false;
     if (resumePlaying) {
+      _playbackPausedByUser = false;
       await _resumePlaybackAfterLoad(
         context: 'tryResyncQueueWithLibraryScan.play',
       );
     } else {
-      try {
-        await _player.pause();
-      } catch (_) {}
+      await pause();
     }
   }
 
@@ -950,7 +969,9 @@ class PlayerController extends ChangeNotifier {
     if (wasEmpty) {
       _index = 0;
       await _loadCurrent();
-      await _resumePlaybackAfterLoad(context: 'appendToPlaylist.play');
+      await _resumePlaybackAfterLoad(
+        context: 'appendToPlaylist.play',
+      );
     } else {
       await _loadCurrent(initialPosition: resumePos);
     }
@@ -965,6 +986,7 @@ class PlayerController extends ChangeNotifier {
     bool keepShuffleMode = false,
     bool enableShuffle = false,
   }) async {
+    _playbackPausedByUser = false;
     await setPlaylist(
       tracks,
       startIndex: startIndex,
@@ -975,7 +997,9 @@ class PlayerController extends ChangeNotifier {
     );
     // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
     // returns; [play] can no-op until [ProcessingState.ready].
-    await _resumePlaybackAfterLoad(context: 'setPlaylistAndPlay.play');
+    await _resumePlaybackAfterLoad(
+      context: 'setPlaylistAndPlay.play',
+    );
   }
 
   static bool _sameQueuedIdentity(TrackItem a, TrackItem b) {
@@ -1192,9 +1216,9 @@ class PlayerController extends ChangeNotifier {
     }
     if (changed) {
       _notifyCatalogListeners(notify);
-      if (refreshNotificationArt &&
-          shouldRefreshNotificationArt &&
-          !_isLoadingSource) {
+      if (!_isLoadingSource &&
+          (shouldRefreshNotificationArt ||
+              (refreshNotificationArt && curKey == key))) {
         _scheduleNotificationArtRefresh();
       }
     }
@@ -1248,8 +1272,10 @@ class PlayerController extends ChangeNotifier {
           artist: track.artist,
           album: track.metaLine,
           artUri: artUri,
+          duration: _player.duration,
         ),
       );
+      notifyListeners();
     } catch (e, st) {
       debugPrint('_refreshNotificationAlbumArt: $e\n$st');
     } finally {
@@ -1334,7 +1360,10 @@ class PlayerController extends ChangeNotifier {
         stopBeforeLoad: false, // already stopped by stopForExternalFileEdit
       );
       if (resumePlayingAfterReload) {
-        await _resumePlaybackAfterLoad(context: 'replaceTrackPath.resumePlay');
+        _playbackPausedByUser = false;
+        await _resumePlaybackAfterLoad(
+          context: 'replaceTrackPath.resumePlay',
+        );
       }
     }());
   }
@@ -1414,7 +1443,9 @@ class PlayerController extends ChangeNotifier {
     if (isCurrent) {
       await _loadCurrent();
       if (resumePlayingIfCurrentRemoved) {
-        await _resumePlaybackAfterLoad(context: 'removePlaylistEntryAt.resume');
+        await _resumePlaybackAfterLoad(
+          context: 'removePlaylistEntryAt.resume',
+        );
       }
     } else {
       await _loadCurrent(initialPosition: _player.position);
@@ -1423,6 +1454,9 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> jumpToIndex(int i, {bool autoPlay = true}) async {
     if (i < 0 || i >= _playlist.length) return;
+    if (autoPlay) {
+      _playbackPausedByUser = false;
+    }
     if (_playbackPathKeysScope != null && !_playlistIndexMatchesScope(i)) {
       _playbackPathKeysScope = null;
     }
@@ -1439,7 +1473,9 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
     await _loadCurrent();
     if (autoPlay) {
-      await _resumePlaybackAfterLoad(context: 'jumpToIndex.play');
+      await _resumePlaybackAfterLoad(
+        context: 'jumpToIndex.play',
+      );
     }
   }
 
@@ -1662,6 +1698,7 @@ class PlayerController extends ChangeNotifier {
         _isLoadingSource = false;
         _suppressTrackCompletedAdvance = false;
         _ignoreSpuriousPlaybackCompletedUntil = null;
+        _scheduleNotificationArtRefresh();
       }
       final pending = _pendingConcatIndexWhileLoading;
       _pendingConcatIndexWhileLoading = null;
@@ -1741,7 +1778,10 @@ class PlayerController extends ChangeNotifier {
     final pos = initialPosition ?? _player.position;
     await _loadCurrent(initialPosition: pos, stopBeforeLoad: stopBeforeLoad);
     if (resumePlaying) {
-      await _resumePlaybackAfterLoad(context: 'reloadCurrentSource.play');
+      _playbackPausedByUser = false;
+      await _resumePlaybackAfterLoad(
+        context: 'reloadCurrentSource.play',
+      );
     }
   }
 
@@ -1787,15 +1827,6 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {}
   }
 
-  // Marks a transport command as in-flight for at most [_transportCommandMaxMs].
-  // The lock is intentionally fire-and-forget for pause (no state confirmation
-  // wait), so the button is never disabled longer than the native call takes.
-  static const int _transportCommandMaxMs = 600;
-
-  // When a second tap arrives while the lock is held, remember the most recent
-  // desired state so it can be applied as soon as the lock is released.
-  bool? _pendingToggleTarget; // true = play, false = pause
-
   /// Coalesce stream-driven UI updates (e.g. notification play/pause) to one frame.
   void _schedulePlayerUiNotify() {
     if (_playerUiNotifyScheduled) return;
@@ -1806,62 +1837,55 @@ class PlayerController extends ChangeNotifier {
     });
   }
 
-  Future<void> _runTransportCommand(Future<void> Function() action) async {
-    if (_transportCommandInFlight) return;
-    _transportCommandInFlight = true;
-    _schedulePlayerUiNotify();
-    try {
-      await action().timeout(
-        const Duration(milliseconds: _transportCommandMaxMs),
-        onTimeout: () {},
-      );
-    } catch (_) {
-    } finally {
-      _transportCommandInFlight = false;
-      final pending = _pendingToggleTarget;
-      _pendingToggleTarget = null;
-      if (pending != null) {
-        // Replay the missed tap: the player state may have settled by now.
-        unawaited(
-          pending ? play() : pause(),
-        );
-      } else {
-        _schedulePlayerUiNotify();
-      }
-    }
-  }
-
   Future<void> play() async {
+    _playbackPausedByUser = false;
+    _invalidatePlayResumeRetries();
+    _schedulePlayerUiNotify();
+    final generation = _playControlGeneration;
     try {
       await _playSafely(context: 'play');
-    } catch (_) {}
+      if (_playbackPausedByUser || _playControlGeneration != generation) return;
+      if (!_player.playing) {
+        await _waitForPlayerPreparedAfterSourceChange();
+        if (_playbackPausedByUser || _playControlGeneration != generation) {
+          return;
+        }
+        await _playSafely(context: 'play.confirm');
+      }
+    } catch (e, st) {
+      debugPrint('play error: $e\n$st');
+    }
     _schedulePlayerUiNotify();
   }
 
   Future<void> pause() async {
+    _playbackPausedByUser = true;
     _invalidatePlayResumeRetries();
-    // Direct pause for snappy notification / system controls (no transport lock).
     try {
-      await _player.pause();
-    } catch (_) {}
+      // [AudioPlayer.pause] no-ops when [playing] is already false, but ExoPlayer
+      // can still be outputting audio after a handler/UI desync.
+      if (_player.playing) {
+        await _player.pause();
+      }
+      if (!kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS)) {
+        await JustAudioBackground.ensureNativePaused();
+      }
+      if (_player.playing) {
+        await _player.pause();
+      }
+    } catch (e, st) {
+      debugPrint('pause error: $e\n$st');
+    }
     _schedulePlayerUiNotify();
   }
 
   Future<void> togglePlayPause() async {
-    // Use [isPlaying] (ORs _retainPlayingUiForShuffleReload) so a momentary
-    // [_player.playing == false] during source reload picks the right branch.
-    final wantPause = isPlaying;
-    if (_transportCommandInFlight) {
-      // Defer: keep the most recent intent; earlier deferred intents are overwritten.
-      _pendingToggleTarget = !wantPause;
-      return;
-    }
-    if (wantPause) {
+    if (isPlaying) {
       await pause();
     } else {
-      await _runTransportCommand(
-        () => _playSafely(context: 'togglePlayPause.play'),
-      );
+      await play();
     }
   }
 
@@ -1871,7 +1895,7 @@ class PlayerController extends ChangeNotifier {
     int playlistIndex, {
     required String playContext,
   }) async {
-    if (_sourceNeedsReload) {
+    if (_sourceNeedsReload || _useSingleTrackAudioSourceForPlatform()) {
       await _loadCurrent();
       _sourceNeedsReload = false;
       await _resumePlaybackAfterLoad(context: playContext);
@@ -1889,6 +1913,14 @@ class PlayerController extends ChangeNotifier {
     }
     try {
       await _player.seek(Duration.zero, index: concatIndex);
+      await _waitForPlayerPreparedAfterSourceChange();
+      final actual = _player.currentIndex;
+      if (actual != null && actual != concatIndex) {
+        await _loadCurrent();
+        _sourceNeedsReload = false;
+        await _resumePlaybackAfterLoad(context: playContext);
+        return;
+      }
       await _playSafely(context: playContext);
     } catch (_) {
       await _loadCurrent();
@@ -1900,7 +1932,17 @@ class PlayerController extends ChangeNotifier {
   /// Next track; at end pauses unless [PlaylistRepeatMode.all].
   Future<void> skipNext() async {
     if (_playlist.isEmpty) return;
+    _playbackPausedByUser = false;
+    _manualQueueAdvance = true;
+    try {
+      await _skipNextImpl();
+    } finally {
+      _manualQueueAdvance = false;
+      notifyListeners();
+    }
+  }
 
+  Future<void> _skipNextImpl() async {
     if (_shuffle) {
       final atLast = _shufflePos >= _shuffleOrder.length - 1;
 
@@ -1909,14 +1951,12 @@ class PlayerController extends ChangeNotifier {
           _shufflePos = 0;
         } else {
           await _player.pause();
-          notifyListeners();
           return;
         }
       } else {
         _shufflePos++;
       }
 
-      notifyListeners();
       await _seekToPlaylistIndexFast(
         _shuffleOrder[_shufflePos],
         playContext: 'skipNext.shuffle play',
@@ -1927,7 +1967,6 @@ class PlayerController extends ChangeNotifier {
     final ordered = _playbackScopedIndices();
     if (ordered.isEmpty) {
       await _player.pause();
-      notifyListeners();
       return;
     }
 
@@ -1935,11 +1974,10 @@ class PlayerController extends ChangeNotifier {
     if (p < 0) {
       if (_playbackPathKeysScope != null) {
         _playbackPathKeysScope = null;
-        await skipNext();
+        await _skipNextImpl();
         return;
       }
       await _player.pause();
-      notifyListeners();
       return;
     }
 
@@ -1949,17 +1987,25 @@ class PlayerController extends ChangeNotifier {
       _index = ordered.first;
     } else {
       await _player.pause();
-      notifyListeners();
       return;
     }
 
-    notifyListeners();
     await _seekToPlaylistIndexFast(_index, playContext: 'skipNext.play');
   }
 
   Future<void> skipPrevious() async {
     if (_playlist.isEmpty) return;
+    _playbackPausedByUser = false;
+    _manualQueueAdvance = true;
+    try {
+      await _skipPreviousImpl();
+    } finally {
+      _manualQueueAdvance = false;
+      notifyListeners();
+    }
+  }
 
+  Future<void> _skipPreviousImpl() async {
     if (_shuffle) {
       final atFirst = _shufflePos <= 0;
 
@@ -1968,14 +2014,12 @@ class PlayerController extends ChangeNotifier {
           _shufflePos = _shuffleOrder.length - 1;
         } else {
           await _player.seek(Duration.zero);
-          notifyListeners();
           return;
         }
       } else {
         _shufflePos--;
       }
 
-      notifyListeners();
       await _seekToPlaylistIndexFast(
         _shuffleOrder[_shufflePos],
         playContext: 'skipPrevious.shuffle play',
@@ -1986,7 +2030,6 @@ class PlayerController extends ChangeNotifier {
     final ordered = _playbackScopedIndices();
     if (ordered.isEmpty) {
       await _player.seek(Duration.zero);
-      notifyListeners();
       return;
     }
 
@@ -1994,11 +2037,10 @@ class PlayerController extends ChangeNotifier {
     if (p < 0) {
       if (_playbackPathKeysScope != null) {
         _playbackPathKeysScope = null;
-        await skipPrevious();
+        await _skipPreviousImpl();
         return;
       }
       await _player.seek(Duration.zero);
-      notifyListeners();
       return;
     }
 
@@ -2008,11 +2050,9 @@ class PlayerController extends ChangeNotifier {
       _index = ordered.last;
     } else {
       await _player.seek(Duration.zero);
-      notifyListeners();
       return;
     }
 
-    notifyListeners();
     await _seekToPlaylistIndexFast(_index, playContext: 'skipPrevious.play');
   }
 
@@ -2140,9 +2180,10 @@ class PlayerController extends ChangeNotifier {
     }
 
     if (resumePlaying) {
+      _playbackPausedByUser = false;
       await _playSafely(context: 'applyRestoredPlayback.play');
     } else {
-      await _player.pause();
+      await pause();
     }
     notifyListeners();
   }

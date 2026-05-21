@@ -16,6 +16,7 @@ import 'platform/android_home_widget_bridge.dart';
 import 'services/accent_settings_store.dart';
 import 'services/font_settings_store.dart';
 import 'services/player_chrome_background_store.dart';
+import 'services/media_notification_permission.dart';
 import 'services/notification_art_theme_bridge.dart';
 import 'services/theme_settings_store.dart';
 import 'theme/accent_color_option.dart';
@@ -32,7 +33,7 @@ class MadPlayerApp extends StatefulWidget {
   State<MadPlayerApp> createState() => _MadPlayerAppState();
 }
 
-class _MadPlayerAppState extends State<MadPlayerApp> {
+class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver {
   late final PlayerController _player = PlayerController();
   AppThemeSetting _themeSetting = AppThemeSetting.automatic;
   AppFontOption _fontOption = AppFontOption.system;
@@ -56,10 +57,19 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_onGlobalHardwareKey);
     _player.addListener(_onPlayerControllerChanged);
     _attachAndroidWidgetProgressTicker();
+    unawaited(ensureMediaNotificationPermission());
     _loadTheme();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _scheduleAndroidHomeWidgetSync();
+    }
   }
 
   bool _onGlobalHardwareKey(KeyEvent event) {
@@ -299,6 +309,7 @@ class _MadPlayerAppState extends State<MadPlayerApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onGlobalHardwareKey);
     _androidWidgetSyncDebounce?.cancel();
     _androidWidgetProgressTimer?.cancel();

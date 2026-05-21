@@ -78,6 +78,10 @@ class JustAudioBackground {
   /// source would cause Android MediaCodec flush/reset churn.
   static Future<void> updateCurrentMediaItem(MediaItem mediaItem) =>
       _playerAudioHandler.customUpdateCurrentMediaItem(mediaItem);
+
+  /// Pauses the native decoder even when [AudioPlayer.playing] is already false
+  /// (UI/handler desync). Use from app transport after [AudioPlayer.pause].
+  static Future<void> ensureNativePaused() => _playerAudioHandler.pause();
 }
 
 class _JustAudioBackgroundPlugin extends JustAudioPlatform {
@@ -403,6 +407,7 @@ class _PlayerAudioHandler extends BaseAudioHandler
               _justAudioEvent = event;
               customEvent.add(event);
               _scheduleBroadcastStateFromStream();
+              _syncMediaItemDurationFromEvent(event);
               return event;
             })
             .map((event) => TrackInfo(event.currentIndex, event.duration))
@@ -434,7 +439,26 @@ class _PlayerAudioHandler extends BaseAudioHandler
             }, onError: (Object e, [StackTrace? st]) {});
       });
 
+  void _syncMediaItemDurationFromEvent(PlaybackEventMessage event) {
+    final trackDuration = event.duration;
+    final queueIndex = event.currentIndex ?? index;
+    if (trackDuration == null ||
+        queueIndex == null ||
+        queueIndex < 0 ||
+        queueIndex >= currentQueue.length) {
+      return;
+    }
+    final item = currentQueue[queueIndex];
+    if (item.duration == trackDuration) return;
+    currentQueue[queueIndex] = item.copyWith(duration: trackDuration);
+    queue.add(currentQueue);
+    if (queueIndex == index) {
+      mediaItem.add(currentQueue[queueIndex]);
+    }
+  }
+
   Future<void> cancelStreamSubscriptions() async {
+    _stopPositionBroadcastTimer();
     final trackInfoSubscription = _trackInfoSubscription;
     if (trackInfoSubscription != null) {
       _trackInfoSubscription = null;
@@ -454,15 +478,30 @@ class _PlayerAudioHandler extends BaseAudioHandler
   }
 
   Future<void> customUpdateCurrentMediaItem(MediaItem item) async {
+    final existing = currentMediaItem;
+    var merged = item;
+    if (existing != null) {
+      merged = item.copyWith(
+        artUri: item.artUri ?? existing.artUri,
+        duration: item.duration ?? existing.duration,
+        title: item.title.isNotEmpty ? item.title : existing.title,
+        artist: (item.artist != null && item.artist!.isNotEmpty)
+            ? item.artist
+            : existing.artist,
+        album: (item.album != null && item.album!.isNotEmpty)
+            ? item.album
+            : existing.album,
+      );
+    }
     final queueIndex = index;
     if (queueIndex != null &&
         queueIndex >= 0 &&
         queueIndex < currentQueue.length) {
       final updatedQueue = List<MediaItem>.from(currentQueue);
-      updatedQueue[queueIndex] = item;
+      updatedQueue[queueIndex] = merged;
       queue.add(updatedQueue);
     }
-    mediaItem.add(item);
+    mediaItem.add(merged);
   }
 
   Future<LoadResponse> customLoad(LoadRequest request) async {
@@ -474,6 +513,21 @@ class _PlayerAudioHandler extends BaseAudioHandler
       initialPosition: request.initialPosition,
       initialIndex: request.initialIndex,
     ));
+    final startIndex = request.initialIndex ?? index;
+    if (startIndex != null &&
+        startIndex >= 0 &&
+        startIndex < currentQueue.length) {
+      index = startIndex;
+      var item = currentQueue[startIndex];
+      if (response.duration != null) {
+        item = item.copyWith(duration: response.duration);
+        final updatedQueue = List<MediaItem>.from(currentQueue);
+        updatedQueue[startIndex] = item;
+        queue.add(updatedQueue);
+      }
+      mediaItem.add(item);
+    }
+    _broadcastStateIfActive();
     return LoadResponse(duration: response.duration);
   }
 
@@ -624,6 +678,20 @@ class _PlayerAudioHandler extends BaseAudioHandler
   bool get hasPrevious => previousIndex != null;
 
   Timer? _streamBroadcastDebounce;
+  Timer? _positionBroadcastTimer;
+
+  void _startPositionBroadcastTimer() {
+    _positionBroadcastTimer?.cancel();
+    _positionBroadcastTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _broadcastStateIfActive(),
+    );
+  }
+
+  void _stopPositionBroadcastTimer() {
+    _positionBroadcastTimer?.cancel();
+    _positionBroadcastTimer = null;
+  }
 
   /// Coalesce rapid playback-event updates; play/pause still broadcast immediately.
   void _scheduleBroadcastStateFromStream() {
@@ -674,32 +742,32 @@ class _PlayerAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> play() => _lock.synchronized(_playLocked);
-
-  Future<void> _playLocked() async {
+  Future<void> play() async {
     if (_justAudioEvent.processingState == ProcessingStateMessage.completed) {
       await (await _player).seek(
         SeekRequest(position: Duration.zero, index: 0),
       );
     }
-    if (_playing) return;
-    await (await _player).play(PlayRequest());
-    _playing = true;
-    _updatePosition();
-    customEvent.add(_PlayingEvent(true));
-    _broadcastState();
+    _streamBroadcastDebounce?.cancel();
+    _streamBroadcastDebounce = null;
+    if (!_playing) {
+      _updatePosition();
+      customEvent.add(_PlayingEvent(_playing = true));
+      _broadcastState();
+      _startPositionBroadcastTimer();
+      await (await _player).play(PlayRequest());
+    }
   }
 
   @override
-  Future<void> pause() => _lock.synchronized(_pauseLocked);
-
-  Future<void> _pauseLocked() async {
-    if (!_playing) return;
-    await (await _player).pause(PauseRequest());
-    _playing = false;
+  Future<void> pause() async {
+    _streamBroadcastDebounce?.cancel();
+    _streamBroadcastDebounce = null;
+    _stopPositionBroadcastTimer();
     _updatePosition();
-    customEvent.add(_PlayingEvent(false));
+    customEvent.add(_PlayingEvent(_playing = false));
     _broadcastState();
+    await (await _player).pause(PauseRequest());
   }
 
   void _updatePosition() {
@@ -761,6 +829,7 @@ class _PlayerAudioHandler extends BaseAudioHandler
   Future<void> stop() => _lock.synchronized(() async {
         final player = _playerCompleter.value;
         if (player == null) return;
+        _stopPositionBroadcastTimer();
         _updatePosition();
         customEvent.add(_PlayingEvent(_playing = false));
         _justAudioEvent = _justAudioEvent.copyWith(

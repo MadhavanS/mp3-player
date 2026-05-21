@@ -18,6 +18,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/player_chrome_background.dart';
 import '../../widgets/daisy_background.dart';
 import '../../widgets/player_adaptive_controls.dart';
+import '../help/help_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -60,7 +61,14 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-enum _SettingsSection { menu, appearance, musicFolders, recentLists, windows }
+enum _SettingsSection {
+  menu,
+  appearance,
+  musicFolders,
+  recentLists,
+  help,
+  windows,
+}
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _busy = false;
@@ -665,6 +673,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: pal.textMuted.withValues(alpha: 0.75),
           ),
           onTap: () => _goToSection(_SettingsSection.recentLists),
+        ),
+        Divider(height: 1, color: pal.dividerOnHero),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(vertical: 6),
+          leading: Icon(
+            Icons.help_outline_rounded,
+            color: pal.onScaffold.withValues(alpha: 0.88),
+            size: 28,
+          ),
+          title: Text(
+            'Help',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: pal.onScaffold,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            'Search filters and library tips',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.textMuted.withValues(alpha: 0.95),
+            ),
+          ),
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            color: pal.textMuted.withValues(alpha: 0.75),
+          ),
+          onTap: () => _goToSection(_SettingsSection.help),
         ),
         if (_isWindowsDesktop) ...[
           Divider(height: 1, color: pal.dividerOnHero),
@@ -1308,6 +1343,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.appearance => 'Appearance',
       _SettingsSection.musicFolders => 'Music folders',
       _SettingsSection.recentLists => 'Recent lists',
+      _SettingsSection.help => 'Help',
       _SettingsSection.windows => 'Windows',
     };
 
@@ -1335,6 +1371,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       theme,
                       pal,
                     ),
+                    _SettingsSection.help => const HelpContent(),
                     _SettingsSection.windows => _buildWindowsDetail(theme, pal),
                   },
                 ),

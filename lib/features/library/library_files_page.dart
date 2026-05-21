@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../theme/app_theme.dart';
+import '../help/search_help_text.dart';
 import '../../widgets/daisy_background.dart';
 import '../player/mini_player_bar.dart';
 import '../player/track_overflow_actions.dart';
@@ -58,7 +59,7 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
   InputDecoration _searchDecoration(AppPalette pal, ThemeData theme) {
     final hasQuery = _searchController.text.trim().isNotEmpty;
     return InputDecoration(
-      hintText: 'Search folders & titles',
+      hintText: SearchHelpText.filesFieldHint,
       hintStyle: theme.textTheme.bodyMedium?.copyWith(
         color: pal.textMuted.withValues(alpha: 0.72),
       ),

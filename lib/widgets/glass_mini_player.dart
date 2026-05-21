@@ -285,8 +285,6 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                             listenable: widget.controller,
                             builder: (context, _) {
                               final playing = widget.controller.isPlaying;
-                              final disabled =
-                                  widget.controller.transportCommandInFlight;
                               return SizedBox(
                                 width: 48,
                                 height: 48,
@@ -295,10 +293,8 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                                   shape: playButtonShape,
                                   clipBehavior: Clip.antiAlias,
                                   child: InkWell(
-                                    onTap: disabled
-                                        ? null
-                                        : () => widget.controller
-                                            .togglePlayPause(),
+                                    onTap: () => widget.controller
+                                        .togglePlayPause(),
                                     customBorder: const CircleBorder(),
                                     child: Icon(
                                       playing
@@ -463,15 +459,11 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                       listenable: widget.controller,
                       builder: (context, _) {
                         final playing = widget.controller.isPlaying;
-                        final disabled =
-                            widget.controller.transportCommandInFlight;
                         return LiquidGlassRingIconButton(
                           icon: playing
                               ? Icons.pause
                               : Icons.play_arrow,
-                          onPressed: disabled
-                              ? null
-                              : () => widget.controller.togglePlayPause(),
+                          onPressed: () => widget.controller.togglePlayPause(),
                           size: 52,
                           iconSize: 28,
                           accentColor: accent,

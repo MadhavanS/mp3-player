@@ -20,6 +20,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/daisy_background.dart';
 import '../../widgets/liquid_glass.dart';
 import '../../widgets/track_album_art.dart';
+import '../help/search_help_text.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
@@ -774,10 +775,10 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabId.songs ||
     LibraryTabId.recentlyAdded ||
     LibraryTabId.favourites ||
-    LibraryTabId.recentlyPlayed =>
-      'Search  •  m: album  s: title  a: artist',
-    LibraryTabId.nowPlayingList => 'Search queue  •  m: album  s: title  a: artist',
-    LibraryTabId.playlist => 'Search playlists (min. 3 characters)',
+    LibraryTabId.recentlyPlayed ||
+    LibraryTabId.nowPlayingList =>
+      SearchHelpText.libraryTrackFieldHint,
+    LibraryTabId.playlist => SearchHelpText.playlistTabFieldHint,
   };
 
   List<String> _pathsMatchingBrowse(

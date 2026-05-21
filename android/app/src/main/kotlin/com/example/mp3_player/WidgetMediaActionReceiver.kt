@@ -45,15 +45,16 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
                             val activelyPlaying =
                                 st == PlaybackStateCompat.STATE_PLAYING ||
                                     st == PlaybackStateCompat.STATE_BUFFERING
-                            val nextPlaying = !activelyPlaying
-                            context.getSharedPreferences(
-                                Mp3PlayerWidgetPrefs.PREFS_NAME,
-                                Context.MODE_PRIVATE,
-                            )
-                                .edit()
-                                .putBoolean(Mp3PlayerWidgetPrefs.PLAYING, nextPlaying)
-                                .apply()
                             if (activelyPlaying) tc.pause() else tc.play()
+                            finishDeferred = true
+                            refreshAfterMetadataSettles(
+                                appCtx,
+                                handler,
+                                pendingResult,
+                                browser,
+                                controller,
+                                settleMs = 300L,
+                            )
                         }
                         ACTION_SKIP_NEXT -> {
                             tc.skipToNext()
@@ -119,10 +120,11 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
             pendingResult: PendingResult,
             browser: MediaBrowserCompat?,
             controller: MediaControllerCompat,
+            settleMs: Long = 450L,
         ) {
-            // The media session metadata usually updates just after skipToNext/Previous
-            // returns. Wait briefly, then copy the new metadata into widget prefs so
-            // artwork/title/album repaint together instead of reusing stale art_path.
+            // Session metadata/playback state settles shortly after transport.
+            // Re-read from MediaSession instead of optimistic prefs so play/pause
+            // stays in sync with notification and in-app controls.
             handler.postDelayed(
                 {
                     try {
@@ -137,7 +139,7 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
                         pendingResult.finish()
                     }
                 },
-                450L,
+                settleMs,
             )
         }
 

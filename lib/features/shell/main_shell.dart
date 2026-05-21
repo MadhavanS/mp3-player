@@ -32,6 +32,7 @@ import '../library/library_screen.dart';
 import '../player/mini_player_bar.dart';
 import '../player/now_playing_screen.dart';
 import '../player/track_overflow_actions.dart';
+import '../help/help_screen.dart';
 import '../settings/settings_screen.dart';
 import 'now_playing_escape_bridge.dart';
 
@@ -553,6 +554,25 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     } catch (e, st) {
       debugPrint('_persistSession: $e\n$st');
     }
+  }
+
+  Future<void> _quitApp() async {
+    _scaffoldKey.currentState?.closeDrawer();
+    _persistPlaybackDebounceTimer?.cancel();
+    final player = _playerRef;
+    if (player != null) {
+      try {
+        await player.pause();
+      } catch (e, st) {
+        debugPrint('_quitApp pause: $e\n$st');
+      }
+    }
+    await _persistSession();
+    if (kIsWeb) {
+      SystemNavigator.pop();
+      return;
+    }
+    exit(0);
   }
 
   @override
@@ -1130,6 +1150,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 Navigator.pop(context);
                 _goSettings();
               },
+              onHelp: () {
+                Navigator.pop(context);
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (ctx) => HelpScreen(
+                      onBack: () => Navigator.of(ctx).pop(),
+                    ),
+                  ),
+                );
+              },
+              onQuit: () {
+                Navigator.pop(context);
+                unawaited(_quitApp());
+              },
             ),
             body: Stack(
               children: [
@@ -1265,6 +1299,8 @@ class _GlossyDrawer extends StatelessWidget {
     required this.onLibrary,
     required this.onFiles,
     required this.onSettings,
+    required this.onHelp,
+    required this.onQuit,
     required this.currentPage,
     required this.hasCurrentTrack,
   });
@@ -1273,6 +1309,8 @@ class _GlossyDrawer extends StatelessWidget {
   final VoidCallback onLibrary;
   final VoidCallback onFiles;
   final VoidCallback onSettings;
+  final VoidCallback onHelp;
+  final VoidCallback onQuit;
   final _ShellPage currentPage;
   final bool hasCurrentTrack;
 
@@ -1337,6 +1375,12 @@ class _GlossyDrawer extends StatelessWidget {
                       onTap: onSettings,
                       selected: currentPage == _ShellPage.settings,
                     ),
+                    _GlossyDrawerTile(
+                      icon: Icons.help_outline_rounded,
+                      label: 'Help',
+                      onTap: onHelp,
+                      selected: false,
+                    ),
                   ],
                 ),
               ),
@@ -1349,9 +1393,9 @@ class _GlossyDrawer extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
                 child: _GlossyDrawerTile(
-                  icon: Icons.exit_to_app_rounded,
-                  label: 'Log Out',
-                  onTap: () => SystemNavigator.pop(),
+                  icon: Icons.power_settings_new_rounded,
+                  label: 'Quit',
+                  onTap: onQuit,
                   selected: false,
                 ),
               ),
