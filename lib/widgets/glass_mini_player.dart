@@ -6,6 +6,7 @@ import '../audio/player_controller.dart';
 import '../theme/app_theme.dart';
 import 'daisy_background.dart';
 import 'liquid_glass.dart';
+import 'playback_loading_hint.dart';
 import 'player_adaptive_controls.dart';
 import 'track_album_art.dart';
 
@@ -34,6 +35,109 @@ class GlassMiniPlayer extends StatefulWidget {
 
 class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
   double? _dragFraction;
+
+  Widget _buildMiniTitleArea({
+    required ThemeData theme,
+    required Color titleColor,
+    required Color mutedColor,
+  }) {
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final preparing = widget.controller.isPreparingPlayback;
+        final t = widget.controller.currentTrack!;
+        if (preparing) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                t.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  color: titleColor,
+                ),
+              ),
+              const SizedBox(height: 4),
+              PlaybackLoadingHint(
+                label: widget.controller.playbackLoadingLabel,
+                color: mutedColor,
+                center: false,
+                fontSize: 12,
+                spinnerSize: 14,
+              ),
+            ],
+          );
+        }
+        return Text(
+          t.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+            color: titleColor,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMiniPlayPauseButton({
+    required Color playButtonBg,
+    required ShapeBorder playButtonShape,
+    required Color playButtonFg,
+    required Color accent,
+    double size = 48,
+    double iconSize = 30,
+  }) {
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final preparing = widget.controller.isPreparingPlayback;
+        final playing = widget.controller.isPlaying;
+        return SizedBox(
+          width: size,
+          height: size,
+          child: Material(
+            color: playButtonBg,
+            shape: playButtonShape,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: preparing
+                  ? null
+                  : () => widget.controller.togglePlayPause(),
+              customBorder: const CircleBorder(),
+              child: Center(
+                child: preparing
+                    ? SizedBox(
+                        width: iconSize * 0.72,
+                        height: iconSize * 0.72,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: playButtonFg,
+                        ),
+                      )
+                    : Icon(
+                        playing
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        color: playButtonFg,
+                        size: iconSize,
+                        semanticLabel: playing ? 'Pause' : 'Play',
+                      ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -249,22 +353,10 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                           ),
                           const SizedBox(width: 14),
                           Expanded(
-                            child: ListenableBuilder(
-                              listenable: widget.controller,
-                              builder: (context, _) {
-                                final t = widget.controller.currentTrack!;
-                                return Text(
-                                  t.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: -0.3,
-                                    color: titleColor,
-                                  ),
-                                );
-                              },
+                            child: _buildMiniTitleArea(
+                              theme: theme,
+                              titleColor: titleColor,
+                              mutedColor: mutedIcon,
                             ),
                           ),
                           IconButton(
@@ -281,35 +373,11 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                             ),
                             onPressed: () => widget.controller.skipPrevious(),
                           ),
-                          ListenableBuilder(
-                            listenable: widget.controller,
-                            builder: (context, _) {
-                              final playing = widget.controller.isPlaying;
-                              return SizedBox(
-                                width: 48,
-                                height: 48,
-                                child: Material(
-                                  color: playButtonBg,
-                                  shape: playButtonShape,
-                                  clipBehavior: Clip.antiAlias,
-                                  child: InkWell(
-                                    onTap: () => widget.controller
-                                        .togglePlayPause(),
-                                    customBorder: const CircleBorder(),
-                                    child: Icon(
-                                      playing
-                                          ? Icons.pause_rounded
-                                          : Icons.play_arrow_rounded,
-                                      color: playButtonFg,
-                                      size: 30,
-                                      semanticLabel: playing
-                                          ? 'Pause'
-                                          : 'Play',
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
+                          _buildMiniPlayPauseButton(
+                            playButtonBg: playButtonBg,
+                            playButtonShape: playButtonShape,
+                            playButtonFg: playButtonFg,
+                            accent: accent,
                           ),
                           ListenableBuilder(
                             listenable: widget.controller,
@@ -419,28 +487,10 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                     ),
                     const SizedBox(width: 14),
                     Expanded(
-                      child: ListenableBuilder(
-                        listenable: widget.controller,
-                        builder: (context, _) {
-                          final t = widget.controller.currentTrack!;
-                          return Text(
-                            t.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: -0.3,
-                              color: titleColor,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.white.withValues(alpha: 0.85),
-                                  offset: const Offset(0, -0.5),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
+                      child: _buildMiniTitleArea(
+                        theme: theme,
+                        titleColor: titleColor,
+                        mutedColor: mutedIcon,
                       ),
                     ),
                     LiquidGlassRingIconButton(
@@ -458,12 +508,29 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                     ListenableBuilder(
                       listenable: widget.controller,
                       builder: (context, _) {
+                        final preparing =
+                            widget.controller.isPreparingPlayback;
+                        if (preparing) {
+                          return SizedBox(
+                            width: 52,
+                            height: 52,
+                            child: Center(
+                              child: SizedBox(
+                                width: 26,
+                                height: 26,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  color: accent,
+                                ),
+                              ),
+                            ),
+                          );
+                        }
                         final playing = widget.controller.isPlaying;
                         return LiquidGlassRingIconButton(
-                          icon: playing
-                              ? Icons.pause
-                              : Icons.play_arrow,
-                          onPressed: () => widget.controller.togglePlayPause(),
+                          icon: playing ? Icons.pause : Icons.play_arrow,
+                          onPressed: () =>
+                              widget.controller.togglePlayPause(),
                           size: 52,
                           iconSize: 28,
                           accentColor: accent,
@@ -532,6 +599,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
           builder: (context, durSnap) {
             final dur = durSnap.data ?? widget.controller.duration;
             final pos = posSnap.data ?? widget.controller.position;
+            final preparing = widget.controller.isPreparingPlayback;
             final total = dur?.inMilliseconds ?? 0;
             final live = total > 0
                 ? (pos.inMilliseconds / total).clamp(0.0, 1.0)
@@ -546,12 +614,12 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
               activeColor: (daisy || leah) ? iconColor : accent,
               inactiveColor: inactiveTrack,
               thumbColor: thumbColor,
-              onChanged: total <= 0
+              onChanged: total <= 0 || preparing
                   ? null
                   : (v) {
                       setState(() => _dragFraction = v);
                     },
-              onChangeEnd: total <= 0
+              onChangeEnd: total <= 0 || preparing
                   ? null
                   : (v) {
                       widget.controller.seek(

@@ -51,4 +51,12 @@ class AndroidHomeWidgetBridge {
       'duration_ms': durationMs,
     });
   }
+
+  /// Updates widget to paused/play icon before [exit] so prefs are not stale.
+  static Future<void> markStoppedOnQuit() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await _channel.invokeMethod<void>('markStoppedOnQuit');
+    } catch (_) {}
+  }
 }

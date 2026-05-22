@@ -692,7 +692,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                 Padding(
                   padding: const EdgeInsets.only(top: 10),
                   child: Text(
-                    'Open Settings from the menu to add music folders.',
+                    'Tap the banner on Library or open Settings → Music folders.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: pal.textSecondary.withValues(alpha: 0.92),

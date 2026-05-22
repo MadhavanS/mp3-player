@@ -38,9 +38,17 @@ class LibraryTabsStore {
 
   static final ValueNotifier<int> revision = ValueNotifier(0);
 
+  static bool _isLibraryUiTab(LibraryTabId id) =>
+      id != LibraryTabId.onlineSearch;
+
+  static bool _defaultEnabledForTab(LibraryTabId id) =>
+      id != LibraryTabId.savedYoutubeAudio &&
+      id != LibraryTabId.savedYoutubeLinks;
+
   static List<LibraryTabRow> _defaultRows() => [
         for (final id in LibraryTabId.values)
-          LibraryTabRow(id: id, enabled: true),
+          if (_isLibraryUiTab(id))
+            LibraryTabRow(id: id, enabled: _defaultEnabledForTab(id)),
       ];
 
   /// Ensures every tab appears exactly once; preserves saved order first.
@@ -51,10 +59,15 @@ class LibraryTabsStore {
       if (!orderedIds.contains(r.id)) orderedIds.add(r.id);
     }
     for (final id in LibraryTabId.values) {
+      if (!_isLibraryUiTab(id)) continue;
       if (!orderedIds.contains(id)) orderedIds.add(id);
     }
     return orderedIds
-        .map((id) => byId[id] ?? LibraryTabRow(id: id, enabled: true))
+        .map(
+          (id) =>
+              byId[id] ??
+              LibraryTabRow(id: id, enabled: _defaultEnabledForTab(id)),
+        )
         .toList();
   }
 
@@ -76,7 +89,10 @@ class LibraryTabsStore {
   /// Visible tabs in UI order.
   static Future<List<LibraryTabId>> loadVisibleOrdered() async {
     final rows = await loadConfig();
-    return rows.where((r) => r.enabled).map((r) => r.id).toList();
+    return rows
+        .where((r) => r.enabled && _isLibraryUiTab(r.id))
+        .map((r) => r.id)
+        .toList();
   }
 
   static Future<void> saveConfig(List<LibraryTabRow> rows) async {

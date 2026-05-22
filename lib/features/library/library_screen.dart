@@ -15,9 +15,12 @@ import '../../services/music_library_path_key.dart';
 import '../../services/recent_list_limits_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
+import '../../services/saved_youtube_audio_store.dart';
+import '../../services/saved_youtube_links_store.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/daisy_background.dart';
+import '../../widgets/library_setup_empty_state.dart';
 import '../../widgets/liquid_glass.dart';
 import '../../widgets/track_album_art.dart';
 import '../help/search_help_text.dart';
@@ -25,6 +28,7 @@ import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
 import 'playing_queue_tab.dart';
+import 'saved_youtube_library_tab.dart';
 
 /// Key for the library search field (widget tests).
 const Key librarySearchFieldKey = Key('library_search_field');
@@ -109,6 +113,7 @@ class LibraryScreen extends StatefulWidget {
     super.key,
     required this.folderPaths,
     required this.onOpenDrawer,
+    required this.onOpenMusicFolderSettings,
     required this.songsBrowsePathKeys,
     required this.onClearSongsBrowseFilter,
     this.onRefreshLibrary,
@@ -116,6 +121,7 @@ class LibraryScreen extends StatefulWidget {
 
   final List<String> folderPaths;
   final VoidCallback onOpenDrawer;
+  final VoidCallback onOpenMusicFolderSettings;
   final VoidCallback onClearSongsBrowseFilter;
 
   /// When non-null (including empty), Songs tab limits to tracks whose paths match keys from Files.
@@ -131,7 +137,7 @@ class LibraryScreenState extends State<LibraryScreen>
   final TextEditingController _searchController = TextEditingController();
   late TabController _tabController;
   List<LibraryTabId> _visibleTabs = List<LibraryTabId>.from(
-    LibraryTabId.values,
+    LibraryTabId.values.where((id) => id != LibraryTabId.onlineSearch),
   );
   List<UserPlaylistEntry> _userPlaylists = const <UserPlaylistEntry>[];
   bool _userPlaylistsLoading = true;
@@ -166,6 +172,12 @@ class LibraryScreenState extends State<LibraryScreen>
   final GlobalKey _scrollAnchorNowPlayingList = GlobalKey(
     debugLabel: 'libScrollNowPlayingList',
   );
+  final GlobalKey _scrollAnchorSavedYoutubeAudio = GlobalKey(
+    debugLabel: 'libScrollSavedYoutubeAudio',
+  );
+  final GlobalKey _scrollAnchorSavedYoutubeLinks = GlobalKey(
+    debugLabel: 'libScrollSavedYoutubeLinks',
+  );
 
   final ScrollController _songsScrollController = ScrollController();
   final ScrollController _recentAddedScrollController = ScrollController();
@@ -173,6 +185,13 @@ class LibraryScreenState extends State<LibraryScreen>
   final ScrollController _favoritesScrollController = ScrollController();
   final ScrollController _recentPlayedScrollController = ScrollController();
   final ScrollController _nowPlayingListScrollController = ScrollController();
+  final ScrollController _savedYoutubeAudioScrollController =
+      ScrollController();
+  final ScrollController _savedYoutubeLinksScrollController =
+      ScrollController();
+
+  Timer? _scrollArtDebounce;
+  bool _scrollArtListenersAttached = false;
 
   static const double _kLibraryListRowStride = 88;
   static const double _kQueueListRowStride = 64;
@@ -289,9 +308,127 @@ class LibraryScreenState extends State<LibraryScreen>
     RecentListLimitsStore.revision.addListener(_onRecentLimitsRevision);
     UserPlaylistsStore.revision.addListener(_onUserPlaylistsRevision);
     unawaited(FavoriteSongsStore.ensureLoaded());
+    unawaited(SavedYoutubeAudioStore.ensureLoaded());
+    unawaited(SavedYoutubeLinksStore.ensureLoaded());
     unawaited(_reloadSongSortMode());
     unawaited(_syncTabsFromStore());
     unawaited(_reloadUserPlaylists());
+    _attachScrollArtListeners();
+  }
+
+  void _attachScrollArtListeners() {
+    if (_scrollArtListenersAttached) return;
+    _scrollArtListenersAttached = true;
+    for (final c in [
+      _songsScrollController,
+      _recentAddedScrollController,
+      _favoritesScrollController,
+      _recentPlayedScrollController,
+      _nowPlayingListScrollController,
+      _savedYoutubeAudioScrollController,
+      _savedYoutubeLinksScrollController,
+    ]) {
+      c.addListener(_onLibraryScrollForArt);
+    }
+  }
+
+  void _onLibraryScrollForArt() {
+    _scrollArtDebounce?.cancel();
+    _scrollArtDebounce = Timer(const Duration(milliseconds: 100), () {
+      if (!mounted) return;
+      unawaited(_enrichVisibleTracksArt());
+    });
+  }
+
+  Future<void> _enrichVisibleTracksArt() async {
+    final player = PlayerController.of(context);
+    final library = player.metadataLibrary;
+    final searchQuery = _parseSearchQuery(_searchController.text);
+    final browsePathKeys = widget.songsBrowsePathKeys.value;
+
+    ScrollController? controller;
+    List<TrackItem> rows = [];
+    var stride = _kLibraryListRowStride;
+
+    switch (_currentLibraryTabId) {
+      case LibraryTabId.songs:
+        controller = _songsScrollController;
+        final indices = _sortedSongsTabIndices(
+          library,
+          searchQuery,
+          browsePathKeys,
+        );
+        rows = [for (final i in indices) library[i]];
+      case LibraryTabId.nowPlayingList:
+        controller = _nowPlayingListScrollController;
+        stride = _kQueueListRowStride;
+        for (final pl in player.playbackOrderIndices) {
+          if (pl < 0 || pl >= player.playlist.length) continue;
+          final t = player.playlist[pl];
+          if (PlayingQueueTab.matchesSearchFilter(t, searchQuery)) {
+            rows.add(t);
+          }
+        }
+      case LibraryTabId.favourites:
+        controller = _favoritesScrollController;
+        var paths = _pathsMatchingBrowse(
+          await _favouritePathsFuture(),
+          null,
+        );
+        paths = _filterPathsBySearch(paths, searchQuery, library);
+        rows = [for (final p in paths) _trackForPath(p, library)];
+      case LibraryTabId.recentlyAdded:
+        controller = _recentAddedScrollController;
+        var paths = _pathsMatchingBrowse(
+          await RecentlyAddedStore.orderedPathsForLibrary(library),
+          browsePathKeys,
+        );
+        paths = _filterPathsBySearch(paths, searchQuery, library);
+        rows = [for (final p in paths) _trackForPath(p, library)];
+      case LibraryTabId.recentlyPlayed:
+        controller = _recentPlayedScrollController;
+        var paths = _pathsMatchingBrowse(
+          await RecentlyPlayedStore.loadPaths(),
+          browsePathKeys,
+        );
+        paths = _filterPathsBySearch(paths, searchQuery, library);
+        rows = [for (final p in paths) _trackForPath(p, library)];
+      case LibraryTabId.savedYoutubeAudio:
+        controller = _savedYoutubeAudioScrollController;
+        var savedAudio = await SavedYoutubeAudioStore.load();
+        if (searchQuery.isNotEmpty) {
+          savedAudio =
+              savedAudio.where((t) => searchQuery.matchesTrack(t)).toList();
+        }
+        rows = savedAudio;
+      case LibraryTabId.savedYoutubeLinks:
+        controller = _savedYoutubeLinksScrollController;
+        var savedLinks = await SavedYoutubeLinksStore.load();
+        if (searchQuery.isNotEmpty) {
+          savedLinks =
+              savedLinks.where((t) => searchQuery.matchesTrack(t)).toList();
+        }
+        rows = savedLinks;
+      case LibraryTabId.playlist:
+      case LibraryTabId.onlineSearch:
+        return;
+    }
+
+    if (!controller.hasClients || rows.isEmpty) {
+      return;
+    }
+    final pos = controller.position;
+    final first = (pos.pixels / stride).floor().clamp(0, rows.length - 1);
+    final last = ((pos.pixels + pos.viewportDimension) / stride)
+        .ceil()
+        .clamp(0, rows.length - 1);
+    if (first > last) return;
+    final visible = rows.sublist(first, last + 1);
+    final batch = <TrackItem>[
+      if (player.currentTrack != null) player.currentTrack!,
+      ...visible,
+    ];
+    await player.enrichTracksArtIfMissing(batch, maxTracks: 14);
   }
 
   Future<void> _syncTabsFromStore() async {
@@ -472,6 +609,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
   @override
   void dispose() {
+    _scrollArtDebounce?.cancel();
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _searchController.dispose();
@@ -481,6 +619,8 @@ class LibraryScreenState extends State<LibraryScreen>
     _favoritesScrollController.dispose();
     _recentPlayedScrollController.dispose();
     _nowPlayingListScrollController.dispose();
+    _savedYoutubeAudioScrollController.dispose();
+    _savedYoutubeLinksScrollController.dispose();
     LibraryTabsStore.revision.removeListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.removeListener(_onSongSortStoreRevision);
     RecentListLimitsStore.revision.removeListener(_onRecentLimitsRevision);
@@ -626,13 +766,54 @@ class LibraryScreenState extends State<LibraryScreen>
   Future<void> _scrollActiveTabToCurrentTrack() async {
     if (!mounted) return;
     final player = PlayerController.of(context);
-    final cur = player.currentTrack?.filePath;
+    final curTrack = player.currentTrack;
+    if (curTrack == null) return;
+
+    final searchQuery = _parseSearchQuery(_searchController.text);
+
+    switch (_currentLibraryTabId) {
+      case LibraryTabId.savedYoutubeAudio:
+        final tracks = await SavedYoutubeAudioStore.load();
+        if (!mounted) return;
+        var list = tracks;
+        if (searchQuery.isNotEmpty) {
+          list = list.where((t) => searchQuery.matchesTrack(t)).toList();
+        }
+        final idx = list.indexWhere((t) => _isCurrentYoutubeTrack(player, t));
+        if (idx < 0) return;
+        await _coaxLazyListThenEnsureVisible(
+          _savedYoutubeAudioScrollController,
+          idx,
+          list.length,
+          _scrollAnchorSavedYoutubeAudio,
+        );
+        return;
+      case LibraryTabId.savedYoutubeLinks:
+        final tracks = await SavedYoutubeLinksStore.load();
+        if (!mounted) return;
+        var list = tracks;
+        if (searchQuery.isNotEmpty) {
+          list = list.where((t) => searchQuery.matchesTrack(t)).toList();
+        }
+        final idx = list.indexWhere((t) => _isCurrentYoutubeTrack(player, t));
+        if (idx < 0) return;
+        await _coaxLazyListThenEnsureVisible(
+          _savedYoutubeLinksScrollController,
+          idx,
+          list.length,
+          _scrollAnchorSavedYoutubeLinks,
+        );
+        return;
+      default:
+        break;
+    }
+
+    final cur = curTrack.filePath;
     if (cur == null || cur.isEmpty) return;
     final pathKey = canonicalMusicLibraryPathKey(cur);
     if (pathKey.isEmpty) return;
 
     final tracks = player.metadataLibrary;
-    final searchQuery = _parseSearchQuery(_searchController.text);
     final browsePathKeys = widget.songsBrowsePathKeys.value;
 
     switch (_currentLibraryTabId) {
@@ -765,6 +946,10 @@ class LibraryScreenState extends State<LibraryScreen>
           rowStride: _kQueueListRowStride,
         );
         return;
+      case LibraryTabId.savedYoutubeAudio:
+      case LibraryTabId.savedYoutubeLinks:
+      case LibraryTabId.onlineSearch:
+        return;
     }
   }
 
@@ -776,7 +961,10 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabId.recentlyAdded ||
     LibraryTabId.favourites ||
     LibraryTabId.recentlyPlayed ||
-    LibraryTabId.nowPlayingList =>
+    LibraryTabId.nowPlayingList ||
+    LibraryTabId.savedYoutubeAudio ||
+    LibraryTabId.savedYoutubeLinks ||
+    LibraryTabId.onlineSearch =>
       SearchHelpText.libraryTrackFieldHint,
     LibraryTabId.playlist => SearchHelpText.playlistTabFieldHint,
   };
@@ -834,6 +1022,49 @@ class LibraryScreenState extends State<LibraryScreen>
       if (fp == null || fp.isEmpty) return false;
       return canonicalMusicLibraryPathKey(fp) == key;
     });
+  }
+
+  bool _isCurrentYoutubeTrack(PlayerController player, TrackItem track) {
+    final cur = player.currentTrack;
+    if (cur == null) return false;
+    final a = track.youtubeVideoId?.trim();
+    final b = cur.youtubeVideoId?.trim();
+    if (a != null && a.isNotEmpty && b != null && b.isNotEmpty) {
+      return a == b;
+    }
+    final fp = track.filePath?.trim();
+    final curFp = cur.filePath?.trim();
+    if (fp != null &&
+        fp.isNotEmpty &&
+        curFp != null &&
+        curFp.isNotEmpty &&
+        canonicalMusicLibraryPathKey(fp) ==
+            canonicalMusicLibraryPathKey(curFp)) {
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _playYoutubeTracks(
+    BuildContext context,
+    List<TrackItem> tracks,
+    int startIndex, {
+    required LibraryTabId playbackOriginTab,
+  }) async {
+    if (tracks.isEmpty) return;
+    final player = PlayerController.of(context);
+    player.setPlaybackPathKeyScope(null, reloadQueue: false);
+    try {
+      await player.setPlaylistAndPlay(
+        tracks,
+        startIndex: startIndex.clamp(0, tracks.length - 1),
+        playbackOriginTab: playbackOriginTab,
+        keepShuffleMode: true,
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ActionPillToast.show(context, 'Could not start playback');
+    }
   }
 
   Future<void> _playOrderedPathsFrom(
@@ -1674,6 +1905,10 @@ class LibraryScreenState extends State<LibraryScreen>
                         ],
                       ),
                     ),
+                    if (widget.folderPaths.isEmpty)
+                      LibrarySetupBanner(
+                        onOpenSettings: widget.onOpenMusicFolderSettings,
+                      ),
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: context.appliedThemePalette == AppThemePalette.ivy
@@ -1826,6 +2061,57 @@ class LibraryScreenState extends State<LibraryScreen>
         tracks,
         browsePathKeys,
       ),
+      LibraryTabId.savedYoutubeAudio => SavedYoutubeLibraryTab(
+        savedAudio: true,
+        playbackOriginTab: LibraryTabId.savedYoutubeAudio,
+        searchQuery: searchQuery,
+        scrollController: _savedYoutubeAudioScrollController,
+        scrollAnchorKey: _scrollAnchorSavedYoutubeAudio,
+        onPlayTracks: (list, i) => unawaited(
+          _playYoutubeTracks(
+            context,
+            list,
+            i,
+            playbackOriginTab: LibraryTabId.savedYoutubeAudio,
+          ),
+        ),
+        onTrackOverflow: (ctx, pl, ix, action, {outsideQueue}) =>
+            _onTrackOverflow(
+          ctx,
+          pl,
+          ix,
+          action,
+          playbackOriginTab: LibraryTabId.savedYoutubeAudio,
+          outsideQueue: outsideQueue,
+        ),
+        isCurrentTrack: _isCurrentYoutubeTrack,
+      ),
+      LibraryTabId.savedYoutubeLinks => SavedYoutubeLibraryTab(
+        savedAudio: false,
+        playbackOriginTab: LibraryTabId.savedYoutubeLinks,
+        searchQuery: searchQuery,
+        scrollController: _savedYoutubeLinksScrollController,
+        scrollAnchorKey: _scrollAnchorSavedYoutubeLinks,
+        onPlayTracks: (list, i) => unawaited(
+          _playYoutubeTracks(
+            context,
+            list,
+            i,
+            playbackOriginTab: LibraryTabId.savedYoutubeLinks,
+          ),
+        ),
+        onTrackOverflow: (ctx, pl, ix, action, {outsideQueue}) =>
+            _onTrackOverflow(
+          ctx,
+          pl,
+          ix,
+          action,
+          playbackOriginTab: LibraryTabId.savedYoutubeLinks,
+          outsideQueue: outsideQueue,
+        ),
+        isCurrentTrack: _isCurrentYoutubeTrack,
+      ),
+      LibraryTabId.onlineSearch => const SizedBox.shrink(),
     };
   }
 
@@ -2446,35 +2732,9 @@ class LibraryScreenState extends State<LibraryScreen>
     final hasBrowseFilter = browsePathKeys != null;
 
     if (tracks.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.library_music_outlined,
-                size: 56,
-                color: pal.onScaffold.withValues(alpha: 0.5),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'No tracks yet',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: pal.onScaffold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Open the menu and go to Settings to add folders. MP3 files are scanned recursively.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: pal.textSecondary.withValues(alpha: 0.9),
-                ),
-              ),
-            ],
-          ),
-        ),
+      return LibrarySetupEmptyState(
+        hasMusicFolders: widget.folderPaths.isNotEmpty,
+        onOpenSettings: widget.onOpenMusicFolderSettings,
       );
     }
 

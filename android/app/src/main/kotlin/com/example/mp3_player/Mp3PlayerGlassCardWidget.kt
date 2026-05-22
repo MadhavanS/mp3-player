@@ -70,12 +70,16 @@ class Mp3PlayerGlassCardWidget : AppWidgetProvider() {
 
             val views = RemoteViews(context.packageName, R.layout.widget_mp3_player_glass_card)
 
-            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                ?: Intent()
             val launchPending = PendingIntent.getActivity(
                 context,
                 10,
-                launchIntent,
+                Intent(context, Mp3PlayerAudioServiceActivity::class.java).apply {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                    )
+                },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             views.setOnClickPendingIntent(R.id.widget_glass_card_art, launchPending)
@@ -207,7 +211,7 @@ class Mp3PlayerGlassCardWidget : AppWidgetProvider() {
         }
 
         private fun mediaActionPendingIntent(context: Context, action: String, requestCode: Int): PendingIntent {
-            val intent = Intent(action).setPackage(context.packageName)
+            val intent = Intent(context, WidgetMediaActionReceiver::class.java).setAction(action)
             return PendingIntent.getBroadcast(
                 context,
                 requestCode,

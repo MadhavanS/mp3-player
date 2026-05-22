@@ -40,9 +40,17 @@ abstract final class ActionPillToast {
   /// Used for themes that do not use a tighter pill offset (see [_themeAwareBottomInset]).
   static const double _aboveBottomChrome = 88;
 
+  /// Prefer root navigator context so overlays survive route/sheet dispose.
+  static BuildContext? _resolveAnchorContext(BuildContext context) {
+    final root = appNavigatorKey.currentContext;
+    if (root != null && root.mounted) return root;
+    if (context.mounted) return context;
+    return null;
+  }
+
   /// Same vertical offset as shuffle / repeat / favourite pills on Now Playing.
-  static double _themeAwareBottomInset(BuildContext context) {
-    switch (context.appliedThemePalette) {
+  static double _themeAwareBottomInsetFor(AppThemePalette palette) {
+    switch (palette) {
       case AppThemePalette.silver:
         return 54;
       case AppThemePalette.julia:
@@ -94,16 +102,22 @@ abstract final class ActionPillToast {
     final label = _effectiveLabel(message, uppercaseLabel);
     if (label.isEmpty) return;
 
+    final anchor = _resolveAnchorContext(context);
+    if (anchor == null) return;
+
     final overlay =
-        Overlay.maybeOf(context, rootOverlay: true) ??
+        Overlay.maybeOf(anchor, rootOverlay: true) ??
             appNavigatorKey.currentState?.overlay;
     if (overlay == null) return;
 
-    final themeData = Theme.of(context);
-    final colors = _pillColorsFor(context);
+    final appliedPalette = anchor.appliedThemePalette;
+    final themeData = Theme.of(anchor);
+    final colors = _pillColorsFor(anchor);
     final pillBg = colors.bg;
     final pillFg = colors.fg;
-    final ivyPill = context.appliedThemePalette == AppThemePalette.ivy;
+    final ivyPill = appliedPalette == AppThemePalette.ivy;
+    final capturedBottomInset = bottomInsetFromSafeArea ??
+        _themeAwareBottomInsetFor(appliedPalette);
 
     dismiss();
 
@@ -111,8 +125,7 @@ abstract final class ActionPillToast {
     entry = OverlayEntry(
       builder: (ctx) {
         final bottom =
-            MediaQuery.viewPaddingOf(ctx).bottom +
-            (bottomInsetFromSafeArea ?? _themeAwareBottomInset(context));
+            MediaQuery.viewPaddingOf(ctx).bottom + capturedBottomInset;
         final textStyle = themeData.textTheme.labelSmall?.copyWith(
           color: pillFg,
           fontWeight: FontWeight.w800,
@@ -205,7 +218,7 @@ abstract final class ActionPillToast {
     double? bottomInsetFromSafeArea,
   }) {
     final ctx = appNavigatorKey.currentContext;
-    if (ctx == null) return;
+    if (ctx == null || !ctx.mounted) return;
     show(
       ctx,
       message,

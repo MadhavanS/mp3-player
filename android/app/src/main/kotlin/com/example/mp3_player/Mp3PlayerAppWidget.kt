@@ -84,13 +84,17 @@ class Mp3PlayerAppWidget : AppWidgetProvider() {
                 views.setInt(R.id.widget_root, "setBackgroundResource", R.drawable.widget_glass_light)
             }
 
-            // Open-app intent wired to art and text column
-            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                ?: Intent()
+            // Open-app intent wired to art and text column — reuse the existing task.
             val launchPending = PendingIntent.getActivity(
                 context,
                 0,
-                launchIntent,
+                Intent(context, Mp3PlayerAudioServiceActivity::class.java).apply {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                    )
+                },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             views.setOnClickPendingIntent(R.id.widget_art, launchPending)
@@ -288,7 +292,7 @@ class Mp3PlayerAppWidget : AppWidgetProvider() {
             action: String,
             requestCode: Int,
         ): PendingIntent {
-            val intent = Intent(action).setPackage(context.packageName)
+            val intent = Intent(context, WidgetMediaActionReceiver::class.java).setAction(action)
             return PendingIntent.getBroadcast(
                 context,
                 requestCode,

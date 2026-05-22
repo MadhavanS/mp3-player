@@ -17,6 +17,25 @@ final _memory = <String, Uint8List>{};
 final _inFlight = <String, Future<Uint8List?>>{};
 Directory? _cacheDir;
 
+int _activeDecodes = 0;
+const int _maxConcurrentDecodes = 1;
+final _decodeWaitQueue = <Completer<void>>[];
+
+Future<void> _acquireDecodeSlot() async {
+  while (_activeDecodes >= _maxConcurrentDecodes) {
+    final waiter = Completer<void>();
+    _decodeWaitQueue.add(waiter);
+    await waiter.future;
+  }
+  _activeDecodes++;
+}
+
+void _releaseDecodeSlot() {
+  _activeDecodes--;
+  if (_decodeWaitQueue.isEmpty) return;
+  _decodeWaitQueue.removeAt(0).complete();
+}
+
 Uint8List? cachedAlbumArtSync(TrackItem track, {int maxDimension = 512}) {
   final raw = track.albumArtBytes;
   if (raw == null || raw.isEmpty) return null;
@@ -59,7 +78,7 @@ void evictCachedAlbumArt(TrackItem track) {
 
 void prewarmAlbumArtCache(
   Iterable<TrackItem> tracks, {
-  int maxCount = 50,
+  int maxCount = 12,
   int maxDimension = 512,
 }) {
   final selected = tracks
@@ -75,7 +94,7 @@ void prewarmAlbumArtCache(
       } catch (e, st) {
         debugPrint('prewarmAlbumArtCache: $e\n$st');
       }
-      await Future<void>.delayed(const Duration(milliseconds: 8));
+      await Future<void>.delayed(const Duration(milliseconds: 40));
     }
   }());
 }
@@ -107,8 +126,12 @@ Future<Uint8List?> _loadOrCreate(
   return resized;
 }
 
+/// Flutter's image codec only works on the root isolate — queue decodes so
+/// the UI thread stays responsive while covers are cached.
 Future<Uint8List?> _resizeToPng(Uint8List raw, int maxDimension) async {
+  await _acquireDecodeSlot();
   try {
+    await Future<void>.delayed(Duration.zero);
     final codec = await ui.instantiateImageCodec(
       raw,
       targetWidth: maxDimension,
@@ -125,6 +148,8 @@ Future<Uint8List?> _resizeToPng(Uint8List raw, int maxDimension) async {
   } catch (e, st) {
     debugPrint('album art resize failed: $e\n$st');
     return null;
+  } finally {
+    _releaseDecodeSlot();
   }
 }
 
@@ -179,4 +204,3 @@ void _touchMemory(String key, Uint8List bytes) {
   _memory.remove(key);
   _memory[key] = bytes;
 }
-

@@ -21,6 +21,9 @@ import '../../services/saved_music_folders.dart';
 import '../../services/song_metadata_cache.dart';
 import '../../services/song_metadata_cache_types.dart';
 import '../../services/track_metadata.dart';
+import '../../platform/android_app_task_bridge.dart';
+import '../../platform/android_home_widget_bridge.dart';
+import '../../platform/android_widget_launch_bridge.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
@@ -34,11 +37,15 @@ import '../player/now_playing_screen.dart';
 import '../player/track_overflow_actions.dart';
 import '../help/help_screen.dart';
 import '../settings/settings_screen.dart';
+import '../youtube/youtube_search_screen.dart';
 import 'now_playing_escape_bridge.dart';
 
 /// During folder scan, skip building a huge native playback queue until the user
 /// actually plays something (avoids hanging on "Loading tags…" for large libraries).
 const int _largeLibraryDeferPlayerQueueThreshold = 200;
+
+/// Cap per-pass cover extraction so opening a large library cannot ANR the UI.
+const int _albumArtWarmupBatchSize = 16;
 
 /// After [appNavigatorKey] pops to the root route, applies Library › Songs (drawer, shell page, tab).
 class EscapeToSongsLibraryHub {
@@ -118,6 +125,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   PlayerController? _playerRef;
   String? _dispatchedRecentPath;
   bool _showingFirstRunHint = false;
+  bool _openMusicFoldersInSettings = false;
   Timer? _idleRescanTimer;
   Timer? _persistPlaybackDebounceTimer;
   bool _backgroundSyncInProgress = false;
@@ -170,6 +178,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _scheduleIdleRescan();
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        final player = _playerRef;
+        if (player != null) {
+          unawaited(_applyWidgetLaunchAction(player));
+        }
+      }
       // Re-check permission when resuming; the user may have just granted it
       // from the system Settings app.  If it was previously denied and is now
       // granted, trigger an immediate rescan so the library populates.
@@ -186,6 +200,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _recheckPermissionOnResume() async {
+    // Skip while bootstrap is already showing the permission dialog.
+    if (_storagePermissionGranted == null) return;
     final wasGranted = _storagePermissionGranted;
     // Only check status — don't show a dialog here; the user is returning from
     // somewhere else and we don't want to interrupt their flow.
@@ -263,7 +279,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
     await _restoreLibraryFromCacheAndSession(player, paths);
-    _scheduleBackgroundSync(delay: const Duration(milliseconds: 500));
+    await _applyWidgetLaunchAction(player);
+    _scheduleBackgroundSync(delay: const Duration(seconds: 2));
     _scheduleIdleRescan();
   }
 
@@ -313,8 +330,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (!mounted || !shouldShow || _folderPaths.isNotEmpty) return;
     _showingFirstRunHint = true;
     try {
-      await FirstRunLibraryHintStore.markSeen();
-      if (!mounted) return;
       final goToSettings = await showDialog<bool>(
         context: context,
         barrierDismissible: true,
@@ -322,11 +337,29 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           final theme = Theme.of(dialogContext);
           final pal = dialogContext.palette;
           return AlertDialog(
-            title: const Text('Add your music folders'),
-            content: Text(
-              'To build your Music Library, first add one or more folders that contain MP3 files.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: pal.textSecondary,
+            title: const Text('Welcome to MadPlayer'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Your library is empty because no music folders are set up yet.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: pal.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    '1. Open Settings → Music folders\n'
+                    '2. Tap Add folder and choose a folder with MP3 files\n'
+                    '3. Return to Library — songs appear after scanning',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: pal.onScaffold.withValues(alpha: 0.9),
+                      height: 1.45,
+                    ),
+                  ),
+                ],
               ),
             ),
             actions: [
@@ -336,15 +369,19 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               ),
               FilledButton.icon(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                icon: const Icon(Icons.settings_rounded),
-                label: const Text('Open Settings'),
+                icon: const Icon(Icons.folder_open_rounded),
+                label: const Text('Add music folders'),
               ),
             ],
           );
         },
       );
       if (!mounted) return;
-      if (goToSettings == true) _goSettings();
+      if (goToSettings == false) {
+        await FirstRunLibraryHintStore.markDismissed();
+      } else if (goToSettings == true) {
+        _goSettings(openMusicFolders: true);
+      }
     } finally {
       _showingFirstRunHint = false;
     }
@@ -377,7 +414,39 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         resumePlaying: false,
       );
     }
-    _scheduleAlbumArtWarmup(player);
+    _scheduleAlbumArtWarmup(player, delay: const Duration(seconds: 3));
+  }
+
+  Future<void> _applyWidgetLaunchAction(PlayerController player) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    final action = await AndroidWidgetLaunchBridge.consumeLaunchAction();
+    if (!mounted || action == null) return;
+
+    Future<void> ensureQueueRestored({required bool resumePlaying}) async {
+      if (player.playlist.isNotEmpty) return;
+      final catalog = player.metadataLibrary;
+      if (catalog.isEmpty) return;
+      await PlaybackSessionStore.restorePlayer(
+        player,
+        catalog,
+        resumePlaying: resumePlaying,
+      );
+    }
+
+    switch (action) {
+      case AndroidWidgetLaunchBridge.actionPlay:
+        await ensureQueueRestored(resumePlaying: true);
+        if (!mounted || player.playlist.isEmpty) return;
+        if (!player.isPlaying) await player.play();
+      case AndroidWidgetLaunchBridge.actionSkipNext:
+        await ensureQueueRestored(resumePlaying: false);
+        if (!mounted || player.playlist.isEmpty) return;
+        await player.skipNext();
+      case AndroidWidgetLaunchBridge.actionSkipPrevious:
+        await ensureQueueRestored(resumePlaying: false);
+        if (!mounted || player.playlist.isEmpty) return;
+        await player.skipPrevious();
+    }
   }
 
   Future<List<ScannedMp3File>> _collectMp3FileStats(List<String> roots) async {
@@ -398,6 +467,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     List<String> roots,
   ) async {
     if (kIsWeb) return;
+    if (player.isPlaying) {
+      _scheduleBackgroundSync(delay: const Duration(seconds: 30));
+      return;
+    }
     try {
       final cachedByPath = await SongMetadataCache.loadSnapshotsForRoots(roots);
       final scanned = await _collectMp3FileStats(roots);
@@ -433,6 +506,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
       const batchSize = 4;
       for (var i = 0; i < changedPaths.length; i += batchSize) {
+        if (!mounted || player.isPlaying) return;
         final batch = changedPaths
             .skip(i)
             .take(batchSize)
@@ -459,22 +533,34 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         for (final s in updated) {
           final p = s.track.filePath;
           if (p != null && p.isNotEmpty) {
-            live[p] = s.track;
+            live[p] = TrackItem.mergePreservedAlbumArt(s.track, live[p]);
           }
         }
         if (!mounted) return;
         final partial = scanned
-            .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
+            .map((f) {
+              final base = live[f.path] ?? TrackItem.fromFilePath(f.path);
+              return TrackItem.mergePreservedAlbumArt(
+                base,
+                player.trackForLibraryPath(f.path),
+              );
+            })
             .toList(growable: false);
         player.setLibraryCatalog(partial, notify: CatalogNotifyMode.throttled);
       }
 
       if (!mounted) return;
       final finalTracks = scanned
-          .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
+          .map((f) {
+            final base = live[f.path] ?? TrackItem.fromFilePath(f.path);
+            return TrackItem.mergePreservedAlbumArt(
+              base,
+              player.trackForLibraryPath(f.path),
+            );
+          })
           .toList(growable: false);
       player.setLibraryCatalog(finalTracks);
-      _scheduleAlbumArtWarmup(player);
+      _scheduleAlbumArtWarmup(player, delay: const Duration(seconds: 4));
 
       if (finalTracks.isNotEmpty) {
         await RecentlyAddedStore.mergeScanPaths(
@@ -488,14 +574,91 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
   }
 
-  void _scheduleAlbumArtWarmup(PlayerController player) {
+  List<TrackItem> _tracksNeedingArtPrioritized(PlayerController player) {
+    final needing = <TrackItem>[];
+    final seen = <String>{};
+
+    void add(TrackItem? track) {
+      if (track == null) return;
+      final path = track.filePath?.trim();
+      if (path == null || path.isEmpty) return;
+      final art = track.albumArtBytes;
+      if (art != null && art.isNotEmpty) return;
+      final key = canonicalMusicLibraryPathKey(path);
+      if (key.isEmpty || !seen.add(key)) return;
+      needing.add(track);
+    }
+
+    add(player.currentTrack);
+    for (final track in player.playlist) {
+      add(track);
+    }
+    for (final track in player.metadataLibrary) {
+      add(track);
+    }
+    return needing;
+  }
+
+  bool _canRunAlbumArtWarmup(PlayerController player) =>
+      mounted && !player.isPlaying;
+
+  Future<void> _enrichLibraryWhenIdle(
+    PlayerController player,
+    List<TrackItem> tracks,
+  ) async {
+    if (kIsWeb || !mounted || player.isPlaying) return;
+    await enrichPlaylistTracks(
+      tracks: tracks,
+      maxTracks: _albumArtWarmupBatchSize,
+      batchSize: 1,
+      interBatchDelay: const Duration(milliseconds: 120),
+      shouldContinue: () => _canRunAlbumArtWarmup(player),
+      onTrackUpdated: (path, updated) {
+        if (!_canRunAlbumArtWarmup(player)) return;
+        player.updateTrackByPath(
+          path,
+          updated,
+          notify: CatalogNotifyMode.throttled,
+          refreshNotificationArt: false,
+        );
+        unawaited(SongMetadataCache.saveTracks([updated]));
+      },
+    );
+    if (mounted && _canRunAlbumArtWarmup(player)) {
+      _scheduleAlbumArtWarmup(player);
+    }
+  }
+
+  void _scheduleAlbumArtWarmup(
+    PlayerController player, {
+    Duration delay = Duration.zero,
+  }) {
     if (kIsWeb) return;
-    // Avoid metadata/cover extraction bursts while audio is actively playing.
-    // On some devices this causes decoder backpressure (pipelineFull/drop spam).
+    if (delay > Duration.zero) {
+      _albumArtWarmupRetryTimer?.cancel();
+      _albumArtWarmupRetryTimer = Timer(delay, () {
+        if (!mounted) return;
+        _scheduleAlbumArtWarmup(player);
+      });
+      return;
+    }
+    // Bulk warmup waits for idle; still load art for now-playing + next while playing.
     if (player.isPlaying) {
+      final priority = _tracksNeedingArtPrioritized(player)
+          .take(3)
+          .toList(growable: false);
+      if (priority.isNotEmpty) {
+        unawaited(
+          player.enrichTracksArtIfMissing(
+            priority,
+            maxTracks: 3,
+            refreshNotificationArt: true,
+          ),
+        );
+      }
       _albumArtWarmupQueued = true;
       _albumArtWarmupRetryTimer?.cancel();
-      _albumArtWarmupRetryTimer = Timer(const Duration(seconds: 12), () {
+      _albumArtWarmupRetryTimer = Timer(const Duration(seconds: 20), () {
         if (!mounted) return;
         _scheduleAlbumArtWarmup(player);
       });
@@ -508,19 +671,18 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _albumArtWarmupInProgress = true;
     unawaited(() async {
       try {
-        final tracksNeedingArt = player.metadataLibrary
-            .where((t) {
-              final p = t.filePath;
-              final art = t.albumArtBytes;
-              return p != null && p.isNotEmpty && (art == null || art.isEmpty);
-            })
-            .toList(growable: false);
+        final tracksNeedingArt = _tracksNeedingArtPrioritized(player);
         if (tracksNeedingArt.isEmpty) return;
+        final batch = tracksNeedingArt
+            .take(_albumArtWarmupBatchSize)
+            .toList(growable: false);
         await enrichPlaylistTracks(
-          tracks: tracksNeedingArt,
+          tracks: batch,
           batchSize: 1,
-          interBatchDelay: const Duration(milliseconds: 20),
+          interBatchDelay: const Duration(milliseconds: 120),
+          shouldContinue: () => _canRunAlbumArtWarmup(player),
           onTrackUpdated: (path, updated) {
+            if (!_canRunAlbumArtWarmup(player)) return;
             player.updateTrackByPath(
               path,
               updated,
@@ -530,13 +692,23 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             unawaited(SongMetadataCache.saveTracks([updated]));
           },
         );
+        if (tracksNeedingArt.length > batch.length &&
+            _canRunAlbumArtWarmup(player)) {
+          _albumArtWarmupQueued = true;
+        }
       } catch (e, st) {
         debugPrint('_scheduleAlbumArtWarmup: $e\n$st');
       } finally {
         _albumArtWarmupInProgress = false;
         if (_albumArtWarmupQueued) {
           _albumArtWarmupQueued = false;
-          _scheduleAlbumArtWarmup(player);
+          if (_canRunAlbumArtWarmup(player)) {
+            _albumArtWarmupRetryTimer?.cancel();
+            _albumArtWarmupRetryTimer = Timer(const Duration(seconds: 8), () {
+              if (!mounted) return;
+              _scheduleAlbumArtWarmup(player);
+            });
+          }
         }
       }
     }());
@@ -562,14 +734,19 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final player = _playerRef;
     if (player != null) {
       try {
-        await player.pause();
+        await player.releaseAudioForAppExit();
       } catch (e, st) {
-        debugPrint('_quitApp pause: $e\n$st');
+        debugPrint('_quitApp releaseAudio: $e\n$st');
       }
     }
     await _persistSession();
     if (kIsWeb) {
       SystemNavigator.pop();
+      return;
+    }
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      await AndroidHomeWidgetBridge.markStoppedOnQuit();
+      await AndroidAppTaskBridge.finishAndRemoveTask();
       return;
     }
     exit(0);
@@ -696,20 +873,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           final keptPlayback = player.refreshLibraryDuringPlayback(tracks);
           if (keptPlayback) {
             if (!kIsWeb && mounted) {
-              enrichPlaylistTracks(
-                tracks: tracks,
-                onTrackUpdated: (path, updated) {
-                  player.updateTrackByPath(
-                    path,
-                    updated,
-                    notify: CatalogNotifyMode.throttled,
-                    refreshNotificationArt: false,
-                  );
-                  unawaited(SongMetadataCache.saveTracks([updated]));
-                },
-              ).catchError((Object e, StackTrace st) {
-                debugPrint('enrichPlaylistTracks: $e\n$st');
-              });
+              unawaited(_enrichLibraryWhenIdle(player, tracks));
             }
             return;
           }
@@ -719,20 +883,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             resumePlaying: wasPlaying,
           );
           if (!kIsWeb && mounted) {
-            enrichPlaylistTracks(
-              tracks: tracks,
-              onTrackUpdated: (path, updated) {
-                player.updateTrackByPath(
-                  path,
-                  updated,
-                  notify: CatalogNotifyMode.throttled,
-                  refreshNotificationArt: false,
-                );
-                unawaited(SongMetadataCache.saveTracks([updated]));
-              },
-            ).catchError((Object e, StackTrace st) {
-              debugPrint('enrichPlaylistTracks: $e\n$st');
-            });
+            unawaited(_enrichLibraryWhenIdle(player, tracks));
           }
           return;
         }
@@ -754,20 +905,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             !wasPlaying;
         if (deferHeavyPlayerQueue && player.playlist.isEmpty) {
           if (!kIsWeb && mounted) {
-            enrichPlaylistTracks(
-              tracks: tracks,
-              onTrackUpdated: (path, updated) {
-                player.updateTrackByPath(
-                  path,
-                  updated,
-                  notify: CatalogNotifyMode.throttled,
-                  refreshNotificationArt: false,
-                );
-                unawaited(SongMetadataCache.saveTracks([updated]));
-              },
-            ).catchError((Object e, StackTrace st) {
-              debugPrint('enrichPlaylistTracks: $e\n$st');
-            });
+            unawaited(_enrichLibraryWhenIdle(player, tracks));
           }
           return;
         }
@@ -793,20 +931,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           }
         }
         if (!kIsWeb && mounted) {
-          enrichPlaylistTracks(
-            tracks: tracks,
-            onTrackUpdated: (path, updated) {
-              player.updateTrackByPath(
-                path,
-                updated,
-                notify: CatalogNotifyMode.throttled,
-                refreshNotificationArt: false,
-              );
-              unawaited(SongMetadataCache.saveTracks([updated]));
-            },
-          ).catchError((Object e, StackTrace st) {
-            debugPrint('enrichPlaylistTracks: $e\n$st');
-          });
+          unawaited(_enrichLibraryWhenIdle(player, tracks));
         }
         return;
       }
@@ -821,20 +946,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         if (restored) {
           if (playAfter) await player.play();
           if (!kIsWeb && mounted) {
-            enrichPlaylistTracks(
-              tracks: tracks,
-              onTrackUpdated: (path, updated) {
-                player.updateTrackByPath(
-                  path,
-                  updated,
-                  notify: CatalogNotifyMode.throttled,
-                  refreshNotificationArt: false,
-                );
-                unawaited(SongMetadataCache.saveTracks([updated]));
-              },
-            ).catchError((Object e, StackTrace st) {
-              debugPrint('enrichPlaylistTracks: $e\n$st');
-            });
+            unawaited(_enrichLibraryWhenIdle(player, tracks));
           }
           return;
         }
@@ -847,20 +959,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           !wasPlaying;
       if (deferHeavyPlayerQueue && player.playlist.isEmpty) {
         if (!kIsWeb && mounted) {
-          enrichPlaylistTracks(
-            tracks: tracks,
-            onTrackUpdated: (path, updated) {
-              player.updateTrackByPath(
-                path,
-                updated,
-                notify: CatalogNotifyMode.throttled,
-                refreshNotificationArt: false,
-              );
-              unawaited(SongMetadataCache.saveTracks([updated]));
-            },
-          ).catchError((Object e, StackTrace st) {
-            debugPrint('enrichPlaylistTracks: $e\n$st');
-          });
+          unawaited(_enrichLibraryWhenIdle(player, tracks));
         }
         return;
       }
@@ -875,20 +974,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
 
       if (!kIsWeb && mounted) {
-        enrichPlaylistTracks(
-          tracks: tracks,
-          onTrackUpdated: (path, updated) {
-            player.updateTrackByPath(
-              path,
-              updated,
-              notify: CatalogNotifyMode.throttled,
-              refreshNotificationArt: false,
-            );
-            unawaited(SongMetadataCache.saveTracks([updated]));
-          },
-        ).catchError((Object e, StackTrace st) {
-          debugPrint('enrichPlaylistTracks: $e\n$st');
-        });
+        unawaited(_enrichLibraryWhenIdle(player, tracks));
       }
     } finally {
       if (showProgressOverlay && mounted) {
@@ -903,7 +989,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   Future<void> _onFoldersChanged(List<String> paths) async {
     await SavedMusicFolders.save(paths);
     if (!mounted) return;
+    final hadFolders = _folderPaths.isNotEmpty;
     setState(() => _folderPaths = List<String>.from(paths));
+    if (paths.isNotEmpty) {
+      await FirstRunLibraryHintStore.markDismissed();
+    }
     await _scanFoldersAndSetPlaylist(
       paths,
       playAfter: false,
@@ -917,6 +1007,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       uppercaseLabel: true,
     );
     _scheduleIdleRescan();
+    if (!hadFolders && paths.isNotEmpty && _page == _ShellPage.settings) {
+      _goLibrary();
+    }
   }
 
   Future<void> _refreshLibraryScan() async {
@@ -924,7 +1017,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (_folderPaths.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add music folders in Settings first.')),
+        SnackBar(
+          content: const Text('Add music folders before refreshing.'),
+          action: SnackBarAction(
+            label: 'Settings',
+            onPressed: () => _goSettings(openMusicFolders: true),
+          ),
+        ),
       );
       return;
     }
@@ -962,7 +1061,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   void _goLibrary() {
-    setState(() => _page = _ShellPage.library);
+    setState(() {
+      _page = _ShellPage.library;
+      _openMusicFoldersInSettings = false;
+    });
     unawaited(PlaybackSessionStore.saveShellPageIsSettings(false));
   }
 
@@ -998,6 +1100,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void _applyLibraryAfterClosingNowPlaying(LibraryTabId? openedFromTab) {
     if (!mounted) return;
     final player = PlayerController.of(context);
+    if (player.playbackOriginTab == LibraryTabId.onlineSearch) {
+      return;
+    }
     final tabId = openedFromTab == LibraryTabId.nowPlayingList
         ? LibraryTabId.nowPlayingList
         : (player.playbackOriginTab ?? LibraryTabId.songs);
@@ -1020,9 +1125,22 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     });
   }
 
-  void _goSettings() {
-    setState(() => _page = _ShellPage.settings);
+  void _goSettings({bool openMusicFolders = false}) {
+    setState(() {
+      _page = _ShellPage.settings;
+      _openMusicFoldersInSettings = openMusicFolders;
+    });
     unawaited(PlaybackSessionStore.saveShellPageIsSettings(true));
+  }
+
+  void _openYoutubeSearch() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (ctx) => YoutubeSearchScreen(
+          onBack: () => Navigator.of(ctx).pop(),
+        ),
+      ),
+    );
   }
 
   void _openNowPlaying() {
@@ -1078,7 +1196,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (_folderPaths.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add music folders in Settings first.')),
+        SnackBar(
+          content: const Text('Add music folders before browsing files.'),
+          action: SnackBarAction(
+            label: 'Settings',
+            onPressed: () => _goSettings(openMusicFolders: true),
+          ),
+        ),
       );
       return;
     }
@@ -1138,6 +1262,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 Navigator.pop(context);
                 _goLibrary();
               },
+              onYoutubeSearch: () {
+                Navigator.pop(context);
+                _openYoutubeSearch();
+              },
               onFiles: () {
                 Navigator.pop(context);
                 _goLibrary();
@@ -1174,6 +1302,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                           ? LibraryScreen(
                               key: _libraryScreenKey,
                               folderPaths: _folderPaths,
+                              onOpenMusicFolderSettings: () =>
+                                  _goSettings(openMusicFolders: true),
                               songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
                               onClearSongsBrowseFilter: () {
                                 _songsBrowsePathKeysNotifier.value = null;
@@ -1197,6 +1327,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                           : SettingsScreen(
                               folderPaths: _folderPaths,
                               onFoldersChanged: _onFoldersChanged,
+                              openMusicFoldersSection: _openMusicFoldersInSettings,
+                              onOpenMusicFoldersSectionHandled: () {
+                                if (mounted) {
+                                  setState(
+                                    () => _openMusicFoldersInSettings = false,
+                                  );
+                                }
+                              },
                               onOpenDrawer: _openDrawer,
                               themeSetting: widget.themeSetting,
                               onThemeSettingChanged:
@@ -1297,6 +1435,7 @@ class _GlossyDrawer extends StatelessWidget {
   const _GlossyDrawer({
     required this.onNowPlaying,
     required this.onLibrary,
+    required this.onYoutubeSearch,
     required this.onFiles,
     required this.onSettings,
     required this.onHelp,
@@ -1307,6 +1446,7 @@ class _GlossyDrawer extends StatelessWidget {
 
   final VoidCallback onNowPlaying;
   final VoidCallback onLibrary;
+  final VoidCallback onYoutubeSearch;
   final VoidCallback onFiles;
   final VoidCallback onSettings;
   final VoidCallback onHelp;
@@ -1362,6 +1502,12 @@ class _GlossyDrawer extends StatelessWidget {
                       label: 'Library',
                       onTap: onLibrary,
                       selected: currentPage == _ShellPage.library,
+                    ),
+                    _GlossyDrawerTile(
+                      icon: Icons.search_rounded,
+                      label: 'Online search',
+                      onTap: onYoutubeSearch,
+                      selected: false,
                     ),
                     _GlossyDrawerTile(
                       icon: Icons.folder_open_rounded,

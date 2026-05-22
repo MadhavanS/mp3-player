@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 /// Row in the library / mini-player / now-playing. [filePath] is set for local scans.
 class TrackItem {
@@ -13,6 +14,9 @@ class TrackItem {
     required this.artColors,
     this.filePath,
     this.albumArtBytes,
+    this.youtubeVideoId,
+    this.youtubeChannelId,
+    this.thumbnailUrl,
   });
 
   final String title;
@@ -26,6 +30,21 @@ class TrackItem {
 
   /// Embedded cover art from tags (JPEG/PNG), if any.
   final Uint8List? albumArtBytes;
+
+  /// YouTube video id when this row came from online search (no local [filePath]).
+  final String? youtubeVideoId;
+
+  /// Upload channel id (`UC…`) for [youtubeVideoId] streams.
+  final String? youtubeChannelId;
+
+  /// Remote cover URL (e.g. YouTube thumbnail).
+  final String? thumbnailUrl;
+
+  bool get isYoutubeStream =>
+      youtubeVideoId != null && youtubeVideoId!.trim().isNotEmpty;
+
+  bool get isPlayable =>
+      (filePath != null && filePath!.trim().isNotEmpty) || isYoutubeStream;
 
   static const Color _pink = Color(0xFFFF6B9D);
   static const Color _blue = Color(0xFF4FACFE);
@@ -59,6 +78,35 @@ class TrackItem {
       artColors: _gradientForKey(path),
       filePath: path,
     );
+  }
+
+  /// Maps a YouTube [Video] from [ytClient.search] into a queue-ready row.
+  factory TrackItem.fromYoutubeVideo(Video video) {
+    final id = video.id.value;
+    final duration = video.duration;
+    final meta = duration != null
+        ? _formatDurationLabel(duration)
+        : (video.isLive ? 'Live' : 'YouTube');
+    return TrackItem(
+      title: video.title,
+      artist: video.author,
+      metaLine: meta,
+      genres: '',
+      artColors: _gradientForKey(id),
+      youtubeVideoId: id,
+      youtubeChannelId: video.channelId.value,
+      thumbnailUrl: video.thumbnails.mediumResUrl,
+    );
+  }
+
+  static String _formatDurationLabel(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    if (h > 0) {
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
   /// Merge ID3 (or similar) tags; keeps filename fallbacks when fields are empty.
@@ -109,6 +157,33 @@ class TrackItem {
       artColors: artColors,
       filePath: filePath,
       albumArtBytes: mergedArt,
+      youtubeVideoId: youtubeVideoId,
+      youtubeChannelId: youtubeChannelId,
+      thumbnailUrl: thumbnailUrl,
+    );
+  }
+
+  /// Keeps loaded cover bytes when [incoming] came from disk/cache without art.
+  static TrackItem mergePreservedAlbumArt(
+    TrackItem incoming,
+    TrackItem? previous,
+  ) {
+    if (previous == null) return incoming;
+    final incomingArt = incoming.albumArtBytes;
+    if (incomingArt != null && incomingArt.isNotEmpty) return incoming;
+    final previousArt = previous.albumArtBytes;
+    if (previousArt == null || previousArt.isEmpty) return incoming;
+    return TrackItem(
+      title: incoming.title,
+      artist: incoming.artist,
+      metaLine: incoming.metaLine,
+      genres: incoming.genres,
+      artColors: previous.artColors,
+      filePath: incoming.filePath,
+      albumArtBytes: previousArt,
+      youtubeVideoId: incoming.youtubeVideoId,
+      youtubeChannelId: incoming.youtubeChannelId ?? previous.youtubeChannelId,
+      thumbnailUrl: incoming.thumbnailUrl ?? previous.thumbnailUrl,
     );
   }
 

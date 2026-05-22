@@ -12,6 +12,8 @@ import '../../services/recent_list_limits_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/storage_access.dart';
+import '../../services/youtube_download_settings_store.dart';
+import '../../services/youtube_search_history_store.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
@@ -25,6 +27,8 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.folderPaths,
     required this.onFoldersChanged,
+    this.openMusicFoldersSection = false,
+    this.onOpenMusicFoldersSectionHandled,
     required this.onOpenDrawer,
     required this.themeSetting,
     required this.onThemeSettingChanged,
@@ -42,6 +46,8 @@ class SettingsScreen extends StatefulWidget {
 
   final List<String> folderPaths;
   final Future<void> Function(List<String> paths) onFoldersChanged;
+  final bool openMusicFoldersSection;
+  final VoidCallback? onOpenMusicFoldersSectionHandled;
   final VoidCallback onOpenDrawer;
   final AppThemeSetting themeSetting;
   final ValueChanged<AppThemeSetting> onThemeSettingChanged;
@@ -66,6 +72,7 @@ enum _SettingsSection {
   appearance,
   musicFolders,
   recentLists,
+  onlineSearch,
   help,
   windows,
 }
@@ -76,8 +83,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   _SettingsSection _section = _SettingsSection.menu;
   late final TextEditingController _recentlyAddedLimitController;
   late final TextEditingController _recentlyPlayedLimitController;
+  late final TextEditingController _searchHistoryLimitController;
   int _recentlyAddedLimit = RecentListLimitsStore.defaultLimit;
   int _recentlyPlayedLimit = RecentListLimitsStore.defaultLimit;
+  int _searchHistoryLimit = YoutubeSearchHistoryStore.defaultLimit;
+  int _searchHistoryCount = 0;
+  String _youtubeDownloadPathLabel = '';
+  bool _youtubeUsesDefaultDownloadDir = true;
   bool _windowsAlwaysOnTop = false;
   bool _windowsWindowPrefsLoaded = false;
 
@@ -87,11 +99,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.openMusicFoldersSection) {
+      _section = _SettingsSection.musicFolders;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        widget.onOpenMusicFoldersSectionHandled?.call();
+      });
+    }
     _recentlyAddedLimitController = TextEditingController();
     _recentlyPlayedLimitController = TextEditingController();
+    _searchHistoryLimitController = TextEditingController();
     unawaited(_loadLibraryTabRows());
     unawaited(_loadRecentListLimits());
+    unawaited(_loadOnlineSearchSettings());
     unawaited(_loadWindowsWindowPrefs());
+    YoutubeSearchHistoryStore.revision.addListener(_onOnlineSearchStoresChanged);
+    YoutubeDownloadSettingsStore.revision.addListener(_onOnlineSearchStoresChanged);
   }
 
   Future<void> _loadWindowsWindowPrefs() async {
@@ -106,9 +128,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    YoutubeSearchHistoryStore.revision
+        .removeListener(_onOnlineSearchStoresChanged);
+    YoutubeDownloadSettingsStore.revision
+        .removeListener(_onOnlineSearchStoresChanged);
     _recentlyAddedLimitController.dispose();
     _recentlyPlayedLimitController.dispose();
+    _searchHistoryLimitController.dispose();
     super.dispose();
+  }
+
+  void _onOnlineSearchStoresChanged() {
+    unawaited(_loadOnlineSearchSettings());
   }
 
   Future<void> _loadLibraryTabRows() async {
@@ -131,6 +162,99 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (rows == null) return 'Loading…';
     final enabled = rows.where((r) => r.enabled).length;
     return '$enabled of ${rows.length} tabs enabled';
+  }
+
+  Future<void> _loadOnlineSearchSettings() async {
+    final limit = await YoutubeSearchHistoryStore.loadLimit();
+    final history = await YoutubeSearchHistoryStore.load();
+    final pathLabel = await YoutubeDownloadSettingsStore.loadEffectivePathLabel();
+    final usesDefault = await YoutubeDownloadSettingsStore.usesDefaultDirectory();
+    if (!mounted) return;
+    setState(() {
+      _searchHistoryLimit = limit;
+      _searchHistoryCount = history.length;
+      _searchHistoryLimitController.text = limit.toString();
+      _youtubeDownloadPathLabel = pathLabel;
+      _youtubeUsesDefaultDownloadDir = usesDefault;
+    });
+  }
+
+  int? _parseSearchHistoryLimitOrNull(String raw) {
+    final v = int.tryParse(raw.trim());
+    if (v == null || v < 1) return null;
+    return v > 200 ? 200 : v;
+  }
+
+  Future<void> _saveSearchHistoryLimit(String raw) async {
+    final parsed = _parseSearchHistoryLimitOrNull(raw);
+    if (parsed == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid number from 1 to 200.')),
+      );
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await YoutubeSearchHistoryStore.saveLimit(parsed);
+      if (!mounted) return;
+      await _loadOnlineSearchSettings();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Search history limit updated.')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _clearSearchHistory() async {
+    setState(() => _busy = true);
+    try {
+      await YoutubeSearchHistoryStore.clear();
+      if (!mounted) return;
+      await _loadOnlineSearchSettings();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Search history cleared.')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pickYoutubeDownloadFolder() async {
+    final picked = await pickMusicDirectory(
+      dialogTitle: 'Choose download folder',
+    );
+    if (picked == null || picked.isEmpty || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await YoutubeDownloadSettingsStore.saveCustomDirectory(picked);
+      if (!mounted) return;
+      await _loadOnlineSearchSettings();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Download folder updated.')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetYoutubeDownloadFolder() async {
+    setState(() => _busy = true);
+    try {
+      await YoutubeDownloadSettingsStore.clearCustomDirectory();
+      if (!mounted) return;
+      await _loadOnlineSearchSettings();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Using default download folder.')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _loadRecentListLimits() async {
@@ -678,6 +802,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ListTile(
           contentPadding: const EdgeInsets.symmetric(vertical: 6),
           leading: Icon(
+            Icons.cloud_download_outlined,
+            color: pal.onScaffold.withValues(alpha: 0.88),
+            size: 28,
+          ),
+          title: Text(
+            'Online search',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: pal.onScaffold,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            'Search history and saved audio folder',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.textMuted.withValues(alpha: 0.95),
+            ),
+          ),
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            color: pal.textMuted.withValues(alpha: 0.75),
+          ),
+          onTap: () => _goToSection(_SettingsSection.onlineSearch),
+        ),
+        Divider(height: 1, color: pal.dividerOnHero),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(vertical: 6),
+          leading: Icon(
             Icons.help_outline_rounded,
             color: pal.onScaffold.withValues(alpha: 0.88),
             size: 28,
@@ -898,6 +1049,190 @@ class _SettingsScreenState extends State<SettingsScreen> {
           style: theme.textTheme.bodySmall?.copyWith(
             color: pal.textMuted.withValues(alpha: 0.9),
           ),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildOnlineSearchDetail(ThemeData theme, AppPalette pal) {
+    Widget compactLimitRow({
+      required String title,
+      required TextEditingController controller,
+      required VoidCallback onSave,
+    }) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+        decoration: BoxDecoration(
+          color: pal.surface.withValues(alpha: 0.28),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: pal.dividerOnHero.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.onScaffold.withValues(alpha: 0.95),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 86,
+              child: TextField(
+                controller: controller,
+                enabled: !_busy,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                textInputAction: TextInputAction.done,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: '${YoutubeSearchHistoryStore.defaultLimit}',
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  filled: true,
+                  fillColor: pal.surface.withValues(alpha: 0.38),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: pal.dividerOnHero.withValues(alpha: 0.7),
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: pal.dividerOnHero.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+                onSubmitted: (_) => onSave(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Save',
+              onPressed: _busy ? null : onSave,
+              icon: Icon(
+                Icons.check_circle_rounded,
+                color: context.controlAccent,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      children: [
+        Text(
+          'Control how many past Online searches are kept, and where audio '
+          'saved from YouTube is stored on this device.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: pal.textSecondary.withValues(alpha: 0.95),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Search history',
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: pal.onScaffold,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Default: ${YoutubeSearchHistoryStore.defaultLimit}. Oldest entries '
+          'are removed when the limit is exceeded.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.92),
+          ),
+        ),
+        const SizedBox(height: 12),
+        compactLimitRow(
+          title: 'History entries to keep',
+          controller: _searchHistoryLimitController,
+          onSave: () => unawaited(
+            _saveSearchHistoryLimit(_searchHistoryLimitController.text),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Stored now: $_searchHistoryCount (limit $_searchHistoryLimit)',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.9),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _busy || _searchHistoryCount == 0
+                ? null
+                : () => unawaited(_clearSearchHistory()),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: const Text('Clear search history'),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'Download folder',
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: pal.onScaffold,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _youtubeUsesDefaultDownloadDir
+              ? 'Using the app default folder. Choose a custom folder for new '
+                  'downloads; files already saved stay where they are.'
+              : 'Using a custom folder. Reset to return to the app default.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.92),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: pal.surface.withValues(alpha: 0.28),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: pal.dividerOnHero.withValues(alpha: 0.5)),
+          ),
+          child: SelectableText(
+            _youtubeDownloadPathLabel.isEmpty
+                ? 'Loading…'
+                : _youtubeDownloadPathLabel,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.onScaffold.withValues(alpha: 0.9),
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.tonalIcon(
+              onPressed: _busy ? null : () => unawaited(_pickYoutubeDownloadFolder()),
+              icon: const Icon(Icons.folder_open_rounded),
+              label: const Text('Choose folder'),
+            ),
+            if (!_youtubeUsesDefaultDownloadDir)
+              OutlinedButton.icon(
+                onPressed:
+                    _busy ? null : () => unawaited(_resetYoutubeDownloadFolder()),
+                icon: const Icon(Icons.restore_rounded),
+                label: const Text('Reset to default'),
+              ),
+          ],
         ),
         const SizedBox(height: 24),
       ],
@@ -1248,17 +1583,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        if (paths.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Text(
-              'No folders yet. Tap the button below to add one.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: pal.onScaffold.withValues(alpha: 0.75),
+        if (paths.isEmpty) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: context.controlAccent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: context.controlAccent.withValues(alpha: 0.35),
               ),
             ),
-          )
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Get started',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: pal.onScaffold,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '1. Tap Add folder below\n'
+                  '2. Choose a folder that contains your MP3 files\n'
+                  '3. Go back to Library — scanning starts automatically',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: pal.onScaffold.withValues(alpha: 0.9),
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ]
         else
           ...paths.asMap().entries.map((e) {
             final i = e.key;
@@ -1343,6 +1703,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.appearance => 'Appearance',
       _SettingsSection.musicFolders => 'Music folders',
       _SettingsSection.recentLists => 'Recent lists',
+      _SettingsSection.onlineSearch => 'Online search',
       _SettingsSection.help => 'Help',
       _SettingsSection.windows => 'Windows',
     };
@@ -1368,6 +1729,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       pal,
                     ),
                     _SettingsSection.recentLists => _buildRecentListsDetail(
+                      theme,
+                      pal,
+                    ),
+                    _SettingsSection.onlineSearch => _buildOnlineSearchDetail(
                       theme,
                       pal,
                     ),

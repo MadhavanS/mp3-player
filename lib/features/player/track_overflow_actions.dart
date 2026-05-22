@@ -30,6 +30,7 @@ enum TrackOverflowAction {
   autoTag,
   manualTagEditor,
   deleteFromDevice,
+  browseYoutubeChannel,
 }
 
 bool trackCanDeleteFromDevice(TrackItem track) =>
@@ -83,8 +84,17 @@ List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
   bool enableFavorite = false,
   bool isFavorite = false,
   bool enableTagEditor = false,
+  bool enableYoutubeChannelBrowse = false,
 }) {
   return [
+    if (enableYoutubeChannelBrowse)
+      PopupMenuItem(
+        value: TrackOverflowAction.browseYoutubeChannel,
+        child: _compactOverflowMenuRow(
+          icon: Icons.video_library_outlined,
+          label: 'Channel tracks',
+        ),
+      ),
     PopupMenuItem(
       value: TrackOverflowAction.playNext,
       child: _compactOverflowMenuRow(
@@ -678,6 +688,9 @@ Future<void> applyTrackOverflowAction(
 
     case TrackOverflowAction.manualTagEditor:
       await showManualTagEditor(context, tracks[ix]);
+
+    case TrackOverflowAction.browseYoutubeChannel:
+      return;
 
     case TrackOverflowAction.deleteFromDevice:
       final track = tracks[ix];

@@ -7,19 +7,30 @@ Future<TrackItem> readAudioMetadata(TrackItem base) => impl.readAudioMetadata(ba
 Future<void> enrichPlaylistTracks({
   required List<TrackItem> tracks,
   required void Function(String path, TrackItem updated) onTrackUpdated,
-  int batchSize = 4,
-  Duration interBatchDelay = const Duration(milliseconds: 12),
+  int batchSize = 1,
+  Duration interBatchDelay = const Duration(milliseconds: 80),
+  int? maxTracks,
+  bool Function()? shouldContinue,
 }) async {
-  final withPath =
-      tracks.where((t) => t.filePath != null && t.filePath!.isNotEmpty).toList();
-  for (var i = 0; i < withPath.length; i += batchSize) {
-    final batch = withPath.skip(i).take(batchSize);
-    await Future.wait(batch.map((t) async {
+  final withPath = tracks
+      .where((t) => t.filePath != null && t.filePath!.isNotEmpty)
+      .toList(growable: false);
+  final limit = maxTracks == null
+      ? withPath.length
+      : maxTracks.clamp(0, withPath.length);
+  if (limit == 0) return;
+
+  final effectiveBatch = batchSize.clamp(1, 2);
+  for (var i = 0; i < limit; i += effectiveBatch) {
+    if (shouldContinue != null && !shouldContinue()) return;
+    final batch = withPath.skip(i).take(effectiveBatch);
+    for (final t in batch) {
+      if (shouldContinue != null && !shouldContinue()) return;
       final updated = await readAudioMetadata(t);
       final path = t.filePath!;
       onTrackUpdated(path, updated);
-    }));
-    final hasMore = i + batchSize < withPath.length;
+    }
+    final hasMore = i + effectiveBatch < limit;
     if (hasMore && interBatchDelay > Duration.zero) {
       await Future<void>.delayed(interBatchDelay);
     }

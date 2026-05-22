@@ -11,7 +11,7 @@ import 'daisy_background.dart';
 enum TrackArtDisplay { mini, list, full, nowPlaying }
 
 /// Embedded ID3 cover when [TrackItem.albumArtBytes] is set; otherwise gradient [TrackItem.artColors].
-class TrackAlbumArt extends StatelessWidget {
+class TrackAlbumArt extends StatefulWidget {
   const TrackAlbumArt({
     super.key,
     required this.track,
@@ -29,14 +29,34 @@ class TrackAlbumArt extends StatelessWidget {
   /// When non-null, overrides the default corner radius for this [display] (use `0` for square art).
   final double? cornerRadius;
 
-  double get _size => switch (display) {
+  @override
+  State<TrackAlbumArt> createState() => _TrackAlbumArtState();
+}
+
+class _TrackAlbumArtState extends State<TrackAlbumArt> {
+  Future<Uint8List?>? _artFuture;
+  String? _artFutureKey;
+
+  @override
+  void didUpdateWidget(TrackAlbumArt oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final pathChanged = oldWidget.track.filePath != widget.track.filePath;
+    final oldLen = oldWidget.track.albumArtBytes?.length ?? 0;
+    final newLen = widget.track.albumArtBytes?.length ?? 0;
+    if (pathChanged || oldLen != newLen) {
+      _artFutureKey = null;
+      _artFuture = null;
+    }
+  }
+
+  double get _size => switch (widget.display) {
     TrackArtDisplay.mini => 48,
     TrackArtDisplay.list => 56,
     TrackArtDisplay.full => 295,
     TrackArtDisplay.nowPlaying => 248,
   };
 
-  double get _radius => switch (display) {
+  double get _radius => switch (widget.display) {
     TrackArtDisplay.mini => 24,
     TrackArtDisplay.list => 14,
     TrackArtDisplay.full => 34,
@@ -45,7 +65,7 @@ class TrackAlbumArt extends StatelessWidget {
 
   double _radiusFor(BuildContext context) {
     if (!context.usesPlayerChrome) return _radius;
-    return switch (display) {
+    return switch (widget.display) {
       TrackArtDisplay.mini => _radius,
       TrackArtDisplay.list => 18,
       TrackArtDisplay.full => 38,
@@ -54,8 +74,8 @@ class TrackAlbumArt extends StatelessWidget {
   }
 
   double _effectiveRadius(BuildContext context) {
-    if (display == TrackArtDisplay.mini) return _radiusFor(context);
-    return cornerRadius ?? _radiusFor(context);
+    if (widget.display == TrackArtDisplay.mini) return _radiusFor(context);
+    return widget.cornerRadius ?? _radiusFor(context);
   }
 
   Widget _noArtPlaceholder(BuildContext context) {
@@ -73,7 +93,12 @@ class TrackAlbumArt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bytes = track.albumArtBytes;
+    final thumbUrl = widget.track.thumbnailUrl?.trim();
+    if (thumbUrl != null && thumbUrl.isNotEmpty) {
+      return _networkThumbnail(context, thumbUrl);
+    }
+
+    final bytes = widget.track.albumArtBytes;
     if (bytes == null || bytes.isEmpty) {
       return _noArtPlaceholder(context);
     }
@@ -82,13 +107,20 @@ class TrackAlbumArt extends StatelessWidget {
         .round()
         .clamp(96, 512)
         .toInt();
-    final cached = cachedAlbumArtSync(track, maxDimension: pixelSize);
+    final cached = cachedAlbumArtSync(widget.track, maxDimension: pixelSize);
     if (cached != null && cached.isNotEmpty) {
       return _imageShell(context, cached, pixelSize);
     }
 
+    final futureKey =
+        '${widget.track.filePath}|${bytes.length}|$pixelSize';
+    if (_artFutureKey != futureKey) {
+      _artFutureKey = futureKey;
+      _artFuture = cachedAlbumArt(widget.track, maxDimension: pixelSize);
+    }
+
     return FutureBuilder<Uint8List?>(
-      future: cachedAlbumArt(track, maxDimension: pixelSize),
+      future: _artFuture,
       builder: (context, snapshot) {
         final art = snapshot.data;
         if (art == null || art.isEmpty) {
@@ -104,6 +136,38 @@ class TrackAlbumArt extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  Widget _networkThumbnail(BuildContext context, String url) {
+    final pixelSize = (_size * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(96, 512)
+        .toInt();
+    final image = Image.network(
+      url,
+      width: _size,
+      height: _size,
+      fit: BoxFit.cover,
+      cacheWidth: pixelSize,
+      cacheHeight: pixelSize,
+      errorBuilder: (_, __, ___) => _noArtPlaceholder(context),
+    );
+    if (widget.display == TrackArtDisplay.mini) {
+      return ClipOval(
+        child: SizedBox(width: _size, height: _size, child: image),
+      );
+    }
+    final r = _effectiveRadius(context);
+    final br = r <= 0 ? BorderRadius.zero : BorderRadius.circular(r);
+    return Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        borderRadius: br,
+        boxShadow: widget.showShadow ? _imageShadows() : const <BoxShadow>[],
+      ),
+      child: ClipRRect(borderRadius: br, child: image),
     );
   }
 
@@ -127,7 +191,7 @@ class TrackAlbumArt extends StatelessWidget {
       errorBuilder: (_, __, ___) => _noArtPlaceholder(context),
     );
 
-    if (display == TrackArtDisplay.mini) {
+    if (widget.display == TrackArtDisplay.mini) {
       return ClipOval(
         child: SizedBox(width: _size, height: _size, child: image),
       );
@@ -138,13 +202,13 @@ class TrackAlbumArt extends StatelessWidget {
       height: _size,
       decoration: BoxDecoration(
         borderRadius: br,
-        boxShadow: showShadow ? _imageShadows() : const <BoxShadow>[],
+        boxShadow: widget.showShadow ? _imageShadows() : const <BoxShadow>[],
       ),
       child: ClipRRect(borderRadius: br, child: image),
     );
   }
 
-  List<BoxShadow> _imageShadows() => switch (display) {
+  List<BoxShadow> _imageShadows() => switch (widget.display) {
     TrackArtDisplay.full => [
       BoxShadow(
         color: Colors.black.withOpacity(0.12),
@@ -173,22 +237,22 @@ class TrackAlbumArt extends StatelessWidget {
     );
     final deco = BoxDecoration(
       border: placeholderBorder,
-      borderRadius: display == TrackArtDisplay.mini
+      borderRadius: widget.display == TrackArtDisplay.mini
           ? null
           : brNonMini,
-      shape: display == TrackArtDisplay.mini
+      shape: widget.display == TrackArtDisplay.mini
           ? BoxShape.circle
           : BoxShape.rectangle,
-      gradient: display == TrackArtDisplay.mini
+      gradient: widget.display == TrackArtDisplay.mini
           ? null
           : const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [fillTop, fill],
             ),
-      color: display == TrackArtDisplay.mini ? fill : null,
-      boxShadow: showShadow
-          ? switch (display) {
+      color: widget.display == TrackArtDisplay.mini ? fill : null,
+      boxShadow: widget.showShadow
+          ? switch (widget.display) {
               TrackArtDisplay.mini => [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.12),
@@ -232,22 +296,22 @@ class TrackAlbumArt extends StatelessWidget {
     final r = _effectiveRadius(context);
     final brNonMini = r <= 0 ? BorderRadius.zero : BorderRadius.circular(r);
     final gradient = BoxDecoration(
-      borderRadius: display == TrackArtDisplay.mini
+      borderRadius: widget.display == TrackArtDisplay.mini
           ? null
           : brNonMini,
-      shape: display == TrackArtDisplay.mini
+      shape: widget.display == TrackArtDisplay.mini
           ? BoxShape.circle
           : BoxShape.rectangle,
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: track.artColors,
+        colors: widget.track.artColors,
       ),
-      boxShadow: showShadow
-          ? switch (display) {
+      boxShadow: widget.showShadow
+          ? switch (widget.display) {
               TrackArtDisplay.mini => [
                 BoxShadow(
-                  color: track.artColors.first.withOpacity(0.35),
+                  color: widget.track.artColors.first.withOpacity(0.35),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
                 ),
@@ -255,7 +319,7 @@ class TrackAlbumArt extends StatelessWidget {
               TrackArtDisplay.list => const [],
               TrackArtDisplay.full => [
                 BoxShadow(
-                  color: track.artColors.last.withOpacity(0.45),
+                  color: widget.track.artColors.last.withOpacity(0.45),
                   blurRadius: 28,
                   offset: const Offset(0, 18),
                 ),
@@ -267,7 +331,7 @@ class TrackAlbumArt extends StatelessWidget {
               ],
               TrackArtDisplay.nowPlaying => [
                 BoxShadow(
-                  color: track.artColors.last.withOpacity(0.38),
+                  color: widget.track.artColors.last.withOpacity(0.38),
                   blurRadius: 20,
                   offset: const Offset(0, 12),
                 ),
@@ -287,15 +351,15 @@ class TrackAlbumArt extends StatelessWidget {
   Widget _daisyPlaceholderDecoration(BuildContext context) {
     final r = _effectiveRadius(context);
     final br = r <= 0 ? BorderRadius.zero : BorderRadius.circular(r);
-    final isMini = display == TrackArtDisplay.mini;
+    final isMini = widget.display == TrackArtDisplay.mini;
     final shape = isMini ? BoxShape.circle : BoxShape.rectangle;
     final outline = Border.all(
       color: const Color(0xFF2B2117).withValues(alpha: 0.9),
       width: 1.5,
     );
 
-    final List<BoxShadow> boxShadows = showShadow
-        ? switch (display) {
+    final List<BoxShadow> boxShadows = widget.showShadow
+        ? switch (widget.display) {
             TrackArtDisplay.mini => [
                 BoxShadow(
                   color: const Color(0xFF2B2117).withValues(alpha: 0.16),
@@ -355,15 +419,15 @@ class TrackAlbumArt extends StatelessWidget {
   Widget _ivyPlaceholderDecoration(BuildContext context) {
     final r = _effectiveRadius(context);
     final br = r <= 0 ? BorderRadius.zero : BorderRadius.circular(r);
-    final isMini = display == TrackArtDisplay.mini;
+    final isMini = widget.display == TrackArtDisplay.mini;
     final shape = isMini ? BoxShape.circle : BoxShape.rectangle;
     final outline = Border.all(
       color: Colors.white.withValues(alpha: 0.72),
       width: 1.2,
     );
 
-    final List<BoxShadow> boxShadows = showShadow
-        ? switch (display) {
+    final List<BoxShadow> boxShadows = widget.showShadow
+        ? switch (widget.display) {
             TrackArtDisplay.mini => [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.10),

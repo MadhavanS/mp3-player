@@ -6,7 +6,12 @@ enum LibraryTabId {
   recentlyAdded('recently_added', 'RecentlyAdded'),
   playlist('playlist', 'Playlist'),
   favourites('favourites', 'Favourites'),
-  recentlyPlayed('recently_played', 'RecentlyPlayed');
+  recentlyPlayed('recently_played', 'RecentlyPlayed'),
+  savedYoutubeAudio('saved_youtube_audio', 'Saved audio'),
+  savedYoutubeLinks('saved_youtube_links', 'Saved links'),
+
+  /// Playback started from Online search (not a library tab).
+  onlineSearch('online_search', 'Online search');
 
   const LibraryTabId(this.wireValue, this.shortTitle);
 

@@ -25,6 +25,15 @@ internal object Mp3PlayerWidgetSync {
         Mp3PlayerGlassCardWidget.refreshAll(context)
     }
 
+    /** Called before process exit so the home widget shows a play icon, not stale pause. */
+    fun markStopped(context: Context) {
+        val p = context.getSharedPreferences(Mp3PlayerWidgetPrefs.PREFS_NAME, Context.MODE_PRIVATE).edit()
+        p.putBoolean(Mp3PlayerWidgetPrefs.PLAYING, false)
+        p.commit()
+        Mp3PlayerAppWidget.refreshAll(context)
+        Mp3PlayerGlassCardWidget.refreshAll(context)
+    }
+
     fun handlePlaybackProgress(context: Context, args: Map<*, *>) {
         val p = context.getSharedPreferences(Mp3PlayerWidgetPrefs.PREFS_NAME, Context.MODE_PRIVATE).edit()
         p.putBoolean(Mp3PlayerWidgetPrefs.PLAYING, args.bool(Mp3PlayerWidgetPrefs.PLAYING))

@@ -1,5 +1,6 @@
 package com.example.mp3_player
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -11,6 +12,7 @@ import android.support.v4.media.MediaBrowserCompat
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import com.ryanheise.audioservice.AudioService
 
 // Routes widget transport buttons to AudioService's media session (same as notification).
 class WidgetMediaActionReceiver : BroadcastReceiver() {
@@ -19,6 +21,13 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
         val action = intent?.action ?: return
         val pendingResult = goAsync()
         val appCtx = context.applicationContext
+
+        if (!isAudioServiceRunning(appCtx)) {
+            handleDeadSession(appCtx, action)
+            pendingResult.finish()
+            return
+        }
+
         val handler = Handler(Looper.getMainLooper())
 
         var browser: MediaBrowserCompat? = null
@@ -28,9 +37,10 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
                 browser?.disconnect()
             } catch (_: Exception) {
             }
+            handleDeadSession(appCtx, action)
             pendingResult.finish()
         }
-        handler.postDelayed(timeout, 2500L)
+        handler.postDelayed(timeout, 2000L)
 
         val callback = object : MediaBrowserCompat.ConnectionCallback() {
             override fun onConnected() {
@@ -86,6 +96,7 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
                     browser?.disconnect()
                 } catch (_: Exception) {
                 }
+                handleDeadSession(appCtx, action)
                 pendingResult.finish()
             }
 
@@ -113,6 +124,45 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
         const val ACTION_PLAY_PAUSE = "com.example.mp3_player.action.WIDGET_PLAY_PAUSE"
         const val ACTION_SKIP_NEXT = "com.example.mp3_player.action.WIDGET_SKIP_NEXT"
         const val ACTION_SKIP_PREVIOUS = "com.example.mp3_player.action.WIDGET_SKIP_PREVIOUS"
+
+        @Suppress("DEPRECATION")
+        private fun isAudioServiceRunning(context: Context): Boolean {
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+                if (AudioService::class.java.name == service.service.className) {
+                    return true
+                }
+            }
+            return false
+        }
+
+        /** AudioService is gone (Quit / process killed): fix stale widget UI and relaunch app. */
+        fun handleDeadSession(context: Context, action: String) {
+            val prefs = context.getSharedPreferences(
+                Mp3PlayerWidgetPrefs.PREFS_NAME,
+                Context.MODE_PRIVATE,
+            )
+            if (!prefs.getBoolean(Mp3PlayerWidgetPrefs.HAS_TRACK, false)) return
+
+            prefs.edit().putBoolean(Mp3PlayerWidgetPrefs.PLAYING, false).apply()
+            Mp3PlayerAppWidget.refreshAll(context)
+            Mp3PlayerGlassCardWidget.refreshAll(context)
+
+            when (action) {
+                ACTION_PLAY_PAUSE -> WidgetLaunchBridge.launchAppForAction(
+                    context,
+                    WidgetLaunchBridge.ACTION_PLAY,
+                )
+                ACTION_SKIP_NEXT -> WidgetLaunchBridge.launchAppForAction(
+                    context,
+                    WidgetLaunchBridge.ACTION_SKIP_NEXT,
+                )
+                ACTION_SKIP_PREVIOUS -> WidgetLaunchBridge.launchAppForAction(
+                    context,
+                    WidgetLaunchBridge.ACTION_SKIP_PREVIOUS,
+                )
+            }
+        }
 
         private fun refreshAfterMetadataSettles(
             context: Context,

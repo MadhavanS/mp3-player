@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
+import 'dart:ui' show FontFeature, ImageFilter;
 
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
@@ -9,14 +9,20 @@ import 'package:flutter/services.dart';
 import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
+import '../../services/saved_youtube_audio_store.dart';
+import '../../services/saved_youtube_links_store.dart';
+import '../../services/youtube_audio_download_controller.dart'
+    show YoutubeAudioDownloadController, startYoutubeAudioSave;
 import '../../theme/album_art_title_color.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/daisy_background.dart';
 import '../../widgets/liquid_glass.dart';
 import '../../widgets/player_adaptive_controls.dart';
+import '../../widgets/playback_loading_hint.dart';
 import '../../widgets/track_album_art.dart';
 import '../shell/now_playing_escape_bridge.dart';
+import '../youtube/open_youtube_channel_tracks.dart';
 import 'edit_track_tags_sheet.dart';
 import 'mini_player_bar.dart';
 import 'site_rename_standalone_dialog.dart';
@@ -180,8 +186,22 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     PlayerController player,
     String value,
   ) async {
+    if (value == 'yt:channel') {
+      final track = player.currentTrack;
+      if (track != null) {
+        await openYoutubeChannelTracksFromTrack(context, track);
+      }
+      return;
+    }
     if (!value.startsWith('ta:')) return;
     final action = TrackOverflowAction.values.byName(value.substring(3));
+    if (action == TrackOverflowAction.browseYoutubeChannel) {
+      final track = player.currentTrack;
+      if (track != null) {
+        await openYoutubeChannelTracksFromTrack(context, track);
+      }
+      return;
+    }
     await applyTrackOverflowAction(
       context,
       player,
@@ -193,10 +213,27 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 
   List<PopupMenuEntry<String>> _softBlurRestMenuEntries(TrackItem track) {
     final out = <PopupMenuEntry<String>>[];
+    if (track.isYoutubeStream) {
+      out.add(
+        const PopupMenuItem<String>(
+          value: 'yt:channel',
+          child: ListTile(
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            contentPadding: EdgeInsets.symmetric(horizontal: 8),
+            minLeadingWidth: 28,
+            horizontalTitleGap: 12,
+            leading: Icon(Icons.video_library_outlined, size: 20),
+            title: Text('Channel tracks', style: TextStyle(fontSize: 14)),
+          ),
+        ),
+      );
+    }
     for (final e in trackOverflowPopupMenuEntries(
       enableDeleteFromDevice: trackCanDeleteFromDevice(track),
       enableFavorite: false,
       isFavorite: false,
+      enableYoutubeChannelBrowse: false,
     )) {
       if (e is PopupMenuItem<TrackOverflowAction>) {
         final a = e.value;
@@ -352,6 +389,204 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     );
   }
 
+  Widget _saveYoutubeAudioButton(BuildContext context, TrackItem track) {
+    if (kIsWeb) return const SizedBox.shrink();
+    final id = track.youtubeVideoId?.trim() ?? '';
+    if (id.isEmpty) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        SavedYoutubeAudioStore.revision,
+        YoutubeAudioDownloadController.instance,
+      ]),
+      builder: (context, _) {
+        final saved = SavedYoutubeAudioStore.isSaved(id);
+        final dl = YoutubeAudioDownloadController.instance;
+        final downloading = dl.isDownloading(id);
+        return IconButton(
+          iconSize: 28,
+          tooltip: downloading
+              ? dl.status
+              : saved
+                  ? 'Audio saved on device'
+                  : 'Save audio to device',
+          icon: downloading
+              ? SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    value: dl.progress,
+                    color: context.controlAccent,
+                  ),
+                )
+              : Icon(
+                  saved
+                      ? Icons.download_done_rounded
+                      : Icons.download_rounded,
+                  color: saved
+                      ? context.controlAccent
+                      : context.palette.textSecondary,
+                ),
+          onPressed: saved || downloading
+              ? null
+              : () async {
+                  final ok = await startYoutubeAudioSave(track);
+                  if (!context.mounted) return;
+                  if (ok) {
+                    ActionPillToast.show(context, 'Audio saved');
+                  }
+                },
+        );
+      },
+    );
+  }
+
+  Widget _youtubeSaveProgressBanner(BuildContext context, AppPalette pal) {
+    return ListenableBuilder(
+      listenable: YoutubeAudioDownloadController.instance,
+      builder: (context, _) {
+        final dl = YoutubeAudioDownloadController.instance;
+        if (!dl.isRunning) return const SizedBox.shrink();
+        final theme = Theme.of(context);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              LinearProgressIndicator(
+                value: dl.progress?.clamp(0.0, 1.0),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                dl.status,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: pal.textMuted,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _playbackLoadingLine(
+    BuildContext context,
+    PlayerController player,
+    AppPalette pal,
+  ) {
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        if (!player.isPreparingPlayback) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: PlaybackLoadingHint(
+            label: player.playbackLoadingLabel,
+            color: pal.textMuted,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _youtubeStreamStatsLine(
+    BuildContext context,
+    PlayerController player,
+    AppPalette pal,
+  ) {
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final track = player.currentTrack;
+        if (player.isPreparingPlayback) return const SizedBox.shrink();
+        final stats = player.youtubeStreamStats;
+        if (track == null ||
+            !track.isYoutubeStream ||
+            stats == null ||
+            (track.filePath != null && track.filePath!.trim().isNotEmpty)) {
+          return const SizedBox.shrink();
+        }
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                stats.isBuffering
+                    ? Icons.cloud_sync_rounded
+                    : Icons.cloud_download_outlined,
+                size: 16,
+                color: pal.textMuted,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  stats.summaryLine,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: pal.textMuted,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Muted bookmark chrome when the link is not saved (shuffle-off style).
+  Color _youtubeBookmarkInactiveColor(BuildContext context, AppPalette pal) {
+    if (_isSilverNp(context)) return _kSilverIconDisabled;
+    if (_isIvyNp(context)) return _kIvyInactiveIcon;
+    if (_isDaisyNp(context)) return _daisyNpIconStates(pal).off;
+    if (_isLeahNp(context)) {
+      return Color.lerp(_kLeahPinkSoft, pal.surface, 0.35)!;
+    }
+    return pal.onScaffold.withValues(alpha: 0.42);
+  }
+
+  Widget _saveYoutubeLinkButton(BuildContext context, TrackItem track) {
+    final id = track.youtubeVideoId?.trim() ?? '';
+    if (id.isEmpty) return const SizedBox.shrink();
+    final pal = context.palette;
+    unawaited(SavedYoutubeLinksStore.ensureLoaded());
+    return ListenableBuilder(
+      listenable: SavedYoutubeLinksStore.revision,
+      builder: (context, _) {
+        final saved = SavedYoutubeLinksStore.isSaved(id);
+        final accent = context.controlAccent;
+        final inactive = _youtubeBookmarkInactiveColor(context, pal);
+        return IconButton(
+          iconSize: 28,
+          tooltip: saved
+              ? 'Remove saved link'
+              : 'Save link (reuse without searching)',
+          icon: Icon(
+            saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+            color: saved ? accent : inactive,
+          ),
+          onPressed: () async {
+            if (saved) {
+              await SavedYoutubeLinksStore.remove(id);
+              if (!context.mounted) return;
+              ActionPillToast.show(context, 'Link removed');
+            } else {
+              await SavedYoutubeLinksStore.add(track);
+              if (!context.mounted) return;
+              ActionPillToast.show(context, 'Link saved');
+            }
+          },
+        );
+      },
+    );
+  }
+
   Widget _footerTrackTools(
     BuildContext context,
     AppPalette pal,
@@ -377,6 +612,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                _youtubeSaveProgressBanner(context, pal),
                 Divider(height: 1, thickness: 1, color: pal.dividerOnHero),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 10, 8, 14),
@@ -394,72 +630,76 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         onPressed: _safeCollapse,
                       ),
                       Expanded(
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: 'Edit tags & cover',
-                              iconSize: 28,
-                              icon: Icon(
-                                Icons.edit_note_rounded,
-                                color: canEdit
-                                    ? context.controlAccent
-                                    : pal.textSecondary.withValues(alpha: 0.45),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (canEdit) ...[
+                                IconButton(
+                                  tooltip: 'Edit tags & cover',
+                                  iconSize: 28,
+                                  visualDensity: VisualDensity.compact,
+                                  icon: Icon(
+                                    Icons.edit_note_rounded,
+                                    color: context.controlAccent,
+                                  ),
+                                  onPressed: () => _openTagEditor(player),
+                                ),
+                              ],
+                              SleepTimerControl(
+                                player: player,
+                                iconColor: context.controlAccent,
                               ),
-                              onPressed: canEdit
-                                  ? () => _openTagEditor(player)
-                                  : null,
-                            ),
-                            SleepTimerControl(
-                              player: player,
-                              iconColor: context.controlAccent,
-                            ),
-                            IconButton(
-                              tooltip: 'Add to playlist',
-                              iconSize: 28,
-                              icon: Icon(
-                                Icons.playlist_add_rounded,
-                                color: canEdit
-                                    ? context.controlAccent
-                                    : pal.textSecondary.withValues(alpha: 0.45),
-                              ),
-                              onPressed: canEdit
-                                  ? () {
-                                      unawaited(
-                                        applyTrackOverflowAction(
-                                          context,
-                                          player,
-                                          player.currentIndex,
-                                          TrackOverflowAction.addToPlaylist,
-                                          playbackOriginTab:
-                                              player.playbackOriginTab,
-                                        ),
-                                      );
-                                    }
-                                  : null,
-                            ),
-                            IconButton(
-                              tooltip: 'Auto update tags',
-                              iconSize: 28,
-                              icon: Icon(
-                                Icons.auto_fix_high_outlined,
-                                color: canEdit
-                                    ? context.controlAccent
-                                    : pal.textSecondary.withValues(alpha: 0.45),
-                              ),
-                              onPressed: canEdit && !kIsWeb
-                                  ? () => showStandaloneSiteRenameDialog(
-                                      context,
-                                      cur,
-                                    )
-                                  : null,
-                            ),
-                            if (isJulia) ...[
-                              const SizedBox(width: 2),
-                              _favoriteButton(pal, cur),
+                              if (cur.isYoutubeStream) ...[
+                                _saveYoutubeAudioButton(context, cur),
+                                _saveYoutubeLinkButton(context, cur),
+                              ],
+                              if (canEdit) ...[
+                                IconButton(
+                                  tooltip: 'Add to playlist',
+                                  iconSize: 28,
+                                  visualDensity: VisualDensity.compact,
+                                  icon: Icon(
+                                    Icons.playlist_add_rounded,
+                                    color: context.controlAccent,
+                                  ),
+                                  onPressed: () {
+                                    unawaited(
+                                      applyTrackOverflowAction(
+                                        context,
+                                        player,
+                                        player.currentIndex,
+                                        TrackOverflowAction.addToPlaylist,
+                                        playbackOriginTab:
+                                            player.playbackOriginTab,
+                                      ),
+                                    );
+                                  },
+                                ),
+                                IconButton(
+                                  tooltip: 'Auto update tags',
+                                  iconSize: 28,
+                                  visualDensity: VisualDensity.compact,
+                                  icon: Icon(
+                                    Icons.auto_fix_high_outlined,
+                                    color: context.controlAccent,
+                                  ),
+                                  onPressed: !kIsWeb
+                                      ? () => showStandaloneSiteRenameDialog(
+                                            context,
+                                            cur,
+                                          )
+                                      : null,
+                                ),
+                              ],
+                              if (isJulia && canEdit) ...[
+                                const SizedBox(width: 2),
+                                _favoriteButton(pal, cur),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
                       ListenableBuilder(
@@ -485,6 +725,16 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                   : navIconColor,
                             ),
                             onSelected: (action) {
+                              if (action ==
+                                  TrackOverflowAction.browseYoutubeChannel) {
+                                unawaited(
+                                  openYoutubeChannelTracksFromTrack(
+                                    context,
+                                    cur,
+                                  ),
+                                );
+                                return;
+                              }
                               unawaited(
                                 applyTrackOverflowAction(
                                   context,
@@ -501,6 +751,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                       trackCanDeleteFromDevice(cur),
                                   enableFavorite: favOk,
                                   isFavorite: isFav,
+                                  enableYoutubeChannelBrowse:
+                                      cur.isYoutubeStream,
                                 ),
                           );
                         },
@@ -1082,13 +1334,6 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     final accent = _fullArtSeekAccent(context, pal);
     final artWidth = _fullArtHeroWidth(context);
     final topIconEnabled = silver ? _kSilverInk : actionColor;
-    final topIconDisabled = silver
-        ? _kSilverIconDisabled
-        : leah
-        ? _kLeahPinkSoft.withValues(alpha: 0.6)
-        : ivy
-        ? _kIvyIconDisabled
-        : pal.textSecondary;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1100,6 +1345,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               IconButton(
                 tooltip: 'Collapse',
                 iconSize: silver ? 36 : null,
+                visualDensity: VisualDensity.compact,
                 onPressed: _safeCollapse,
                 icon: Icon(
                   silver
@@ -1108,37 +1354,63 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   color: topIconEnabled,
                 ),
               ),
-              const Spacer(),
-              IconButton(
-                tooltip: 'Edit tags & cover',
-                iconSize: silver ? 36 : null,
-                onPressed: canEdit ? () => _openTagEditor(player) : null,
-                icon: Icon(
-                  silver ? Icons.edit_note : Icons.edit_note_rounded,
-                  color: canEdit ? topIconEnabled : topIconDisabled,
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (canEdit) ...[
+                          IconButton(
+                            tooltip: 'Clean site-style name',
+                            iconSize: silver ? 34 : null,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: !kIsWeb
+                                ? () => showStandaloneSiteRenameDialog(
+                                      context,
+                                      track,
+                                    )
+                                : null,
+                            icon: Icon(
+                              Icons.auto_fix_high_outlined,
+                              color: topIconEnabled,
+                            ),
+                          ),
+                          _favoriteButton(pal, track),
+                          IconButton(
+                            tooltip: 'Edit tags & cover',
+                            iconSize: silver ? 36 : null,
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => _openTagEditor(player),
+                            icon: Icon(
+                              silver
+                                  ? Icons.edit_note
+                                  : Icons.edit_note_rounded,
+                              color: topIconEnabled,
+                            ),
+                          ),
+                        ],
+                        if (track.isYoutubeStream) ...[
+                          _saveYoutubeLinkButton(context, track),
+                          _saveYoutubeAudioButton(context, track),
+                        ],
+                        SleepTimerControl(
+                          player: player,
+                          iconColor: ivy ? _kIvyInactiveIcon : topIconEnabled,
+                          iconSize: silver ? 34 : 28,
+                        ),
+                        _softBlurTailOverflowMenu(
+                          player: player,
+                          track: track,
+                          actionColor: topIconEnabled,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-              SleepTimerControl(
-                player: player,
-                iconColor: ivy ? _kIvyInactiveIcon : topIconEnabled,
-                iconSize: silver ? 34 : 28,
-              ),
-              _favoriteButton(pal, track),
-              IconButton(
-                tooltip: 'Clean site-style name',
-                iconSize: silver ? 34 : null,
-                onPressed: canEdit && !kIsWeb
-                    ? () => showStandaloneSiteRenameDialog(context, track)
-                    : null,
-                icon: Icon(
-                  Icons.auto_fix_high_outlined,
-                  color: canEdit ? topIconEnabled : topIconDisabled,
-                ),
-              ),
-              _softBlurTailOverflowMenu(
-                player: player,
-                track: track,
-                actionColor: topIconEnabled,
               ),
             ],
           ),
@@ -1201,6 +1473,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             ),
           ),
         ],
+        SizedBox(
+          width: artWidth,
+          child: _playbackLoadingLine(context, player, pal),
+        ),
+        SizedBox(
+          width: artWidth,
+          child: _youtubeStreamStatsLine(context, player, pal),
+        ),
         const SizedBox(height: 14),
         SizedBox(
           width: artWidth,
@@ -1212,6 +1492,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 builder: (context, durSnap) {
                   final dur = durSnap.data ?? player.duration;
                   final pos = posSnap.data ?? player.position;
+                  final preparing = player.isPreparingPlayback;
                   final totalMs = dur?.inMilliseconds ?? 0;
                   final posMs = pos.inMilliseconds;
                   final sliderValue =
@@ -1226,10 +1507,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         inactiveColor: ivy
                             ? _kIvyMuted.withValues(alpha: 0.45)
                             : null,
-                        onChanged: totalMs > 0
+                        onChanged: totalMs > 0 && !preparing
                             ? (v) => setState(() => _dragPositionFraction = v)
                             : null,
-                        onChangeEnd: totalMs > 0
+                        onChangeEnd: totalMs > 0 && !preparing
                             ? (v) {
                                 player.seek(
                                   Duration(
@@ -1240,29 +1521,46 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               }
                             : null,
                       ),
-                      Row(
-                        children: [
-                          Text(
-                            _formatDuration(pos),
-                            style: _fullArtTimeLabelStyle(
-                              context,
-                              theme,
-                              pal,
-                              accent,
+                      if (preparing)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              player.playbackLoadingLabel,
+                              style: _fullArtTimeLabelStyle(
+                                context,
+                                theme,
+                                pal,
+                                accent,
+                              ),
                             ),
                           ),
-                          const Spacer(),
-                          Text(
-                            dur != null ? _formatDuration(dur) : '--:--',
-                            style: _fullArtTimeLabelStyle(
-                              context,
-                              theme,
-                              pal,
-                              accent,
+                        )
+                      else
+                        Row(
+                          children: [
+                            Text(
+                              _formatDuration(pos),
+                              style: _fullArtTimeLabelStyle(
+                                context,
+                                theme,
+                                pal,
+                                accent,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                            const Spacer(),
+                            Text(
+                              dur != null ? _formatDuration(dur) : '--:--',
+                              style: _fullArtTimeLabelStyle(
+                                context,
+                                theme,
+                                pal,
+                                accent,
+                              ),
+                            ),
+                          ],
+                        ),
                     ],
                   );
                   return seekColumn;
@@ -1306,8 +1604,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           width: artWidth,
           child: Row(
             children: [
-              _favoriteButton(pal, track),
-              const SizedBox(width: 8),
+              if (track.filePath != null && track.filePath!.isNotEmpty)
+                _favoriteButton(pal, track),
+              if (track.filePath != null && track.filePath!.isNotEmpty)
+                const SizedBox(width: 8),
               Expanded(
                 child: _MarqueeText(
                   track.title,
@@ -1329,6 +1629,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             ],
           ),
         ),
+        SizedBox(
+          width: artWidth,
+          child: _playbackLoadingLine(context, player, pal),
+        ),
         const SizedBox(height: 14),
         SizedBox(
           width: artWidth,
@@ -1340,6 +1644,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 builder: (context, durSnap) {
                   final dur = durSnap.data ?? player.duration;
                   final pos = posSnap.data ?? player.position;
+                  final preparing = player.isPreparingPlayback;
                   final totalMs = dur?.inMilliseconds ?? 0;
                   final posMs = pos.inMilliseconds;
                   final sliderValue =
@@ -1352,10 +1657,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         appearance: PlayerSliderAppearance.daisy,
                         activeColor: accent,
                         inactiveColor: accent.withValues(alpha: 0.35),
-                        onChanged: totalMs > 0
+                        onChanged: totalMs > 0 && !preparing
                             ? (v) => setState(() => _dragPositionFraction = v)
                             : null,
-                        onChangeEnd: totalMs > 0
+                        onChangeEnd: totalMs > 0 && !preparing
                             ? (v) {
                                 player.seek(
                                   Duration(
@@ -1366,25 +1671,40 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               }
                             : null,
                       ),
-                      Row(
-                        children: [
-                          Text(
-                            _formatDuration(pos),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: accent,
-                              fontWeight: FontWeight.w700,
+                      if (preparing)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              player.playbackLoadingLabel,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: accent.withValues(alpha: 0.72),
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                          const Spacer(),
-                          Text(
-                            dur != null ? _formatDuration(dur) : '--:--',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: accent,
-                              fontWeight: FontWeight.w700,
+                        )
+                      else
+                        Row(
+                          children: [
+                            Text(
+                              _formatDuration(pos),
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: accent,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
+                            const Spacer(),
+                            Text(
+                              dur != null ? _formatDuration(dur) : '--:--',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: accent,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
                     ],
                   );
                 },
@@ -1498,58 +1818,75 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             icon: Icon(Icons.chevron_left_rounded, color: ink.active),
           ),
           Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: 'Edit tags & cover',
-                  iconSize: 28,
-                  icon: Icon(
-                    Icons.edit_note_rounded,
-                    color: canEdit ? ink.active : ink.disabled,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (canEdit) ...[
+                    IconButton(
+                      tooltip: 'Edit tags & cover',
+                      iconSize: 28,
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.edit_note_rounded,
+                        color: ink.active,
+                      ),
+                      onPressed: () => _openTagEditor(player),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  SleepTimerControl(
+                    player: player,
+                    iconColor: ink.active,
                   ),
-                  onPressed: canEdit ? () => _openTagEditor(player) : null,
-                ),
-                const SizedBox(width: 10),
-                SleepTimerControl(
-                  player: player,
-                  iconColor: ink.active,
-                ),
-                const SizedBox(width: 10),
-                IconButton(
-                  tooltip: 'Add to playlist',
-                  iconSize: 28,
-                  icon: Icon(
-                    Icons.playlist_add_rounded,
-                    color: canEdit ? ink.active : ink.disabled,
-                  ),
-                  onPressed: canEdit
-                      ? () {
-                          unawaited(
-                            applyTrackOverflowAction(
-                              context,
-                              player,
-                              player.currentIndex,
-                              TrackOverflowAction.addToPlaylist,
-                              playbackOriginTab: player.playbackOriginTab,
-                            ),
-                          );
-                        }
-                      : null,
-                ),
-                const SizedBox(width: 10),
-                IconButton(
-                  tooltip: 'Auto update tags',
-                  iconSize: 28,
-                  icon: Icon(
-                    Icons.auto_fix_high_outlined,
-                    color: canEdit ? ink.active : ink.disabled,
-                  ),
-                  onPressed: canEdit && !kIsWeb
-                      ? () => showStandaloneSiteRenameDialog(context, track)
-                      : null,
-                ),
-              ],
+                  if (track.isYoutubeStream) ...[
+                    const SizedBox(width: 4),
+                    _saveYoutubeAudioButton(context, track),
+                    _saveYoutubeLinkButton(context, track),
+                  ],
+                  if (canEdit) ...[
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Add to playlist',
+                      iconSize: 28,
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.playlist_add_rounded,
+                        color: ink.active,
+                      ),
+                      onPressed: () {
+                        unawaited(
+                          applyTrackOverflowAction(
+                            context,
+                            player,
+                            player.currentIndex,
+                            TrackOverflowAction.addToPlaylist,
+                            playbackOriginTab: player.playbackOriginTab,
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      tooltip: 'Auto update tags',
+                      iconSize: 28,
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.auto_fix_high_outlined,
+                        color: ink.active,
+                      ),
+                      onPressed: !kIsWeb
+                          ? () => showStandaloneSiteRenameDialog(
+                                context,
+                                track,
+                              )
+                          : null,
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ],
@@ -1652,6 +1989,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                             ),
                                           ),
                                           const SizedBox(height: 16),
+                                          SizedBox(
+                                            width: double.infinity,
+                                            child: _playbackLoadingLine(
+                                              context,
+                                              player,
+                                              pal,
+                                            ),
+                                          ),
                                           StreamBuilder<Duration>(
                                             stream: player
                                                 .audioPlayer

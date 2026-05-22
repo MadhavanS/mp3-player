@@ -9,16 +9,21 @@ import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb, listEquals;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 import '../models/library_tab_id.dart';
 import '../models/track_item.dart';
+import '../models/youtube_stream_transfer_stats.dart';
 import '../services/album_art_cache.dart';
 import '../services/music_library_path_key.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
+import '../services/youtube_api_clients.dart';
+import '../services/youtube_search_service.dart';
+import '../widgets/action_pill_toast.dart';
 import 'notification_art_uri.dart';
 
 enum PlaylistRepeatMode { off, all, one }
@@ -38,7 +43,13 @@ enum CatalogNotifyMode {
 /// `just_audio_windows` currently logs "Failed to seek to item" during
 /// [setAudioSource] with a concatenated source and can ignore [initialIndex],
 /// causing item 0 to play regardless of the selected Dart queue index.
-bool _useSingleTrackAudioSourceForPlatform() {
+///
+/// Windows keeps a single-file source and reloads on skip. Android/iOS use a
+/// lazy [ConcatenatingAudioSource] so notification/widget skipToNext/Previous
+/// see the full queue (required for ~1800-song libraries).
+const int _largeQueueNativeDeferThreshold = 200;
+
+bool _useSingleTrackAudioSourceForQueue(int queueLength) {
   if (kIsWeb) return false;
   return defaultTargetPlatform == TargetPlatform.windows;
 }
@@ -53,10 +64,96 @@ bool _concatUseLazyPreparationForPlatform() {
 /// Local playback + playlist index. Exposes [audioPlayer] for streams in the UI.
 class PlayerController extends ChangeNotifier {
   bool _isInterruptedAbort(Object error) {
+    final blob = error.toString().toLowerCase();
+    if (blob.contains('loading interrupted')) return true;
     if (error is! PlatformException) return false;
     final code = error.code.toLowerCase();
     final message = (error.message ?? '').toLowerCase();
     return code == 'abort' && message.contains('loading interrupted');
+  }
+
+  bool _isYoutubeSourceLoadError(Object error) {
+    final blob = error.toString().toLowerCase();
+    if (blob.contains('403') ||
+        blob.contains('source error') ||
+        blob.contains('invalidresponsecode') ||
+        blob.contains('response code') ||
+        blob.contains('httpdatasource') ||
+        blob.contains('type_source')) {
+      return true;
+    }
+    if (error is PlatformException) {
+      final msg = (error.message ?? '').toLowerCase();
+      final code = error.code.toLowerCase();
+      if (msg.contains('403') ||
+          msg.contains('source error') ||
+          msg.contains('response code') ||
+          code.contains('source')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _notifyYoutubeStreamPlaybackFailed() {
+    ActionPillToast.showUsingRootNavigator(
+      'Stream unavailable — tap play to retry',
+      icon: Icons.cloud_off_outlined,
+    );
+  }
+
+  /// One automatic re-resolve of the YouTube CDN URL per [errorGeneration].
+  Future<bool> _tryRecoverYoutubeSourceError({
+    required int errorGeneration,
+    Duration initialPosition = Duration.zero,
+    int? loadToken,
+  }) async {
+    if (_isLoadingSource || _youtubeSourceRetryInFlight) return false;
+    final track = currentTrack;
+    if (track == null || !_isRemoteYoutubeStreamTrack(track)) return false;
+    if (_youtubeSourceRetryUsedForGeneration == errorGeneration) return false;
+
+    _youtubeSourceRetryInFlight = true;
+    _youtubeSourceRetryUsedForGeneration = errorGeneration;
+    try {
+      debugPrint(
+        'YouTube stream source error — re-resolving playback for '
+        '${track.youtubeVideoId}',
+      );
+      await _loadCurrent(
+        initialPosition: initialPosition,
+        stopBeforeLoad: true,
+        retryAfterMissingPath: true,
+        retryAfterYoutubeSourceError: false,
+        loadToken: loadToken,
+      );
+      return true;
+    } catch (e, st) {
+      debugPrint('YouTube stream recovery failed: $e\n$st');
+      return false;
+    } finally {
+      _youtubeSourceRetryInFlight = false;
+    }
+  }
+
+  Future<void> _handleAsyncYoutubePlaybackError(Object error) async {
+    if (!_isYoutubeSourceLoadError(error)) return;
+    final resume = _player.playing && !_playbackPausedByUser;
+    final pos = _player.position;
+    final gen = _loadRequestGeneration;
+    final recovered = await _tryRecoverYoutubeSourceError(
+      errorGeneration: gen,
+      initialPosition: pos,
+    );
+    if (!recovered) {
+      if (_youtubeSourceRetryUsedForGeneration == gen) {
+        _notifyYoutubeStreamPlaybackFailed();
+      }
+      return;
+    }
+    if (resume && !_playbackPausedByUser) {
+      await _resumePlaybackAfterLoad(context: 'youtubeAsyncRetry');
+    }
   }
 
   Future<void> _playSafely({String context = 'play'}) async {
@@ -78,10 +175,10 @@ class PlayerController extends ChangeNotifier {
   /// until a long timeout (or never, if [play] keeps no-op'ing).
   Future<void> _resumePlaybackAfterLoad({
     String context = 'resumeAfterLoad',
+    int? playGeneration,
   }) async {
     if (_playbackPausedByUser) return;
-    _invalidatePlayResumeRetries();
-    final generation = _playControlGeneration;
+    final generation = playGeneration ?? _playControlGeneration;
     await _waitForPlayerPreparedAfterSourceChange();
     if (_playbackPausedByUser || _playControlGeneration != generation) return;
     // One event-loop turn; helps desktop embedders finish native load callbacks.
@@ -160,7 +257,15 @@ class PlayerController extends ChangeNotifier {
     // Single subscription: listening to [processingStateStream] and
     // [playerStateStream] both triggered platform init; concurrent inits caused
     // "Platform player … already exists" on some devices (just_audio / Android).
-    _playerStateSub = _player.playerStateStream.listen((state) {
+    _playbackEventSub = _player.playbackEventStream.listen(
+      (_) {},
+      onError: (Object e, StackTrace st) {
+        debugPrint('playbackEventStream error: $e\n$st');
+        unawaited(_handleAsyncYoutubePlaybackError(e));
+      },
+    );
+    _playerStateSub = _player.playerStateStream.listen(
+      (state) {
       _onProcessingState(state.processingState);
       final playing = state.playing;
       final proc = state.processingState;
@@ -183,21 +288,35 @@ class PlayerController extends ChangeNotifier {
         _lastDispatchedProcessing = proc;
         _schedulePlayerUiNotify();
       }
-    });
+    },
+      onError: (Object e, StackTrace st) {
+        debugPrint('playerStateStream error: $e\n$st');
+        unawaited(_handleAsyncYoutubePlaybackError(e));
+      },
+    );
     _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
   }
 
   /// [just_audio] can subscribe to [AudioSession] interruptions internally, but
   /// we disable that and handle focus here so phone calls / mic use reliably pause
   /// and transient focus loss can resume after the call.
-  final AudioPlayer _player = AudioPlayer(handleInterruptions: false);
+  final AudioPlayer _player = AudioPlayer(
+    handleInterruptions: false,
+    // Send Referer/Origin/User-Agent via ExoPlayer (avoids cleartext localhost proxy).
+    useProxyForRequestHeaders: false,
+    userAgent: youtubeStreamUserAgent,
+  );
   late final StreamSubscription<PlayerState> _playerStateSub;
+  late final StreamSubscription<PlaybackEvent> _playbackEventSub;
   StreamSubscription<int?>? _concatIndexSub;
+  bool _youtubeSourceRetryInFlight = false;
+  int _youtubeSourceRetryUsedForGeneration = -1;
   StreamSubscription<AudioInterruptionEvent>? _audioInterruptionSub;
   StreamSubscription<void>? _becomingNoisySub;
   StreamSubscription<AudioDevicesChangedEvent>? _devicesChangedSub;
   Timer? _notificationArtRefreshDebounce;
   bool _notificationArtRefreshInProgress = false;
+  final Set<String> _artEnrichInflightKeys = {};
 
   /// Set when the user explicitly pauses; blocks [_resumePlaybackAfterLoad] until play.
   bool _playbackPausedByUser = false;
@@ -217,7 +336,11 @@ class PlayerController extends ChangeNotifier {
   ProcessingState? _previousProcessing;
   bool _isLoadingSource = false;
   int _loadCurrentDepth = 0;
+  /// Bumped on each new [_loadCurrent] request; stale loads ignore errors/cleanup.
+  int _loadRequestGeneration = 0;
   int? _pendingConcatIndexWhileLoading;
+
+  bool _isStaleLoad(int loadId) => loadId != _loadRequestGeneration;
 
   /// After [setAudioSource], [currentIndexStream] can still emit `0` once loading
   /// ends even when [initialIndex] was non-zero — that would overwrite [_index] via
@@ -225,6 +348,9 @@ class PlayerController extends ChangeNotifier {
   DateTime? _postLoadConcatGuardUntil;
   int? _postLoadExpectedConcatIndex;
   bool _sourceNeedsReload = false;
+
+  /// Saved queue position when a large library restore skips native load on launch.
+  Duration? _pendingInitialPosition;
 
   /// While [skipNext]/[skipPrevious] update [_index] and reload/seek, ignore
   /// [currentIndexStream] so the UI is not advanced before audio catches up.
@@ -251,6 +377,12 @@ class PlayerController extends ChangeNotifier {
 
   Timer? _catalogNotifyThrottleTimer;
   bool _catalogNotifyThrottlePending = false;
+
+  Timer? _youtubeStreamStatsTimer;
+  int _youtubeStreamBitrateBitsPerSec = 0;
+  Duration _youtubeStatsLastBuffered = Duration.zero;
+  DateTime? _youtubeStatsLastSample;
+  YoutubeStreamTransferStats? _youtubeStreamStats;
 
   /// Avoid rebuilding the whole app (Library lists, etc.) on every [playerStateStream]
   /// tick — only notify when play/pause or processing state actually changes.
@@ -425,7 +557,23 @@ class PlayerController extends ChangeNotifier {
     List<TrackItem> tracks, {
     CatalogNotifyMode notify = CatalogNotifyMode.immediate,
   }) {
-    _libraryCatalog = List<TrackItem>.from(tracks);
+    final previousByKey = <String, TrackItem>{};
+    for (final t in _libraryCatalog) {
+      final fp = t.filePath?.trim();
+      if (fp == null || fp.isEmpty) continue;
+      final k = canonicalMusicLibraryPathKey(fp);
+      if (k.isNotEmpty) previousByKey[k] = t;
+    }
+
+    _libraryCatalog = tracks
+        .map((incoming) {
+          final fp = incoming.filePath?.trim();
+          if (fp == null || fp.isEmpty) return incoming;
+          final k = canonicalMusicLibraryPathKey(fp);
+          if (k.isEmpty) return incoming;
+          return TrackItem.mergePreservedAlbumArt(incoming, previousByKey[k]);
+        })
+        .toList(growable: false);
     _notifyCatalogListeners(notify);
   }
 
@@ -561,6 +709,45 @@ class PlayerController extends ChangeNotifier {
   Duration get position => _player.position;
   Duration? get duration => _player.duration;
 
+  /// True while resolving a source URL and/or the native player is not ready.
+  bool get isLoadingPlaybackSource => _isLoadingSource;
+
+  /// User-visible loading (YouTube stream resolve, [setAudioSource], early buffer).
+  bool get isPreparingPlayback {
+    if (currentTrack == null) return false;
+    if (_isLoadingSource) return true;
+    if (!_isRemoteYoutubeStreamTrack(currentTrack!)) return false;
+    switch (_player.processingState) {
+      case ProcessingState.loading:
+        return true;
+      case ProcessingState.buffering:
+        return !_player.playing;
+      case ProcessingState.idle:
+      case ProcessingState.ready:
+      case ProcessingState.completed:
+        return false;
+    }
+  }
+
+  /// Short status for Now Playing / mini player while [isPreparingPlayback].
+  String get playbackLoadingLabel {
+    if (_isLoadingSource) return 'Preparing stream…';
+    return switch (_player.processingState) {
+      ProcessingState.buffering => 'Buffering…',
+      ProcessingState.loading => 'Loading stream…',
+      _ => 'Loading…',
+    };
+  }
+
+  static bool _isRemoteYoutubeStreamTrack(TrackItem track) {
+    if (!track.isYoutubeStream) return false;
+    final fp = track.filePath?.trim();
+    return fp == null || fp.isEmpty;
+  }
+
+  /// Live estimate while streaming YouTube (null for local files).
+  YoutubeStreamTransferStats? get youtubeStreamStats => _youtubeStreamStats;
+
   static PlayerController of(BuildContext context) {
     final scope = context
         .dependOnInheritedWidgetOfExactType<PlayerControllerScope>();
@@ -612,14 +799,13 @@ class PlayerController extends ChangeNotifier {
       final notifier = _sleepTimerTrackEndNotifier;
       _sleepTimerTrackEndNotifier = null;
       notifier?.call();
-      
+      _playbackPausedByUser = true;
       try {
         _invalidatePlayResumeRetries();
         await _player.pause();
       } catch (e) {
         debugPrint('Sleep timer natural stop failed: $e');
       }
-      
       notifyListeners();
       return;
     }
@@ -706,6 +892,7 @@ class PlayerController extends ChangeNotifier {
         final notifier = _sleepTimerTrackEndNotifier;
         _sleepTimerTrackEndNotifier = null;
         notifier?.call();
+        _playbackPausedByUser = true;
 
         // Authoritative pause and seek back to the end of the previous track
         // so we don't start playing the next one in the background.
@@ -714,7 +901,6 @@ class PlayerController extends ChangeNotifier {
         Future.delayed(const Duration(milliseconds: 20), () async {
           try {
             _invalidatePlayResumeRetries();
-            // Force pause at the platform level bypassing the transport lock.
             await _player.pause();
             
             // Re-sync logical index if the auto-advance had already moved it
@@ -753,6 +939,7 @@ class PlayerController extends ChangeNotifier {
   Future<void> _syncUiAfterQueueIndexChange() async {
     if (_manualQueueAdvance) return;
     await _waitForPlayerPreparedAfterSourceChange();
+    schedulePlaybackArtEnrichment();
     _prewarmPlaybackAlbumArt();
     _scheduleNotificationArtRefresh();
     notifyListeners();
@@ -764,29 +951,7 @@ class PlayerController extends ChangeNotifier {
       if (upcomingTrack != null) upcomingTrack!,
     ];
     if (tracks.isEmpty) return;
-    prewarmAlbumArtCache(tracks, maxCount: tracks.length);
-  }
-
-  /// Playlist indices in [sourceOrder] that should get [MediaItem.artUri] when
-  /// building a concat source. Large libraries only tag the current item so
-  /// scan/load does not rasterize thousands of covers.
-  List<int> _notificationArtPlaylistIndices(
-    List<int> sourceOrder,
-    int logical,
-  ) {
-    if (sourceOrder.isEmpty) return const <int>[];
-    if (_playlist.length <= 80) return List<int>.from(sourceOrder);
-    final pos = sourceOrder.indexOf(logical);
-    if (pos < 0) return <int>[logical];
-    const radius = 2;
-    final out = <int>{};
-    for (var d = -radius; d <= radius; d++) {
-      final i = pos + d;
-      if (i >= 0 && i < sourceOrder.length) {
-        out.add(sourceOrder[i]);
-      }
-    }
-    return out.toList();
+    prewarmAlbumArtCache(tracks, maxCount: 2);
   }
 
   /// During [setAudioSource] with lazy preparation, [currentIndexStream] can briefly
@@ -804,9 +969,7 @@ class PlayerController extends ChangeNotifier {
     if (concatIdx < 0 || concatIdx >= order.length) return false;
     final pl = order[concatIdx];
     if (pl < 0 || pl >= _playlist.length) return false;
-    final fp = _playlist[pl].filePath?.trim();
-    if (fp == null || fp.isEmpty) return false;
-    return canonicalMusicLibraryPathKey(fp) == loadTargetKey;
+    return _playbackKeyForTrack(_playlist[pl]) == loadTargetKey;
   }
 
   Future<void> setPlaylist(
@@ -843,9 +1006,12 @@ class PlayerController extends ChangeNotifier {
     } else {
       _resetShuffleState();
     }
+    final loadId = ++_loadRequestGeneration;
+    _stopYoutubeStreamStats();
     notifyListeners();
-    await _loadCurrent();
-    _sourceNeedsReload = false;
+    await _loadCurrent(loadToken: loadId);
+    if (_isStaleLoad(loadId)) return;
+    _sourceNeedsReload = _useSingleTrackAudioSource();
   }
 
   /// Updates library rows and in-queue metadata after a rescan without reloading
@@ -876,7 +1042,7 @@ class PlayerController extends ChangeNotifier {
       final k = canonicalMusicLibraryPathKey(fp);
       final fresh = byKey[k];
       if (fresh != null && fresh != _playlist[i]) {
-        _playlist[i] = fresh;
+        _playlist[i] = TrackItem.mergePreservedAlbumArt(fresh, _playlist[i]);
         changed = true;
       }
     }
@@ -987,6 +1153,8 @@ class PlayerController extends ChangeNotifier {
     bool enableShuffle = false,
   }) async {
     _playbackPausedByUser = false;
+    _invalidatePlayResumeRetries();
+    final resumeGen = _playControlGeneration;
     await setPlaylist(
       tracks,
       startIndex: startIndex,
@@ -995,14 +1163,21 @@ class PlayerController extends ChangeNotifier {
       keepShuffleMode: keepShuffleMode,
       enableShuffle: enableShuffle,
     );
+    if (_playControlGeneration != resumeGen) return;
     // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
     // returns; [play] can no-op until [ProcessingState.ready].
     await _resumePlaybackAfterLoad(
       context: 'setPlaylistAndPlay.play',
+      playGeneration: resumeGen,
     );
   }
 
   static bool _sameQueuedIdentity(TrackItem a, TrackItem b) {
+    final ya = a.youtubeVideoId?.trim();
+    final yb = b.youtubeVideoId?.trim();
+    if (ya != null && ya.isNotEmpty && yb != null && yb.isNotEmpty) {
+      return ya == yb;
+    }
     final pa = a.filePath;
     final pb = b.filePath;
     if (pa != null && pa.isNotEmpty && pb != null && pb.isNotEmpty) {
@@ -1203,14 +1378,15 @@ class PlayerController extends ChangeNotifier {
     for (var i = 0; i < _playlist.length; i++) {
       final fp = _playlist[i].filePath;
       if (fp != null && canonicalMusicLibraryPathKey(fp) == key) {
-        _playlist[i] = updated;
+        _playlist[i] = TrackItem.mergePreservedAlbumArt(updated, _playlist[i]);
         changed = true;
       }
     }
     for (var c = 0; c < _libraryCatalog.length; c++) {
       final fp = _libraryCatalog[c].filePath;
       if (fp != null && canonicalMusicLibraryPathKey(fp) == key) {
-        _libraryCatalog[c] = updated;
+        _libraryCatalog[c] =
+            TrackItem.mergePreservedAlbumArt(updated, _libraryCatalog[c]);
         changed = true;
       }
     }
@@ -1381,6 +1557,7 @@ class PlayerController extends ChangeNotifier {
 
     final before = _playlist.length;
     _playlist.removeWhere((t) {
+      if (t.isYoutubeStream) return false;
       final fp = t.filePath;
       if (fp == null || fp.trim().isEmpty) return true;
       final k = canonicalMusicLibraryPathKey(fp);
@@ -1452,9 +1629,10 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  Future<void> jumpToIndex(int i, {bool autoPlay = true}) async {
+  Future<void> jumpToIndex(int i, {bool? autoPlay}) async {
     if (i < 0 || i >= _playlist.length) return;
-    if (autoPlay) {
+    final playAfter = autoPlay ?? !_playbackPausedByUser;
+    if (playAfter) {
       _playbackPausedByUser = false;
     }
     if (_playbackPathKeysScope != null && !_playlistIndexMatchesScope(i)) {
@@ -1471,11 +1649,16 @@ class PlayerController extends ChangeNotifier {
       _index = i;
     }
     notifyListeners();
-    await _loadCurrent();
-    if (autoPlay) {
+    await _loadCurrent(stopBeforeLoad: playAfter);
+    if (playAfter) {
       await _resumePlaybackAfterLoad(
         context: 'jumpToIndex.play',
       );
+    } else {
+      try {
+        await _player.pause();
+      } catch (_) {}
+      notifyListeners();
     }
   }
 
@@ -1512,14 +1695,254 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _useSingleTrackAudioSource() {
+    if (_useSingleTrackAudioSourceForQueue(_playlist.length)) return true;
+    // YouTube streams are resolved per track; avoid pre-fetching every result.
+    if (!kIsWeb && _playlist.any((t) => t.isYoutubeStream)) return true;
+    return false;
+  }
+
+  /// Loads embedded cover when [track] has no art. Safe during playback (unlike
+  /// idle-only bulk library warmup).
+  Future<void> enrichTrackArtIfMissing(
+    TrackItem track, {
+    CatalogNotifyMode notify = CatalogNotifyMode.immediate,
+    bool refreshNotificationArt = true,
+  }) async {
+    if (kIsWeb) return;
+    final path = track.filePath?.trim();
+    if (path == null || path.isEmpty) return;
+    final key = canonicalMusicLibraryPathKey(path);
+    if (key.isEmpty) return;
+    final existing = track.albumArtBytes;
+    if (existing != null && existing.isNotEmpty) return;
+    if (!_artEnrichInflightKeys.add(key)) return;
+    try {
+      TrackItem base = track;
+      for (final t in _playlist) {
+        final fp = t.filePath?.trim();
+        if (fp != null &&
+            fp.isNotEmpty &&
+            canonicalMusicLibraryPathKey(fp) == key) {
+          base = t;
+          break;
+        }
+      }
+      final enriched = await readAudioMetadata(base);
+      if (enriched.albumArtBytes == null || enriched.albumArtBytes!.isEmpty) {
+        return;
+      }
+      updateTrackByPath(
+        path,
+        enriched,
+        notify: notify,
+        refreshNotificationArt: refreshNotificationArt,
+      );
+    } catch (e, st) {
+      debugPrint('enrichTrackArtIfMissing: $e\n$st');
+    } finally {
+      _artEnrichInflightKeys.remove(key);
+    }
+  }
+
+  /// Current, next, and (in shuffle) a couple of upcoming rows — fixes Now Playing
+  /// art when skipping without reloading the native source.
+  void schedulePlaybackArtEnrichment() {
+    if (kIsWeb || _playlist.isEmpty) return;
+    final targets = <TrackItem>[];
+    final seen = <String>{};
+
+    void add(TrackItem? t) {
+      if (t == null) return;
+      final path = t.filePath?.trim();
+      if (path == null || path.isEmpty) return;
+      final key = canonicalMusicLibraryPathKey(path);
+      if (key.isEmpty || !seen.add(key)) return;
+      final art = t.albumArtBytes;
+      if (art != null && art.isNotEmpty) return;
+      targets.add(t);
+    }
+
+    add(currentTrack);
+    add(upcomingTrack);
+    if (_shuffle && _shuffleOrder.isNotEmpty) {
+      for (var offset = 2; offset <= 3; offset++) {
+        final pos = _shufflePos + offset;
+        if (pos < _shuffleOrder.length) {
+          add(_playlist[_shuffleOrder[pos]]);
+        } else if (_repeat == PlaylistRepeatMode.all) {
+          add(_playlist[_shuffleOrder[(pos) % _shuffleOrder.length]]);
+        }
+      }
+    }
+    if (targets.isEmpty) return;
+    unawaited(
+      enrichTracksArtIfMissing(
+        targets,
+        maxTracks: targets.length,
+        notify: CatalogNotifyMode.immediate,
+      ),
+    );
+  }
+
+  Future<void> enrichTracksArtIfMissing(
+    List<TrackItem> tracks, {
+    int maxTracks = 8,
+    CatalogNotifyMode notify = CatalogNotifyMode.throttled,
+    bool refreshNotificationArt = false,
+  }) async {
+    if (kIsWeb) return;
+    final limit = maxTracks.clamp(1, 32);
+    var done = 0;
+    for (final t in tracks) {
+      if (done >= limit) break;
+      final art = t.albumArtBytes;
+      if (art != null && art.isNotEmpty) continue;
+      await enrichTrackArtIfMissing(
+        t,
+        notify: notify,
+        refreshNotificationArt: refreshNotificationArt,
+      );
+      done++;
+      if (done < limit) {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+      }
+    }
+  }
+
+  Future<void> _enrichTrackArtAfterLoad(int logical, String enrichPath) async {
+    if (logical < 0 || logical >= _playlist.length) return;
+    await enrichTrackArtIfMissing(
+      _playlist[logical],
+      refreshNotificationArt: true,
+    );
+  }
+
+  String _playbackKeyForTrack(TrackItem track) {
+    final yt = track.youtubeVideoId?.trim();
+    if (yt != null && yt.isNotEmpty) return 'yt:$yt';
+    final fp = track.filePath?.trim();
+    if (fp != null && fp.isNotEmpty) {
+      return canonicalMusicLibraryPathKey(fp);
+    }
+    return '';
+  }
+
+  void _stopYoutubeStreamStats() {
+    _youtubeStreamStatsTimer?.cancel();
+    _youtubeStreamStatsTimer = null;
+    _youtubeStatsLastSample = null;
+    _youtubeStatsLastBuffered = Duration.zero;
+    _youtubeStreamBitrateBitsPerSec = 0;
+    if (_youtubeStreamStats != null) {
+      _youtubeStreamStats = null;
+      notifyListeners();
+    }
+  }
+
+  void _startYoutubeStreamStats({required int bitrateBitsPerSec}) {
+    _stopYoutubeStreamStats();
+    _youtubeStreamBitrateBitsPerSec = bitrateBitsPerSec;
+    _youtubeStatsLastBuffered = _player.bufferedPosition;
+    _youtubeStatsLastSample = DateTime.now();
+    _youtubeStreamStatsTimer = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) => _sampleYoutubeStreamStats(),
+    );
+    _sampleYoutubeStreamStats();
+  }
+
+  void _sampleYoutubeStreamStats() {
+    final track = currentTrack;
+    final fp = track?.filePath?.trim();
+    if (track == null ||
+        !track.isYoutubeStream ||
+        (fp != null && fp.isNotEmpty)) {
+      _stopYoutubeStreamStats();
+      return;
+    }
+
+    final bitrate = _youtubeStreamBitrateBitsPerSec;
+    final pos = _player.position;
+    final buffered = _player.bufferedPosition;
+    final now = DateTime.now();
+    final last = _youtubeStatsLastSample ?? now;
+    final elapsedMs = now.difference(last).inMilliseconds;
+    _youtubeStatsLastSample = now;
+
+    var bytesPerSec = 0.0;
+    if (bitrate > 0 && elapsedMs > 0) {
+      final bufferGrowthMs =
+          (buffered - _youtubeStatsLastBuffered).inMilliseconds;
+      if (bufferGrowthMs > 0) {
+        bytesPerSec = bufferGrowthMs / elapsedMs * (bitrate / 8);
+      } else if (_player.playing) {
+        bytesPerSec = bitrate / 8.0;
+      }
+      _youtubeStatsLastBuffered = buffered;
+    }
+
+    final estimatedConsumed = bitrate > 0
+        ? ((pos.inMilliseconds / 1000.0) * (bitrate / 8)).round()
+        : 0;
+    final bufferAhead = buffered > pos ? buffered - pos : Duration.zero;
+    final buffering = _player.processingState == ProcessingState.buffering ||
+        (_player.processingState == ProcessingState.loading && !_player.playing);
+
+    _youtubeStreamStats = YoutubeStreamTransferStats(
+      downloadRateBytesPerSec: bytesPerSec,
+      estimatedBytesConsumed: estimatedConsumed,
+      bufferAhead: bufferAhead,
+      streamBitrateBitsPerSec: bitrate,
+      isBuffering: buffering,
+    );
+    notifyListeners();
+  }
+
+  Future<({Uri uri, Map<String, String>? headers})?> _playbackSourceForTrack(
+    TrackItem track, {
+    void Function(int bitrateBitsPerSec)? onYoutubeBitrate,
+  }) async {
+    final fp = track.filePath?.trim();
+    if (fp != null && fp.isNotEmpty) {
+      return (uri: Uri.file(fp), headers: null);
+    }
+    final yt = track.youtubeVideoId?.trim();
+    if (yt == null || yt.isEmpty) return null;
+    final playback =
+        await YoutubeSearchService.instance.resolveYoutubePlayback(yt);
+    if (playback == null) return null;
+    onYoutubeBitrate?.call(playback.bitrateBitsPerSec);
+    return (uri: playback.uri, headers: playback.headers);
+  }
+
   Future<void> _loadCurrent({
     Duration initialPosition = Duration.zero,
     bool stopBeforeLoad = true,
     bool retryAfterMissingPath = true,
+    bool retryAfterYoutubeSourceError = true,
+    int? loadToken,
+  }) async {
+    final loadId = loadToken ?? ++_loadRequestGeneration;
+    await _loadCurrentImpl(
+      loadId: loadId,
+      initialPosition: initialPosition,
+      stopBeforeLoad: stopBeforeLoad,
+      retryAfterMissingPath: retryAfterMissingPath,
+      retryAfterYoutubeSourceError: retryAfterYoutubeSourceError,
+    );
+  }
+
+  Future<void> _loadCurrentImpl({
+    required int loadId,
+    Duration initialPosition = Duration.zero,
+    bool stopBeforeLoad = true,
+    bool retryAfterMissingPath = true,
+    bool retryAfterYoutubeSourceError = true,
   }) async {
     final preview = currentTrack;
-    final pathPreview = preview?.filePath;
-    if (preview == null || pathPreview == null || pathPreview.isEmpty) {
+    if (preview == null || !preview.isPlayable) {
+      _stopYoutubeStreamStats();
       _suppressTrackCompletedAdvance = false;
       if (stopBeforeLoad) {
         try {
@@ -1531,7 +1954,7 @@ class PlayerController extends ChangeNotifier {
       return;
     }
 
-    final loadTargetPathKey = canonicalMusicLibraryPathKey(pathPreview.trim());
+    final loadTargetPathKey = _playbackKeyForTrack(preview);
 
     _postLoadConcatGuardUntil = null;
     _postLoadExpectedConcatIndex = null;
@@ -1540,6 +1963,7 @@ class PlayerController extends ChangeNotifier {
     // run [skipNext] in the gap after [stopForExternalFileEdit] (see [_suppressTrackCompletedAdvance]).
     _loadCurrentDepth++;
     _isLoadingSource = true;
+    notifyListeners();
     try {
       if (_prunePlaylistPathsNotInCatalog() && _playlist.isNotEmpty) {
         notifyListeners();
@@ -1558,6 +1982,7 @@ class PlayerController extends ChangeNotifier {
           await _player.stop();
         } catch (_) {}
       }
+      if (_isStaleLoad(loadId)) return;
 
       var logical = _logicalPlaylistIndex();
       if (!order.contains(logical)) {
@@ -1578,64 +2003,43 @@ class PlayerController extends ChangeNotifier {
       }
 
       final enrichPath = _playlist[logical].filePath?.trim();
-      if (enrichPath != null &&
-          enrichPath.isNotEmpty &&
-          (_playlist[logical].albumArtBytes == null ||
-              _playlist[logical].albumArtBytes!.isEmpty)) {
-        final enriched = await readAudioMetadata(_playlist[logical]);
-        if (enriched.albumArtBytes != null &&
-            enriched.albumArtBytes!.isNotEmpty) {
-          updateTrackByPath(
-            enrichPath,
-            enriched,
-            refreshNotificationArt: false,
-          );
-        }
-      }
 
       final children = <AudioSource>[];
       final loadedOrder = <int>[];
       var initialConcatIndex = 0;
       var concatPos = 0;
-      final sourceOrder = _useSingleTrackAudioSourceForPlatform()
-          ? <int>[logical]
-          : order;
-
-      final logicalTrack = logical >= 0 && logical < _playlist.length
-          ? _playlist[logical]
-          : preview;
-      final artIndices = _notificationArtPlaylistIndices(sourceOrder, logical);
-      final notificationArtUris = <int, Uri?>{};
-      await Future.wait(
-        artIndices.map((pi) async {
-          if (pi < 0 || pi >= _playlist.length) return;
-          notificationArtUris[pi] =
-              await uriForNotificationAlbumArt(_playlist[pi]);
-        }),
-      );
-      if (logical >= 0 &&
-          logical < _playlist.length &&
-          !notificationArtUris.containsKey(logical)) {
-        notificationArtUris[logical] =
-            await uriForNotificationAlbumArt(logicalTrack);
-      }
+      var resolvedYoutubeBitrate = 0;
+      final useSingleTrack = _useSingleTrackAudioSource();
+      final sourceOrder = useSingleTrack ? <int>[logical] : order;
 
       for (final pi in sourceOrder) {
+        if (_isStaleLoad(loadId)) return;
         if (pi < 0 || pi >= _playlist.length) continue;
         final t = _playlist[pi];
-        final fp = t.filePath?.trim();
-        if (fp == null || fp.isEmpty) continue;
+        if (!t.isPlayable) continue;
 
-        final artUri = notificationArtUris[pi];
+        final source = await _playbackSourceForTrack(
+          t,
+          onYoutubeBitrate: pi == logical
+              ? (b) => resolvedYoutubeBitrate = b
+              : null,
+        );
+        if (_isStaleLoad(loadId)) return;
+        if (source == null) continue;
+
+        final mediaId = _playbackKeyForTrack(t);
         children.add(
           AudioSource.uri(
-            Uri.file(fp),
+            source.uri,
+            headers: source.headers,
             tag: MediaItem(
-              id: fp,
+              id: mediaId.isNotEmpty ? mediaId : source.uri.toString(),
               title: t.title,
               artist: t.artist,
               album: t.metaLine,
-              artUri: artUri,
+              artUri: t.thumbnailUrl != null && t.thumbnailUrl!.isNotEmpty
+                  ? Uri.parse(t.thumbnailUrl!)
+                  : null,
             ),
           ),
         );
@@ -1654,7 +2058,9 @@ class PlayerController extends ChangeNotifier {
       initialConcatIndex = initialConcatIndex.clamp(0, children.length - 1);
       _activeSourceOrder = loadedOrder;
 
-      if (_useSingleTrackAudioSourceForPlatform()) {
+      if (_isStaleLoad(loadId)) return;
+
+      if (_useSingleTrackAudioSource()) {
         await _player.setAudioSource(
           children.single,
           initialPosition: initialPosition,
@@ -1669,13 +2075,33 @@ class PlayerController extends ChangeNotifier {
           initialPosition: initialPosition,
         );
       }
+      if (_isStaleLoad(loadId)) return;
       await _applyPreferredVolume();
       _postLoadExpectedConcatIndex = initialConcatIndex;
       _postLoadConcatGuardUntil = DateTime.now().add(
         const Duration(milliseconds: 650),
       );
-      _sourceNeedsReload = false;
+      _sourceNeedsReload = useSingleTrack;
+      final playing = _playlist[logical];
+      final playingPath = playing.filePath?.trim();
+      if (playing.isYoutubeStream &&
+          (playingPath == null || playingPath.isEmpty) &&
+          resolvedYoutubeBitrate > 0) {
+        _startYoutubeStreamStats(bitrateBitsPerSec: resolvedYoutubeBitrate);
+      } else {
+        _stopYoutubeStreamStats();
+      }
+      if (enrichPath != null && enrichPath.isNotEmpty) {
+        unawaited(_enrichTrackArtAfterLoad(logical, enrichPath));
+      }
     } catch (e, st) {
+      if (_isInterruptedAbort(e) && _isStaleLoad(loadId)) {
+        return;
+      }
+      if (_isInterruptedAbort(e)) {
+        return;
+      }
+      if (_isStaleLoad(loadId)) return;
       debugPrint('Playback load error: $e\n$st');
       if (retryAfterMissingPath) {
         final missingPath = _extractMissingPathFromLoadError(e);
@@ -1686,28 +2112,55 @@ class PlayerController extends ChangeNotifier {
               initialPosition: Duration.zero,
               stopBeforeLoad: true,
               retryAfterMissingPath: false,
+              retryAfterYoutubeSourceError: retryAfterYoutubeSourceError,
+              loadToken: loadId,
             );
             return;
           }
+        }
+      }
+      if (retryAfterYoutubeSourceError && _isYoutubeSourceLoadError(e)) {
+        final track = preview;
+        final fp = track?.filePath?.trim();
+        if (track != null &&
+            track.isYoutubeStream &&
+            (fp == null || fp.isEmpty) &&
+            _playlist.isNotEmpty) {
+          final recovered = await _tryRecoverYoutubeSourceError(
+            errorGeneration: _loadRequestGeneration,
+            initialPosition: initialPosition,
+            loadToken: loadId,
+          );
+          if (recovered) return;
+        }
+      }
+      if (_isYoutubeSourceLoadError(e)) {
+        final track = preview;
+        if (track != null && _isRemoteYoutubeStreamTrack(track)) {
+          _notifyYoutubeStreamPlaybackFailed();
         }
       }
     } finally {
       _loadCurrentDepth--;
       if (_loadCurrentDepth <= 0) {
         _loadCurrentDepth = 0;
-        _isLoadingSource = false;
-        _suppressTrackCompletedAdvance = false;
-        _ignoreSpuriousPlaybackCompletedUntil = null;
-        _scheduleNotificationArtRefresh();
+        if (!_isStaleLoad(loadId)) {
+          _isLoadingSource = false;
+          _suppressTrackCompletedAdvance = false;
+          _ignoreSpuriousPlaybackCompletedUntil = null;
+          _scheduleNotificationArtRefresh();
+        }
       }
       final pending = _pendingConcatIndexWhileLoading;
       _pendingConcatIndexWhileLoading = null;
-      if (pending != null &&
+      if (!_isStaleLoad(loadId) &&
+          pending != null &&
           _pendingConcatIndexMatchesLoadedPath(pending, loadTargetPathKey) &&
           _applyConcatIndexChanged(pending)) {
         notifyListeners();
       }
     }
+    if (_isStaleLoad(loadId)) return;
     _prewarmPlaybackAlbumArt();
     notifyListeners();
   }
@@ -1827,6 +2280,24 @@ class PlayerController extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Pause, [stop], and wait for ExoPlayer/MediaCodec teardown before Android
+  /// removes the task (Quit). Avoids "Handler on a dead thread" log spam when
+  /// the process exits while the decoder is still in RELEASING.
+  Future<void> releaseAudioForAppExit() async {
+    _suppressTrackCompletedAdvance = true;
+    _ignoreSpuriousPlaybackCompletedUntil = DateTime.now().add(
+      const Duration(seconds: 2),
+    );
+    _playbackPausedByUser = true;
+    try {
+      if (_player.playing) {
+        await _player.pause();
+      }
+      await _player.stop();
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+  }
+
   /// Coalesce stream-driven UI updates (e.g. notification play/pause) to one frame.
   void _schedulePlayerUiNotify() {
     if (_playerUiNotifyScheduled) return;
@@ -1843,6 +2314,11 @@ class PlayerController extends ChangeNotifier {
     _schedulePlayerUiNotify();
     final generation = _playControlGeneration;
     try {
+      if (_sourceNeedsReload && _playlist.isNotEmpty) {
+        final pos = _pendingInitialPosition ?? Duration.zero;
+        _pendingInitialPosition = null;
+        await _loadCurrent(initialPosition: pos);
+      }
       await _playSafely(context: 'play');
       if (_playbackPausedByUser || _playControlGeneration != generation) return;
       if (!_player.playing) {
@@ -1895,7 +2371,7 @@ class PlayerController extends ChangeNotifier {
     int playlistIndex, {
     required String playContext,
   }) async {
-    if (_sourceNeedsReload || _useSingleTrackAudioSourceForPlatform()) {
+    if (_sourceNeedsReload || _useSingleTrackAudioSource()) {
       await _loadCurrent();
       _sourceNeedsReload = false;
       await _resumePlaybackAfterLoad(context: playContext);
@@ -1921,7 +2397,14 @@ class PlayerController extends ChangeNotifier {
         await _resumePlaybackAfterLoad(context: playContext);
         return;
       }
-      await _playSafely(context: playContext);
+      schedulePlaybackArtEnrichment();
+      if (_playbackPausedByUser) {
+        try {
+          await _player.pause();
+        } catch (_) {}
+      } else {
+        await _playSafely(context: playContext);
+      }
     } catch (_) {
       await _loadCurrent();
       _sourceNeedsReload = false;
@@ -1932,12 +2415,12 @@ class PlayerController extends ChangeNotifier {
   /// Next track; at end pauses unless [PlaylistRepeatMode.all].
   Future<void> skipNext() async {
     if (_playlist.isEmpty) return;
-    _playbackPausedByUser = false;
     _manualQueueAdvance = true;
     try {
       await _skipNextImpl();
     } finally {
       _manualQueueAdvance = false;
+      schedulePlaybackArtEnrichment();
       notifyListeners();
     }
   }
@@ -1995,12 +2478,12 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> skipPrevious() async {
     if (_playlist.isEmpty) return;
-    _playbackPausedByUser = false;
     _manualQueueAdvance = true;
     try {
       await _skipPreviousImpl();
     } finally {
       _manualQueueAdvance = false;
+      schedulePlaybackArtEnrichment();
       notifyListeners();
     }
   }
@@ -2166,6 +2649,14 @@ class PlayerController extends ChangeNotifier {
 
     notifyListeners();
 
+    if (!resumePlaying &&
+        _playlist.length >= _largeQueueNativeDeferThreshold) {
+      // ~1800-song libraries: restore queue metadata only; load ExoPlayer on first play.
+      _sourceNeedsReload = true;
+      _pendingInitialPosition = position;
+      return;
+    }
+
     await _loadCurrent();
 
     Duration seekTo = Duration.zero;
@@ -2201,6 +2692,7 @@ class PlayerController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stopYoutubeStreamStats();
     _catalogNotifyThrottleTimer?.cancel();
     _catalogNotifyThrottleTimer = null;
     _catalogNotifyThrottlePending = false;
@@ -2213,6 +2705,7 @@ class PlayerController extends ChangeNotifier {
     _devicesChangedSub?.cancel();
     _devicesChangedSub = null;
     _concatIndexSub?.cancel();
+    _playbackEventSub.cancel();
     _playerStateSub.cancel();
     unawaited(() async {
       try {

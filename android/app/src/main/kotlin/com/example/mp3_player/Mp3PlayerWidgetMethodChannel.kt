@@ -22,6 +22,10 @@ object Mp3PlayerWidgetMethodChannel {
                         Mp3PlayerWidgetSync.handlePlaybackProgress(appContext, args)
                         result.success(null)
                     }
+                    "markStoppedOnQuit" -> {
+                        Mp3PlayerWidgetSync.markStopped(appContext)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }

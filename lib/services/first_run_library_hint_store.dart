@@ -1,16 +1,17 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Controls one-time "how to add music folders" guidance for new installs.
+/// Controls welcome dialog for users who have not added music folders yet.
 abstract final class FirstRunLibraryHintStore {
-  static const _seenKey = 'first_run_library_hint_seen_v1';
+  static const _dismissedKey = 'first_run_library_hint_dismissed_v1';
 
   static Future<bool> shouldShowHint() async {
     final prefs = await SharedPreferences.getInstance();
-    return !(prefs.getBool(_seenKey) ?? false);
+    return !(prefs.getBool(_dismissedKey) ?? false);
   }
 
-  static Future<void> markSeen() async {
+  /// User tapped "Later" — do not show the dialog again until folders exist.
+  static Future<void> markDismissed() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_seenKey, true);
+    await prefs.setBool(_dismissedKey, true);
   }
 }
