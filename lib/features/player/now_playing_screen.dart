@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../audio/player_controller.dart';
+import '../../platform/youtube_platform_support.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/saved_youtube_audio_store.dart';
@@ -213,7 +214,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 
   List<PopupMenuEntry<String>> _softBlurRestMenuEntries(TrackItem track) {
     final out = <PopupMenuEntry<String>>[];
-    if (track.isYoutubeStream) {
+    if (track.isYoutubeStream &&
+        YoutubePlatformSupport.isOnlinePlaybackSupported) {
       out.add(
         const PopupMenuItem<String>(
           value: 'yt:channel',
@@ -504,6 +506,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         final stats = player.youtubeStreamStats;
         if (track == null ||
             !track.isYoutubeStream ||
+            !YoutubePlatformSupport.isOnlinePlaybackSupported ||
             stats == null ||
             (track.filePath != null && track.filePath!.trim().isNotEmpty)) {
           return const SizedBox.shrink();
@@ -652,7 +655,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                 player: player,
                                 iconColor: context.controlAccent,
                               ),
-                              if (cur.isYoutubeStream) ...[
+                              if (cur.isYoutubeStream &&
+                                  YoutubePlatformSupport
+                                      .isOnlinePlaybackSupported) ...[
                                 _saveYoutubeAudioButton(context, cur),
                                 _saveYoutubeLinkButton(context, cur),
                               ],
@@ -752,7 +757,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                   enableFavorite: favOk,
                                   isFavorite: isFav,
                                   enableYoutubeChannelBrowse:
-                                      cur.isYoutubeStream,
+                                      cur.isYoutubeStream &&
+                                      YoutubePlatformSupport
+                                          .isOnlinePlaybackSupported,
                                 ),
                           );
                         },
@@ -1393,7 +1400,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                             ),
                           ),
                         ],
-                        if (track.isYoutubeStream) ...[
+                        if (track.isYoutubeStream &&
+                            YoutubePlatformSupport
+                                .isOnlinePlaybackSupported) ...[
                           _saveYoutubeLinkButton(context, track),
                           _saveYoutubeAudioButton(context, track),
                         ],
@@ -1841,7 +1850,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                     player: player,
                     iconColor: ink.active,
                   ),
-                  if (track.isYoutubeStream) ...[
+                  if (track.isYoutubeStream &&
+                      YoutubePlatformSupport.isOnlinePlaybackSupported) ...[
                     const SizedBox(width: 4),
                     _saveYoutubeAudioButton(context, track),
                     _saveYoutubeLinkButton(context, track),

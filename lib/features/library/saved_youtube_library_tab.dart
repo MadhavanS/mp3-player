@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
+import '../../platform/youtube_platform_support.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/saved_youtube_audio_store.dart';
@@ -321,7 +322,8 @@ class _SavedYoutubeLibraryOverflowMenu extends StatelessWidget {
           enableDeleteFromDevice:
               !savedAudio && trackCanDeleteFromDevice(track),
           enableFavorite: false,
-          enableYoutubeChannelBrowse: channelId.isNotEmpty,
+          enableYoutubeChannelBrowse: channelId.isNotEmpty &&
+              YoutubePlatformSupport.isOnlinePlaybackSupported,
         );
 
         final items = <PopupMenuEntry<_SavedYoutubeLibraryMenuValue>>[];

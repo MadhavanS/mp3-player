@@ -27,13 +27,59 @@ class YoutubePlaybackSource {
 }
 
 const Duration _searchTimeout = Duration(seconds: 25);
-const Duration _streamManifestTimeout = Duration(seconds: 30);
+/// Per client-set attempt; we try several sets so total wait can be longer.
+const Duration _streamManifestTimeout = Duration(seconds: 18);
+const Duration _videoMetadataTimeout = Duration(seconds: 12);
+const int _enrichMetadataConcurrency = 6;
 
 /// YouTube search and stream URL resolution via [ytClient].
 class YoutubeSearchService {
   YoutubeSearchService._();
 
   static final YoutubeSearchService instance = YoutubeSearchService._();
+
+  /// Resolves a watch URL to a single [TrackItem], or null if not a video link.
+  Future<TrackItem?> trackFromVideoUrl(String url) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return null;
+    try {
+      final id = VideoId.parseVideoId(trimmed);
+      final video =
+          await ytClient.videos.get(id).timeout(_videoMetadataTimeout);
+      return TrackItem.fromYoutubeVideo(video);
+    } on TimeoutException {
+      debugPrint('YouTube video URL timed out: $trimmed');
+      return null;
+    } catch (e, st) {
+      debugPrint('YouTube video URL error: $e\n$st');
+      return null;
+    }
+  }
+
+  /// Loads videos from a playlist URL.
+  Future<List<TrackItem>> tracksFromPlaylistUrl(
+    String url, {
+    int maxVideos = 50,
+  }) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return [];
+    try {
+      final playlistId = PlaylistId.parsePlaylistId(trimmed);
+      final videos = await ytClient.playlists
+          .getVideos(playlistId)
+          .take(maxVideos)
+          .toList();
+      return _enrichTracksMissingTitles(
+        videos.map(TrackItem.fromYoutubeVideo).toList(),
+      );
+    } on TimeoutException {
+      debugPrint('YouTube playlist URL timed out: $trimmed');
+      return [];
+    } catch (e, st) {
+      debugPrint('YouTube playlist URL error: $e\n$st');
+      return [];
+    }
+  }
 
   /// Search YouTube for videos and map them to [TrackItem]s.
   Future<List<TrackItem>> searchVideos(String query) async {
@@ -63,6 +109,19 @@ class YoutubeSearchService {
     if (id.isEmpty) return [];
 
     try {
+      final fromPlaylist = await ytClient.channels
+          .getUploads(id)
+          .take(maxVideos)
+          .map(TrackItem.fromYoutubeVideo)
+          .toList();
+      if (fromPlaylist.isNotEmpty) {
+        return _enrichTracksMissingTitles(fromPlaylist);
+      }
+    } catch (e, st) {
+      debugPrint('Channel uploads (playlist) error: $e\n$st');
+    }
+
+    try {
       final matches = <Video>[];
       var page = await ytClient.channels
           .getUploadsFromPage(id)
@@ -74,14 +133,56 @@ class YoutubeSearchService {
         if (next == null) break;
         page = next;
       }
-      return matches
+      final tracks = matches
           .take(maxVideos)
           .map(TrackItem.fromYoutubeVideo)
           .toList();
+      return _enrichTracksMissingTitles(tracks);
     } catch (e, st) {
       debugPrint('Channel uploads error: $e\n$st');
       return [];
     }
+  }
+
+  /// Channel upload grids often omit titles; fetch watch metadata when needed.
+  Future<List<TrackItem>> _enrichTracksMissingTitles(
+    List<TrackItem> tracks,
+  ) async {
+    if (tracks.isEmpty) return tracks;
+
+    final needsEnrich = tracks.where((t) {
+      final id = t.youtubeVideoId?.trim() ?? '';
+      if (id.isEmpty) return false;
+      final title = t.title.trim();
+      return title.isEmpty || title == 'Untitled video';
+    }).toList();
+    if (needsEnrich.isEmpty) return tracks;
+
+    final enrichedById = <String, TrackItem>{};
+    for (var start = 0; start < needsEnrich.length; start += _enrichMetadataConcurrency) {
+      final end = (start + _enrichMetadataConcurrency).clamp(0, needsEnrich.length);
+      final chunk = needsEnrich.sublist(start, end);
+      await Future.wait(
+        chunk.map((track) async {
+          final videoId = track.youtubeVideoId?.trim() ?? '';
+          if (videoId.isEmpty) return;
+          try {
+            final video = await ytClient.videos
+                .get(VideoId(videoId))
+                .timeout(_videoMetadataTimeout);
+            enrichedById[videoId] = TrackItem.fromYoutubeVideo(video);
+          } catch (e, st) {
+            debugPrint('YouTube metadata enrich failed for $videoId: $e\n$st');
+          }
+        }),
+      );
+    }
+
+    return tracks.map((t) {
+      final id = t.youtubeVideoId?.trim() ?? '';
+      if (id.isEmpty) return t;
+      return enrichedById[id] ?? t;
+    }).toList();
   }
 
   /// Search within a channel: global results filtered by channel, then uploads.
@@ -134,7 +235,7 @@ class YoutubeSearchService {
         page = next;
       }
 
-      return out;
+      return _enrichTracksMissingTitles(out);
     } on TimeoutException {
       debugPrint('Channel-scoped search timed out');
       return [];
@@ -169,6 +270,7 @@ class YoutubeSearchService {
       ...youtubeManifestClientFallbacks,
     ];
 
+    Object? lastError;
     for (var i = 0; i < clientSets.length; i++) {
       try {
         final manifest = await ytClient.videos.streams
@@ -184,11 +286,26 @@ class YoutubeSearchService {
           bitrateBitsPerSec: stream.bitrate.bitsPerSecond,
           totalBytes: stream.size.totalBytes,
         );
-      } on TimeoutException {
-        debugPrint('YouTube stream manifest timed out for: $id (set $i)');
+      } on TimeoutException catch (e) {
+        lastError = e;
+        if (kDebugMode) {
+          debugPrint(
+            'YouTube manifest slow for $id (client set ${i + 1}/'
+            '${clientSets.length})',
+          );
+        }
       } catch (e, st) {
-        debugPrint('YouTube stream resolve error (set $i): $e\n$st');
+        lastError = e;
+        if (kDebugMode) {
+          debugPrint('YouTube stream resolve error (set ${i + 1}): $e\n$st');
+        }
       }
+    }
+    if (kDebugMode && lastError != null) {
+      debugPrint(
+        'YouTube stream manifest failed for $id after ${clientSets.length} '
+        'client sets: $lastError',
+      );
     }
     return null;
   }

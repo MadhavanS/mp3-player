@@ -1,0 +1,12 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background: Deep Charcoal Squircle -->
+  <rect x="64" y="64" width="384" height="384" rx="96" fill="#121212"/>
+
+  <!-- Subtle Top-Left Lighting Edge -->
+  <rect x="68" y="68" width="376" height="376" rx="92" stroke="white" stroke-opacity="0.08" stroke-width="4"/>
+
+  <!-- Audio Visualizer "Pulse" Bars -->
+  <rect x="168" y="196" width="44" height="120" rx="22" fill="#5FE3B3"/>
+  <rect x="234" y="146" width="44" height="220" rx="22" fill="#0B84FF"/>
+  <rect x="300" y="180" width="44" height="152" rx="22" fill="#F5F5F7"/>
+</svg>

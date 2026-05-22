@@ -22,6 +22,7 @@ import '../services/music_library_path_key.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
 import '../services/youtube_api_clients.dart';
+import '../platform/youtube_platform_support.dart';
 import '../services/youtube_search_service.dart';
 import '../widgets/action_pill_toast.dart';
 import 'notification_art_uri.dart';
@@ -270,9 +271,14 @@ class PlayerController extends ChangeNotifier {
       final playing = state.playing;
       final proc = state.processingState;
 
-      // When the player becomes paused (e.g. via notification button or auto-pause),
-      // invalidate any in-flight retry loops so they don't overwrite the pause.
-      if (!playing && _lastDispatchedPlaying) {
+      // When the player becomes paused (e.g. notification or user pause), invalidate
+      // in-flight play retries. Ignore transitions caused by [_loadCurrent]'s
+      // [stop] — otherwise library row taps set [_playbackPausedByUser] and
+      // [_resumePlaybackAfterLoad] never starts audio.
+      if (!playing &&
+          _lastDispatchedPlaying &&
+          _loadCurrentDepth == 0 &&
+          !_startingPlaybackFromLibrary) {
         _invalidatePlayResumeRetries();
         _playbackPausedByUser = true;
       }
@@ -320,6 +326,10 @@ class PlayerController extends ChangeNotifier {
 
   /// Set when the user explicitly pauses; blocks [_resumePlaybackAfterLoad] until play.
   bool _playbackPausedByUser = false;
+
+  /// True while replacing the queue to start playback (library row tap, etc.).
+  /// Prevents [playerStateStream] from treating [_loadCurrent]'s [stop] as user pause.
+  bool _startingPlaybackFromLibrary = false;
 
   /// True when we paused because another app (or the OS) took transient audio focus
   /// (e.g. phone call). Cleared after we attempt resume.
@@ -1155,21 +1165,27 @@ class PlayerController extends ChangeNotifier {
     _playbackPausedByUser = false;
     _invalidatePlayResumeRetries();
     final resumeGen = _playControlGeneration;
-    await setPlaylist(
-      tracks,
-      startIndex: startIndex,
-      playbackOriginTab: playbackOriginTab,
-      playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
-      keepShuffleMode: keepShuffleMode,
-      enableShuffle: enableShuffle,
-    );
-    if (_playControlGeneration != resumeGen) return;
-    // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
-    // returns; [play] can no-op until [ProcessingState.ready].
-    await _resumePlaybackAfterLoad(
-      context: 'setPlaylistAndPlay.play',
-      playGeneration: resumeGen,
-    );
+    _startingPlaybackFromLibrary = true;
+    try {
+      await setPlaylist(
+        tracks,
+        startIndex: startIndex,
+        playbackOriginTab: playbackOriginTab,
+        playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
+        keepShuffleMode: keepShuffleMode,
+        enableShuffle: enableShuffle,
+      );
+      if (_playControlGeneration != resumeGen) return;
+      // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
+      // returns; [play] can no-op until [ProcessingState.ready].
+      _playbackPausedByUser = false;
+      await _resumePlaybackAfterLoad(
+        context: 'setPlaylistAndPlay.play',
+        playGeneration: resumeGen,
+      );
+    } finally {
+      _startingPlaybackFromLibrary = false;
+    }
   }
 
   static bool _sameQueuedIdentity(TrackItem a, TrackItem b) {
@@ -1649,16 +1665,26 @@ class PlayerController extends ChangeNotifier {
       _index = i;
     }
     notifyListeners();
-    await _loadCurrent(stopBeforeLoad: playAfter);
     if (playAfter) {
-      await _resumePlaybackAfterLoad(
-        context: 'jumpToIndex.play',
-      );
-    } else {
-      try {
-        await _player.pause();
-      } catch (_) {}
-      notifyListeners();
+      _startingPlaybackFromLibrary = true;
+    }
+    try {
+      await _loadCurrent(stopBeforeLoad: playAfter);
+      if (playAfter) {
+        _playbackPausedByUser = false;
+        await _resumePlaybackAfterLoad(
+          context: 'jumpToIndex.play',
+        );
+      } else {
+        try {
+          await _player.pause();
+        } catch (_) {}
+        notifyListeners();
+      }
+    } finally {
+      if (playAfter) {
+        _startingPlaybackFromLibrary = false;
+      }
     }
   }
 
@@ -1909,6 +1935,7 @@ class PlayerController extends ChangeNotifier {
     }
     final yt = track.youtubeVideoId?.trim();
     if (yt == null || yt.isEmpty) return null;
+    if (!YoutubePlatformSupport.isOnlinePlaybackSupported) return null;
     final playback =
         await YoutubeSearchService.instance.resolveYoutubePlayback(yt);
     if (playback == null) return null;

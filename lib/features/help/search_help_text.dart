@@ -10,4 +10,8 @@ abstract final class SearchHelpText {
 
   /// Shown in the Files browser search field.
   static const String filesFieldHint = 'Folders & titles';
+
+  /// Shown in Online search (drawer → Online search).
+  static const String onlineSearchFieldHint =
+      '@channel, #tag, or YouTube link';
 }

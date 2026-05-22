@@ -37,6 +37,7 @@ import '../player/now_playing_screen.dart';
 import '../player/track_overflow_actions.dart';
 import '../help/help_screen.dart';
 import '../settings/settings_screen.dart';
+import '../../platform/youtube_platform_support.dart';
 import '../youtube/youtube_search_screen.dart';
 import 'now_playing_escape_bridge.dart';
 
@@ -337,7 +338,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           final theme = Theme.of(dialogContext);
           final pal = dialogContext.palette;
           return AlertDialog(
-            title: const Text('Welcome to MadPlayer'),
+            backgroundColor: pal.surface,
+            title: Text(
+              'Welcome to MadPlayer',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: pal.textPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -347,6 +355,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                     'Your library is empty because no music folders are set up yet.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: pal.textSecondary,
+                      height: 1.4,
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -355,8 +364,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                     '2. Tap Add folder and choose a folder with MP3 files\n'
                     '3. Return to Library — songs appear after scanning',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: pal.onScaffold.withValues(alpha: 0.9),
+                      color: pal.textPrimary,
                       height: 1.45,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
@@ -365,7 +375,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Later'),
+                child: Text(
+                  'Later',
+                  style: TextStyle(color: pal.textPrimary),
+                ),
               ),
               FilledButton.icon(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -1134,10 +1147,22 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   void _openYoutubeSearch() {
+    if (!YoutubePlatformSupport.isOnlinePlaybackSupported) {
+      ActionPillToast.showUsingRootNavigator(
+        'Online search is available on Android only',
+        icon: Icons.info_outline_rounded,
+      );
+      return;
+    }
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (ctx) => YoutubeSearchScreen(
-          onBack: () => Navigator.of(ctx).pop(),
+          onOpenDrawer: () {
+            Navigator.of(ctx).pop();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _openDrawer();
+            });
+          },
         ),
       ),
     );
@@ -1431,6 +1456,22 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 }
 
+/// Drawer uses [AppPalette.surface]; [onScaffold] is for the navy hero, not white panels.
+bool _drawerSurfaceIsLight(AppPalette pal) => pal.surface.computeLuminance() > 0.55;
+
+Color _drawerPrimaryFg(AppPalette pal) =>
+    _drawerSurfaceIsLight(pal) ? pal.textPrimary : pal.onScaffold;
+
+Color _drawerMutedFg(AppPalette pal) =>
+    _drawerSurfaceIsLight(pal)
+        ? pal.textSecondary
+        : pal.onScaffold.withValues(alpha: 0.75);
+
+Color _drawerSelectedTileBg(AppPalette pal) =>
+    _drawerSurfaceIsLight(pal)
+        ? pal.textPrimary.withValues(alpha: 0.08)
+        : pal.onScaffold.withValues(alpha: 0.1);
+
 class _GlossyDrawer extends StatelessWidget {
   const _GlossyDrawer({
     required this.onNowPlaying,
@@ -1474,7 +1515,7 @@ class _GlossyDrawer extends StatelessWidget {
                 child: Text(
                   'MadPlayer',
                   style: theme.textTheme.headlineSmall?.copyWith(
-                    color: ivy ? const Color(0xFF1C1C1E) : pal.onScaffold,
+                    color: ivy ? const Color(0xFF1C1C1E) : _drawerPrimaryFg(pal),
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.5,
                   ),
@@ -1484,7 +1525,9 @@ class _GlossyDrawer extends StatelessWidget {
                 indent: 24,
                 endIndent: 24,
                 thickness: 0.8,
-                color: pal.onScaffold.withValues(alpha: 0.12),
+                color: ivy
+                    ? pal.onScaffold.withValues(alpha: 0.12)
+                    : _drawerMutedFg(pal).withValues(alpha: 0.35),
               ),
               const SizedBox(height: 12),
               Expanded(
@@ -1503,12 +1546,13 @@ class _GlossyDrawer extends StatelessWidget {
                       onTap: onLibrary,
                       selected: currentPage == _ShellPage.library,
                     ),
-                    _GlossyDrawerTile(
-                      icon: Icons.search_rounded,
-                      label: 'Online search',
-                      onTap: onYoutubeSearch,
-                      selected: false,
-                    ),
+                    if (YoutubePlatformSupport.isOnlinePlaybackSupported)
+                      _GlossyDrawerTile(
+                        icon: Icons.search_rounded,
+                        label: 'Online search',
+                        onTap: onYoutubeSearch,
+                        selected: false,
+                      ),
                     _GlossyDrawerTile(
                       icon: Icons.folder_open_rounded,
                       label: 'Files',
@@ -1534,7 +1578,9 @@ class _GlossyDrawer extends StatelessWidget {
                 indent: 24,
                 endIndent: 24,
                 thickness: 0.8,
-                color: pal.onScaffold.withValues(alpha: 0.12),
+                color: ivy
+                    ? pal.onScaffold.withValues(alpha: 0.12)
+                    : _drawerMutedFg(pal).withValues(alpha: 0.35),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
@@ -1585,7 +1631,7 @@ class _GlossyDrawerTile extends StatelessWidget {
               color: selected
                   ? (ivy
                       ? Colors.white.withValues(alpha: 0.5)
-                      : pal.onScaffold.withValues(alpha: 0.1))
+                      : _drawerSelectedTileBg(pal))
                   : null,
             ),
             child: Row(
@@ -1593,10 +1639,12 @@ class _GlossyDrawerTile extends StatelessWidget {
                 Icon(
                   icon,
                   color: selected
-                      ? (ivy ? const Color(0xFF1C1C1E) : context.controlAccent)
+                      ? (ivy
+                          ? const Color(0xFF1C1C1E)
+                          : context.controlAccent)
                       : (ivy
                           ? const Color(0xFF48484A)
-                          : pal.onScaffold.withValues(alpha: 0.7)),
+                          : _drawerMutedFg(pal)),
                   size: 26,
                 ),
                 const SizedBox(width: 16),
@@ -1604,10 +1652,12 @@ class _GlossyDrawerTile extends StatelessWidget {
                   label,
                   style: TextStyle(
                     color: selected
-                        ? (ivy ? const Color(0xFF1C1C1E) : pal.onScaffold)
+                        ? (ivy
+                            ? const Color(0xFF1C1C1E)
+                            : _drawerPrimaryFg(pal))
                         : (ivy
                             ? const Color(0xFF48484A)
-                            : pal.onScaffold.withValues(alpha: 0.8)),
+                            : _drawerMutedFg(pal)),
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     fontSize: 16,
                   ),

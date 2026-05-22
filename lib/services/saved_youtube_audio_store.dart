@@ -79,6 +79,67 @@ class SavedYoutubeAudioStore {
     return true;
   }
 
+  /// Updates display title and renames the file on disk when possible.
+  static Future<bool> renameSaved({
+    required String videoId,
+    required String newTitle,
+  }) async {
+    final id = videoId.trim();
+    final title = newTitle.trim();
+    if (id.isEmpty || title.isEmpty) return false;
+    await ensureLoaded();
+    final ix = _items.indexWhere((t) => t.youtubeVideoId == id);
+    if (ix < 0) return false;
+    final old = _items[ix];
+    final fp = old.filePath?.trim();
+    String? newPath = fp;
+    if (!kIsWeb && fp != null && fp.isNotEmpty) {
+      try {
+        final file = File(fp);
+        if (await file.exists()) {
+          final ext = p.extension(fp);
+          final dir = p.dirname(fp);
+          final base = _sanitizeFileBase(title);
+          var candidate = p.join(dir, '$base$ext');
+          var n = 1;
+          while (candidate != fp &&
+              await File(candidate).exists()) {
+            candidate = p.join(dir, '${base}_$n$ext');
+            n++;
+          }
+          if (candidate != fp) {
+            await file.rename(candidate);
+          }
+          newPath = p.normalize(candidate);
+        }
+      } catch (_) {
+        return false;
+      }
+    }
+    _items[ix] = TrackItem(
+      title: title,
+      artist: old.artist,
+      metaLine: old.metaLine,
+      genres: old.genres,
+      artColors: old.artColors,
+      filePath: newPath,
+      youtubeVideoId: old.youtubeVideoId,
+      youtubeChannelId: old.youtubeChannelId,
+      thumbnailUrl: old.thumbnailUrl,
+    );
+    await _persist();
+    return true;
+  }
+
+  static String _sanitizeFileBase(String name) {
+    final cleaned = name
+        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (cleaned.isEmpty) return 'audio';
+    return cleaned.length > 120 ? cleaned.substring(0, 120) : cleaned;
+  }
+
   static Future<bool> remove(String videoId) async {
     final id = videoId.trim();
     if (id.isEmpty) return false;

@@ -27,6 +27,8 @@ class YoutubeAudioDownloadService {
   Future<TrackItem?> downloadAndSave(
     TrackItem source, {
     void Function(double? progress)? onProgress,
+    bool Function()? isCancelled,
+    bool Function()? isPaused,
   }) async {
     if (kIsWeb) return null;
 
@@ -68,6 +70,15 @@ class YoutubeAudioDownloadService {
       try {
         sink = outFile.openWrite();
         await for (final chunk in byteStream) {
+          if (isCancelled?.call() == true) {
+            throw _DownloadCancelled();
+          }
+          while (isPaused?.call() == true) {
+            if (isCancelled?.call() == true) {
+              throw _DownloadCancelled();
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 150));
+          }
           sink.add(chunk);
           received += chunk.length;
           if (total > 0) {
@@ -77,6 +88,16 @@ class YoutubeAudioDownloadService {
         await sink.flush();
         await sink.close();
         sink = null;
+      } on _DownloadCancelled {
+        try {
+          await sink?.close();
+        } catch (_) {}
+        if (await outFile.exists()) {
+          try {
+            await outFile.delete();
+          } catch (_) {}
+        }
+        return null;
       } catch (e, st) {
         debugPrint('YouTube download stream error: $e\n$st');
         try {
@@ -121,5 +142,6 @@ class YoutubeAudioDownloadService {
     if (name.contains('opus')) return 'webm';
     return name.isNotEmpty ? name : 'webm';
   }
-
 }
+
+class _DownloadCancelled implements Exception {}

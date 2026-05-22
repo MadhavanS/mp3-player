@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../../audio/player_controller.dart';
+import '../../platform/youtube_platform_support.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
@@ -27,6 +28,7 @@ import '../help/search_help_text.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
+import '../youtube/youtube_downloads_tab.dart';
 import 'playing_queue_tab.dart';
 import 'saved_youtube_library_tab.dart';
 
@@ -136,7 +138,7 @@ class LibraryScreenState extends State<LibraryScreen>
     with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   late TabController _tabController;
-  List<LibraryTabId> _visibleTabs = List<LibraryTabId>.from(
+  List<LibraryTabId> _visibleTabs = YoutubePlatformSupport.filterLibraryTabIds(
     LibraryTabId.values.where((id) => id != LibraryTabId.onlineSearch),
   );
   List<UserPlaylistEntry> _userPlaylists = const <UserPlaylistEntry>[];
@@ -409,6 +411,7 @@ class LibraryScreenState extends State<LibraryScreen>
               savedLinks.where((t) => searchQuery.matchesTrack(t)).toList();
         }
         rows = savedLinks;
+      case LibraryTabId.youtubeDownloads:
       case LibraryTabId.playlist:
       case LibraryTabId.onlineSearch:
         return;
@@ -804,6 +807,8 @@ class LibraryScreenState extends State<LibraryScreen>
           _scrollAnchorSavedYoutubeLinks,
         );
         return;
+      case LibraryTabId.youtubeDownloads:
+        return;
       default:
         break;
     }
@@ -948,6 +953,7 @@ class LibraryScreenState extends State<LibraryScreen>
         return;
       case LibraryTabId.savedYoutubeAudio:
       case LibraryTabId.savedYoutubeLinks:
+      case LibraryTabId.youtubeDownloads:
       case LibraryTabId.onlineSearch:
         return;
     }
@@ -964,6 +970,7 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabId.nowPlayingList ||
     LibraryTabId.savedYoutubeAudio ||
     LibraryTabId.savedYoutubeLinks ||
+    LibraryTabId.youtubeDownloads ||
     LibraryTabId.onlineSearch =>
       SearchHelpText.libraryTrackFieldHint,
     LibraryTabId.playlist => SearchHelpText.playlistTabFieldHint,
@@ -1052,6 +1059,15 @@ class LibraryScreenState extends State<LibraryScreen>
     required LibraryTabId playbackOriginTab,
   }) async {
     if (tracks.isEmpty) return;
+    if (!YoutubePlatformSupport.isOnlinePlaybackSupported) {
+      if (!context.mounted) return;
+      ActionPillToast.show(
+        context,
+        'Online playback is not available on Windows',
+        icon: Icons.info_outline_rounded,
+      );
+      return;
+    }
     final player = PlayerController.of(context);
     player.setPlaybackPathKeyScope(null, reloadQueue: false);
     try {
@@ -2111,6 +2127,7 @@ class LibraryScreenState extends State<LibraryScreen>
         ),
         isCurrentTrack: _isCurrentYoutubeTrack,
       ),
+      LibraryTabId.youtubeDownloads => const YoutubeDownloadsTab(),
       LibraryTabId.onlineSearch => const SizedBox.shrink(),
     };
   }

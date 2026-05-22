@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/track_item.dart';
+import '../../platform/youtube_platform_support.dart';
 import '../../models/youtube_channel_ref.dart';
 import '../../services/youtube_channel_resolver.dart';
 import '../../widgets/action_pill_toast.dart';
@@ -13,6 +14,16 @@ Future<void> openYoutubeChannelTracksFromTrack(
   bool popNowPlaying = true,
 }) async {
   if (!track.isYoutubeStream) return;
+  if (!YoutubePlatformSupport.isOnlinePlaybackSupported) {
+    if (context.mounted) {
+      ActionPillToast.show(
+        context,
+        'Online search is not available on Windows',
+        icon: Icons.info_outline_rounded,
+      );
+    }
+    return;
+  }
 
   YoutubeChannelRef? channel;
   final storedId = track.youtubeChannelId?.trim();
@@ -44,7 +55,7 @@ Future<void> openYoutubeChannelTracksFromTrack(
   await Navigator.of(context).push<void>(
     MaterialPageRoute<void>(
       builder: (ctx) => YoutubeSearchScreen(
-        onBack: () => Navigator.of(ctx).pop(),
+        onOpenDrawer: () => Navigator.of(ctx).pop(),
         initialChannel: channel,
       ),
     ),

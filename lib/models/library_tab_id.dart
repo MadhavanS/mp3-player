@@ -9,6 +9,7 @@ enum LibraryTabId {
   recentlyPlayed('recently_played', 'RecentlyPlayed'),
   savedYoutubeAudio('saved_youtube_audio', 'Saved audio'),
   savedYoutubeLinks('saved_youtube_links', 'Saved links'),
+  youtubeDownloads('youtube_downloads', 'Downloads'),
 
   /// Playback started from Online search (not a library tab).
   onlineSearch('online_search', 'Online search');

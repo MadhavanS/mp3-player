@@ -25,6 +25,7 @@ import 'theme/app_font_option.dart';
 import 'theme/app_theme.dart';
 import 'theme/player_chrome_background.dart';
 import 'widgets/action_pill_toast.dart';
+import 'widgets/app_splash_screen.dart';
 
 class MadPlayerApp extends StatefulWidget {
   const MadPlayerApp({super.key});
@@ -35,6 +36,7 @@ class MadPlayerApp extends StatefulWidget {
 
 class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver {
   late final PlayerController _player = PlayerController();
+  bool _showSplash = true;
   AppThemeSetting _themeSetting = AppThemeSetting.automatic;
   AppFontOption _fontOption = AppFontOption.system;
   AppAccentColorOption _accentOption = AppAccentColorOption.themeDefault;
@@ -354,21 +356,23 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
         title: 'MadPlayer',
         debugShowCheckedModeBanner: false,
         theme: theme,
-        home: MainShell(
-          themeSetting: _themeSetting,
-          onThemeSettingChanged: _setThemeSetting,
-          fontOption: _fontOption,
-          onFontOptionChanged: _setFontOption,
-          accentColorOption: _accentOption,
-          customAccentColor: _customAccentColor,
-          onAccentColorOptionChanged: _setAccentOption,
-          onCustomAccentColorChanged: _setCustomAccentColor,
-          playerChromeBackgroundKind: _playerChromeBackgroundKind,
-          playerChromeCustomBackground: _playerChromeCustomBackground,
-          onPlayerChromeBackgroundKindChanged: _setPlayerChromeBackgroundKind,
-          onPlayerChromeCustomBackgroundChanged:
-              _setPlayerChromeCustomBackground,
-        ),
+        home: _showSplash
+            ? AppSplashScreen(onFinish: () => setState(() => _showSplash = false))
+            : MainShell(
+                themeSetting: _themeSetting,
+                onThemeSettingChanged: _setThemeSetting,
+                fontOption: _fontOption,
+                onFontOptionChanged: _setFontOption,
+                accentColorOption: _accentOption,
+                customAccentColor: _customAccentColor,
+                onAccentColorOptionChanged: _setAccentOption,
+                onCustomAccentColorChanged: _setCustomAccentColor,
+                playerChromeBackgroundKind: _playerChromeBackgroundKind,
+                playerChromeCustomBackground: _playerChromeCustomBackground,
+                onPlayerChromeBackgroundKindChanged: _setPlayerChromeBackgroundKind,
+                onPlayerChromeCustomBackgroundChanged:
+                    _setPlayerChromeCustomBackground,
+              ),
       ),
     );
   }

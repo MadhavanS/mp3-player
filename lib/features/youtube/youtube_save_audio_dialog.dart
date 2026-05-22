@@ -18,14 +18,20 @@ Future<bool> showYoutubeSaveAudioDialog(
     return false;
   }
 
-  if (YoutubeAudioDownloadController.instance.isRunning) {
-    ActionPillToast.show(context, 'Another save is already in progress');
+  final dl = YoutubeAudioDownloadController.instance;
+  final id = track.youtubeVideoId?.trim() ?? '';
+  if (id.isNotEmpty && (dl.isDownloading(id) || dl.isQueued(id))) {
+    ActionPillToast.show(context, 'Already in download queue');
     return false;
   }
 
   final ok = await startYoutubeAudioSave(track);
   if (context.mounted && ok) {
-    ActionPillToast.show(context, 'Audio saved');
+    ActionPillToast.show(
+      context,
+      'Added to download queue',
+      icon: Icons.download_rounded,
+    );
   }
   return ok;
 }

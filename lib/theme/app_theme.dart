@@ -626,7 +626,7 @@ abstract final class AppTheme {
         color: isDaisy
             ? const Color(0xFFE5D8C4)
             : (isIvy
-                ? const Color(0xFF0D1117).withValues(alpha: 0.72)
+                ? const Color(0xFFF2F2F5)
                 : ext.surface),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(isIvy ? 20 : 14),
@@ -634,7 +634,7 @@ abstract final class AppTheme {
             color: isDaisy
                 ? const Color(0xFF2B2117).withValues(alpha: 0.72)
                 : (isIvy
-                    ? Colors.white.withValues(alpha: 0.15)
+                    ? const Color(0xFF1C1C1E).withValues(alpha: 0.12)
                     : ext.onScaffold.withValues(alpha: 0.14)),
             width: isDaisy || isIvy ? 1.2 : 1,
           ),
@@ -642,11 +642,31 @@ abstract final class AppTheme {
         textStyle: TextStyle(
           color: isDaisy
               ? const Color(0xFF2B2117)
-              : (isIvy ? Colors.white : ext.textPrimary),
+              : (isIvy ? const Color(0xFF1C1C1E) : ext.textPrimary),
           fontSize: 16,
           fontWeight: FontWeight.w600,
         ),
       ),
+      listTileTheme: isIvy
+          ? const ListTileThemeData(
+              iconColor: Color(0xFF48484A),
+              textColor: Color(0xFF1C1C1E),
+            )
+          : null,
+      dialogTheme: isIvy
+          ? DialogThemeData(
+              backgroundColor: const Color(0xFFF2F2F5),
+              titleTextStyle: const TextStyle(
+                color: Color(0xFF1C1C1E),
+                fontWeight: FontWeight.w700,
+                fontSize: 20,
+              ),
+              contentTextStyle: const TextStyle(
+                color: Color(0xFF48484A),
+                fontSize: 14,
+              ),
+            )
+          : null,
       textTheme: TextTheme(
         titleLarge: TextStyle(
           fontWeight: FontWeight.w700,

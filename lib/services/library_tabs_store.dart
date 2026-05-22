@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/library_tab_id.dart';
+import '../platform/youtube_platform_support.dart';
 
 /// One row in Settings: tab identity + visibility; list order is tab order.
 class LibraryTabRow {
@@ -39,11 +40,12 @@ class LibraryTabsStore {
   static final ValueNotifier<int> revision = ValueNotifier(0);
 
   static bool _isLibraryUiTab(LibraryTabId id) =>
-      id != LibraryTabId.onlineSearch;
+      id != LibraryTabId.onlineSearch && YoutubePlatformSupport.includeLibraryTab(id);
 
   static bool _defaultEnabledForTab(LibraryTabId id) =>
       id != LibraryTabId.savedYoutubeAudio &&
-      id != LibraryTabId.savedYoutubeLinks;
+      id != LibraryTabId.savedYoutubeLinks &&
+      id != LibraryTabId.youtubeDownloads;
 
   static List<LibraryTabRow> _defaultRows() => [
         for (final id in LibraryTabId.values)
@@ -56,6 +58,7 @@ class LibraryTabsStore {
     final byId = {for (final r in saved) r.id: r};
     final orderedIds = <LibraryTabId>[];
     for (final r in saved) {
+      if (!_isLibraryUiTab(r.id)) continue;
       if (!orderedIds.contains(r.id)) orderedIds.add(r.id);
     }
     for (final id in LibraryTabId.values) {
@@ -63,6 +66,7 @@ class LibraryTabsStore {
       if (!orderedIds.contains(id)) orderedIds.add(id);
     }
     return orderedIds
+        .where(_isLibraryUiTab)
         .map(
           (id) =>
               byId[id] ??

@@ -114,6 +114,51 @@ class HelpContent extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         _HelpSection(
+          title: 'Online search',
+          titleColor: ink,
+          children: [
+            _HelpPoint(
+              label: 'Field hint',
+              body: SearchHelpText.onlineSearchFieldHint,
+              bodyColor: secondary,
+              theme: theme,
+              monospace: true,
+            ),
+            _HelpPoint(
+              body: 'Plain text — search YouTube.',
+              bodyColor: secondary,
+              theme: theme,
+            ),
+            _HelpPoint(
+              label: '@name',
+              body:
+                  'Find a channel and browse uploads. Add words after the name to search inside that channel (example: @Put Chutney comedy).',
+              bodyColor: secondary,
+              theme: theme,
+            ),
+            _HelpPoint(
+              label: 'https://…',
+              body:
+                  'Paste a YouTube link to open a video, playlist, or channel.',
+              bodyColor: secondary,
+              theme: theme,
+            ),
+            _HelpPoint(
+              label: '#tag',
+              body: 'Search by hashtag (example: #lofi).',
+              bodyColor: secondary,
+              theme: theme,
+            ),
+            _HelpPoint(
+              body:
+                  'After you pick a channel, the In: chip limits plain-text searches to that channel until you remove it.',
+              bodyColor: secondary,
+              theme: theme,
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        _HelpSection(
           title: 'Songs multi-select',
           titleColor: ink,
           children: [

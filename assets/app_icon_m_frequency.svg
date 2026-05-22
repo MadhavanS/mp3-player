@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background: Deep Charcoal Squircle -->
+  <rect x="64" y="64" width="384" height="384" rx="96" fill="#121212"/>
+
+  <!-- Subtle Inner Border -->
+  <rect x="68" y="68" width="376" height="376" rx="92" stroke="white" stroke-opacity="0.05" stroke-width="4"/>
+
+  <!-- "M" Silhouette formed by Frequency Bars -->
+  <!-- Left Leg -->
+  <rect x="150" y="160" width="36" height="192" rx="18" fill="#0B84FF"/>
+
+  <!-- Left Valley (forming the M dip) -->
+  <rect x="200" y="210" width="36" height="120" rx="18" fill="#5FE3B3"/>
+
+  <!-- Center Peak -->
+  <rect x="250" y="250" width="36" height="80" rx="18" fill="#F5F5F7"/>
+
+  <!-- Right Valley -->
+  <rect x="300" y="210" width="36" height="120" rx="18" fill="#5FE3B3"/>
+
+  <!-- Right Leg -->
+  <rect x="350" y="160" width="36" height="192" rx="18" fill="#0B84FF"/>
+
+  <!-- Bottom Accent Glow -->
+  <path d="M150 380 Q256 410 362 380" stroke="#0B84FF" stroke-width="8" stroke-linecap="round" stroke-opacity="0.3"/>
+</svg>

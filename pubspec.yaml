@@ -54,12 +54,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # The "flutter_lints" package below contains a set of recommended lints to
-  # encourage good coding practices. The lint set provided by the package is
-  # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
-  # rules and activating additional ones.
+  flutter_svg: ^2.0.10+1
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
 
@@ -74,6 +69,10 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
+    - assets/app_icon_liquid_m_reverted.svg
+    - assets/splash_background.png
+    - assets/boot_background.png
+    - assets/ivy_background.png
     - assets/c__Users_smadh_AppData_Roaming_Cursor_User_workspaceStorage_0dbfe92190d87ed8cf776b817604569f_images_image-9647ab36-e7ec-435e-afe7-d85d50b88632.png
     - assets/c__Users_smadh_AppData_Roaming_Cursor_User_workspaceStorage_0dbfe92190d87ed8cf776b817604569f_images_image-f44a8fb3-4799-4ae6-8d61-ac2e01f71443.png
     # Bundled for offline use; google_fonts matches names like EduNSWACTCursive-Regular.ttf
@@ -82,21 +81,26 @@ flutter:
     - assets/fonts/EduNSWACTCursive-SemiBold.ttf
     - assets/fonts/EduNSWACTCursive-Bold.ttf
 
+# App icon source: assets/app_icon_liquid_m_reverted.svg
+# Refresh PNG + platform icons: tool/rasterize_app_icon.sh (or dart run flutter_launcher_icons after PNG exists)
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/app_icon_source.png"
+  image_path: "assets/app_icon.png"
   remove_alpha_ios: true
   web:
     generate: true
-    image_path: "assets/app_icon_source.png"
+    image_path: "assets/app_icon.png"
   windows:
     generate: true
-    image_path: "assets/app_icon_source.png"
+    image_path: "assets/app_icon.png"
     icon_size: 256
   macos:
     generate: true
-    image_path: "assets/app_icon_source.png"
+    image_path: "assets/app_icon.png"
+  linux:
+    generate: true
+    image_path: "assets/app_icon.png"
 
   # To add assets to your application, add an assets section, like this:
   # assets:

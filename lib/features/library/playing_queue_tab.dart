@@ -364,7 +364,12 @@ class _QueueListRow extends StatelessWidget {
           : Colors.transparent,
       child: InkWell(
         onTap: () {
-          unawaited(PlayerController.of(context).jumpToIndex(playlistIndex));
+          unawaited(
+            PlayerController.of(context).jumpToIndex(
+              playlistIndex,
+              autoPlay: true,
+            ),
+          );
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

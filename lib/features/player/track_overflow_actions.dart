@@ -50,14 +50,13 @@ Widget _compactOverflowMenuRow({
 }) {
   return Builder(
     builder: (context) {
+      final pal = context.palette;
       final ivy = context.appliedThemePalette == AppThemePalette.ivy;
-      final ink = ivy ? Colors.white : const Color(0xFF1C1C1E);
-      final muted = ivy 
-          ? Colors.white.withValues(alpha: 0.7) 
-          : const Color(0xFF48484A);
-      
-      final effectiveIconColor = iconColor ?? (ivy ? muted : null);
-      final effectiveLabelColor = labelColor ?? (ivy ? ink : null);
+      final ink = labelColor ?? (ivy ? const Color(0xFF1C1C1E) : pal.textPrimary);
+      final muted = iconColor ?? (ivy ? const Color(0xFF48484A) : pal.textMuted);
+
+      final effectiveIconColor = muted;
+      final effectiveLabelColor = ink;
 
       return ListTile(
         dense: true,

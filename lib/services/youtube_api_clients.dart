@@ -1,17 +1,22 @@
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 /// Clients used when resolving stream manifests (tried in order).
-const List<YoutubeApiClient> youtubeManifestClients = [
+///
+/// [YoutubeApiClient.androidSdkless] is listed first — youtube_explode recommends
+/// it for fewer 403/timeouts vs legacy [YoutubeApiClient.android].
+final List<YoutubeApiClient> youtubeManifestClients = [
+  YoutubeApiClient.androidSdkless,
   YoutubeApiClient.androidVr,
-  YoutubeApiClient.android,
+  YoutubeApiClient.ios,
   YoutubeApiClient.mweb,
 ];
 
-/// Manifest client sets tried when the first [youtubeManifestClients] fetch fails.
-const List<List<YoutubeApiClient>> youtubeManifestClientFallbacks = [
-  [YoutubeApiClient.android],
-  [YoutubeApiClient.mweb],
+/// Extra client sets when the first [youtubeManifestClients] fetch fails.
+final List<List<YoutubeApiClient>> youtubeManifestClientFallbacks = [
   [YoutubeApiClient.tv],
+  [YoutubeApiClient.androidVr, YoutubeApiClient.ios],
+  [YoutubeApiClient.mweb],
+  [YoutubeApiClient.android],
 ];
 
 /// User-Agent aligned with Android YouTube clients (must match CDN expectations).

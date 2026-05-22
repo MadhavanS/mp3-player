@@ -17,7 +17,11 @@ import '../../services/saved_youtube_links_store.dart';
 import '../../services/youtube_search_history_store.dart';
 import '../../services/youtube_search_service.dart';
 import 'saved_youtube_audio_info.dart';
+import 'youtube_downloads_tab.dart';
+import 'youtube_rename_saved_audio_dialog.dart';
 import 'youtube_save_audio_dialog.dart';
+import 'online_search_input.dart';
+import 'youtube_search_thumbnail.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format_bytes.dart';
 import '../../widgets/action_pill_toast.dart';
@@ -27,11 +31,11 @@ import '../../widgets/daisy_background.dart';
 class YoutubeSearchScreen extends StatefulWidget {
   const YoutubeSearchScreen({
     super.key,
-    required this.onBack,
+    required this.onOpenDrawer,
     this.initialChannel,
   });
 
-  final VoidCallback onBack;
+  final VoidCallback onOpenDrawer;
 
   /// When set, opens on the Search tab with this channel selected and uploads listed.
   final YoutubeChannelRef? initialChannel;
@@ -43,7 +47,6 @@ class YoutubeSearchScreen extends StatefulWidget {
 class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
     with SingleTickerProviderStateMixin {
   final TextEditingController _queryController = TextEditingController();
-  final TextEditingController _channelController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
 
   late final TabController _tabController;
@@ -71,7 +74,8 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
+    YoutubeAudioDownloadController.instance.addListener(_onDownloadsChanged);
     unawaited(_reloadSavedLibraries());
     unawaited(_loadSearchHistory());
     SavedYoutubeAudioStore.revision.addListener(_onSavedStoresChanged);
@@ -90,6 +94,10 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
 
   void _onSearchHistoryChanged() => unawaited(_loadSearchHistory());
 
+  void _onDownloadsChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _loadSearchHistory() async {
     final items = await YoutubeSearchHistoryStore.load();
     if (!mounted) return;
@@ -101,21 +109,29 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
     SavedYoutubeAudioStore.revision.removeListener(_onSavedStoresChanged);
     SavedYoutubeLinksStore.revision.removeListener(_onSavedStoresChanged);
     YoutubeSearchHistoryStore.revision.removeListener(_onSearchHistoryChanged);
+    YoutubeAudioDownloadController.instance.removeListener(_onDownloadsChanged);
     _tabController.dispose();
     _debounce?.cancel();
     _channelDebounce?.cancel();
     _queryController.dispose();
-    _channelController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
 
-  void _selectChannel(YoutubeChannelRef channel) {
+  void _selectChannel(
+    YoutubeChannelRef channel, {
+    String? retainQuery,
+  }) {
     setState(() {
       _selectedChannel = channel;
-      _channelController.text = channel.title;
       _channelSuggestions = [];
       _channelSearchHint = null;
+      if (retainQuery != null) {
+        _queryController.text = retainQuery;
+        _queryController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _queryController.text.length),
+        );
+      }
     });
     unawaited(_runSearch());
   }
@@ -123,16 +139,53 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
   void _clearChannel() {
     setState(() {
       _selectedChannel = null;
-      _channelController.clear();
       _channelSuggestions = [];
       _channelSearchHint = null;
     });
   }
 
+  void _clearSearch() {
+    _queryController.clear();
+    setState(() {
+      _selectedChannel = null;
+      _results = [];
+      _suggestions = [];
+      _channelSuggestions = [];
+      _channelSearchHint = null;
+      _submittedQuery = '';
+      _errorMessage = null;
+    });
+  }
+
+  String _channelResolveRaw(String token) {
+    final t = token.trim();
+    if (t.isEmpty) return t;
+    if (YoutubeChannelResolver.isDirectChannelInput(t)) return t;
+    return t.startsWith('@') ? t : '@$t';
+  }
+
   Future<void> _saveTrackAudio(TrackItem track) async {
-    final ok = await showYoutubeSaveAudioDialog(context, track);
-    if (!mounted) return;
-    if (ok) await _reloadSavedLibraries();
+    await showYoutubeSaveAudioDialog(context, track);
+  }
+
+  Future<void> _toggleBookmark(TrackItem track) async {
+    final id = track.youtubeVideoId?.trim() ?? '';
+    if (id.isEmpty) return;
+    await SavedYoutubeLinksStore.ensureLoaded();
+    if (SavedYoutubeLinksStore.isSaved(id)) {
+      await SavedYoutubeLinksStore.remove(id);
+      if (!mounted) return;
+      ActionPillToast.show(context, 'Bookmark removed');
+    } else {
+      await SavedYoutubeLinksStore.add(track);
+      if (!mounted) return;
+      ActionPillToast.show(
+        context,
+        'Bookmarked',
+        icon: Icons.bookmark_rounded,
+      );
+    }
+    await _reloadSavedLibraries();
   }
 
   Future<void> _reloadSavedLibraries() async {
@@ -164,14 +217,16 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
         TextPosition(offset: _queryController.text.length),
       );
     }
+    await _runUnifiedSearch();
+  }
 
-    final q = _queryController.text.trim();
+  Future<void> _runUnifiedSearch() async {
+    final parsed = OnlineSearchInput.parse(_queryController.text);
     _latestSuggestionRequest++;
     _debounce?.cancel();
+    _channelDebounce?.cancel();
 
-    final channel = _selectedChannel;
-
-    if (q.isEmpty && channel == null) {
+    if (parsed.kind == OnlineSearchInputKind.empty && _selectedChannel == null) {
       setState(() {
         _results = [];
         _suggestions = [];
@@ -184,25 +239,130 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
     setState(() {
       _searching = true;
       _errorMessage = null;
-      _submittedQuery = q;
     });
     _focusNode.unfocus();
 
-    final List<TrackItem> results;
-    if (channel != null) {
-      results = await YoutubeSearchService.instance.searchVideosInChannel(
-        channelId: channel.id,
-        query: q,
-      );
-    } else {
-      results = await YoutubeSearchService.instance.searchVideos(q);
-    }
-    if (!mounted) return;
+    final service = YoutubeSearchService.instance;
+    final resolver = YoutubeChannelResolver.instance;
+    List<TrackItem> results = [];
+    String historyQuery = parsed.raw;
+    YoutubeChannelRef? channel = _selectedChannel;
 
+    try {
+      switch (parsed.kind) {
+        case OnlineSearchInputKind.empty:
+          if (channel != null) {
+            historyQuery = '';
+            results = await service.searchVideosInChannel(
+              channelId: channel.id,
+              query: '',
+            );
+          }
+        case OnlineSearchInputKind.atChannel:
+          final token = parsed.channelToken?.trim() ?? '';
+          if (token.isEmpty) {
+            setState(() {
+              _searching = false;
+              _errorMessage = 'Type @handle, channel name, or channel URL';
+            });
+            return;
+          }
+          final resolved = await resolver.resolveChannelInput(
+            _channelResolveRaw(token),
+          );
+          if (!mounted) return;
+          if (resolved == null) {
+            setState(() {
+              _searching = false;
+              _errorMessage = resolver.lastChannelSearchError ??
+                  'Could not find that channel';
+            });
+            return;
+          }
+          channel = resolved;
+          final inChannel = parsed.inChannelQuery?.trim() ?? '';
+          historyQuery = inChannel.isEmpty ? '@${resolved.title}' : '@${resolved.title} $inChannel';
+          setState(() {
+            _selectedChannel = resolved;
+            _channelSuggestions = [];
+            _channelSearchHint = null;
+            _queryController.text = inChannel;
+            _submittedQuery = inChannel;
+          });
+          results = await service.searchVideosInChannel(
+            channelId: resolved.id,
+            query: inChannel,
+          );
+        case OnlineSearchInputKind.youtubeUrl:
+          channel = null;
+          if (_selectedChannel != null) {
+            setState(() => _selectedChannel = null);
+          }
+          final url = parsed.url ?? parsed.raw;
+          if (parsed.videoId != null) {
+            historyQuery = url;
+            final track = await service.trackFromVideoUrl(url);
+            results = track != null ? [track] : [];
+            if (results.isEmpty) {
+              _errorMessage = 'Could not open that video link';
+            }
+          } else if (parsed.playlistId != null) {
+            historyQuery = url;
+            results = await service.tracksFromPlaylistUrl(url);
+            if (results.isEmpty) {
+              _errorMessage = 'Could not load that playlist';
+            }
+          } else if (parsed.isChannelUrl) {
+            final resolved = await resolver.resolveChannelInput(url);
+            if (!mounted) return;
+            if (resolved == null) {
+              _errorMessage = resolver.lastChannelSearchError ??
+                  'Could not open that channel link';
+            } else {
+              channel = resolved;
+              historyQuery = url;
+              setState(() => _selectedChannel = resolved);
+              results = await service.searchVideosInChannel(
+                channelId: resolved.id,
+                query: '',
+              );
+            }
+          } else {
+            _errorMessage = 'Unsupported YouTube link';
+          }
+        case OnlineSearchInputKind.hashtag:
+        case OnlineSearchInputKind.plain:
+          final q = parsed.plainQuery?.trim() ?? '';
+          historyQuery = q;
+          setState(() => _submittedQuery = q);
+          if (channel != null) {
+            results = await service.searchVideosInChannel(
+              channelId: channel.id,
+              query: q,
+            );
+          } else {
+            results = await service.searchVideos(q);
+          }
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _searching = false;
+        _errorMessage = 'Search failed. Check your connection.';
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    final q = historyQuery;
     setState(() {
       _searching = false;
       _results = results;
-      if (results.isEmpty) {
+      _submittedQuery = parsed.kind == OnlineSearchInputKind.plain ||
+              parsed.kind == OnlineSearchInputKind.hashtag
+          ? (parsed.plainQuery?.trim() ?? '')
+          : _submittedQuery;
+      if (results.isEmpty && _errorMessage == null) {
         _errorMessage = channel != null
             ? (q.isEmpty
                 ? 'No uploads found for this channel.'
@@ -213,12 +373,104 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
 
     unawaited(
       YoutubeSearchHistoryStore.recordSearch(
-        query: q,
+        query: historyQuery,
         channelId: channel?.id,
         channelTitle: channel?.title,
       ),
     );
-    unawaited(_refreshSuggestionsForQuery(q));
+    if (parsed.kind == OnlineSearchInputKind.plain ||
+        parsed.kind == OnlineSearchInputKind.hashtag) {
+      unawaited(_refreshSuggestionsForQuery(parsed.plainQuery ?? ''));
+    }
+  }
+
+  void _onQueryChanged(String value) {
+    setState(() {});
+    _debounce?.cancel();
+    _channelDebounce?.cancel();
+
+    final parsed = OnlineSearchInput.parse(value);
+    final requestId = ++_latestSuggestionRequest;
+
+    if (parsed.isTypingChannelLookup) {
+      setState(() => _suggestions = []);
+      final lookup = parsed.channelLookupQuery;
+      if (lookup.isEmpty) {
+        setState(() {
+          _channelSuggestions = [];
+          _channelSearchHint = null;
+        });
+        return;
+      }
+      final channelRequestId = ++_latestChannelRequest;
+      _channelDebounce = Timer(const Duration(milliseconds: 800), () async {
+        final resolver = YoutubeChannelResolver.instance;
+        if (YoutubeChannelResolver.isDirectChannelInput(_channelResolveRaw(lookup))) {
+          final resolved = await resolver.resolveChannelInput(
+            _channelResolveRaw(lookup),
+          );
+          if (!mounted ||
+              channelRequestId != _latestChannelRequest ||
+              _queryController.text != value) {
+            return;
+          }
+          if (resolved != null) {
+            _selectChannel(
+              resolved,
+              retainQuery: parsed.inChannelQuery,
+            );
+            return;
+          }
+          setState(() {
+            _channelSearchHint = resolver.lastChannelSearchError;
+            _channelSuggestions = [];
+          });
+          return;
+        }
+
+        final suggestions = await resolver.searchChannels(lookup);
+        if (!mounted ||
+            channelRequestId != _latestChannelRequest ||
+            _queryController.text != value) {
+          return;
+        }
+        setState(() {
+          _channelSuggestions = suggestions;
+          _channelSearchHint = resolver.lastChannelSearchError ??
+              (suggestions.isEmpty && lookup.length >= 3
+                  ? 'No channels found — try @handle or UC id'
+                  : null);
+        });
+      });
+      return;
+    }
+
+    setState(() {
+      _channelSuggestions = [];
+      _channelSearchHint = null;
+    });
+
+    if (value.trim().isEmpty) {
+      setState(() => _suggestions = []);
+      return;
+    }
+
+    if (parsed.kind == OnlineSearchInputKind.youtubeUrl) {
+      setState(() => _suggestions = []);
+      return;
+    }
+
+    final suggestQuery = parsed.plainQuery ?? value.trim();
+    _debounce = Timer(const Duration(milliseconds: 350), () async {
+      final items =
+          await YoutubeSearchService.instance.querySuggestions(suggestQuery);
+      if (!mounted ||
+          requestId != _latestSuggestionRequest ||
+          _queryController.text != value) {
+        return;
+      }
+      setState(() => _suggestions = items);
+    });
   }
 
   Future<void> _applyHistoryEntry(YoutubeSearchHistoryEntry entry) async {
@@ -231,7 +483,6 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
               ? entry.channelTitle!.trim()
               : cid,
         );
-        _channelController.text = _selectedChannel!.title;
         _channelSuggestions = [];
         _channelSearchHint = null;
       });
@@ -267,6 +518,8 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
     final player = PlayerController.of(context);
 
     switch (action) {
+      case _SearchQueueAction.bookmark:
+        await _toggleBookmark(track);
       case _SearchQueueAction.playNext:
         final next = await player.playTrackNext(
           track,
@@ -332,35 +585,62 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
     final player = PlayerController.of(context);
     final relevant = _relevantSuggestions;
 
+    final dl = YoutubeAudioDownloadController.instance;
+    final downloadTabLabel = dl.activeCount == 0
+        ? 'Downloads'
+        : 'Downloads (${dl.activeCount})';
+
     return Scaffold(
       backgroundColor: pal.scaffoldBackground,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: widget.onBack,
-        ),
-        title: const Text('Online search'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: [
-            const Tab(text: 'Search'),
-            Tab(
-              text: _savedAudio.isEmpty
-                  ? 'Saved audio'
-                  : 'Saved audio (${_savedAudio.length})',
-            ),
-            Tab(
-              text: _savedLinks.isEmpty
-                  ? 'Saved links'
-                  : 'Saved links (${_savedLinks.length})',
-            ),
-          ],
-        ),
-      ),
       body: Column(
         children: [
+          SafeArea(
+            bottom: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 4, 12, 0),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.menu_rounded),
+                        color: pal.onScaffold,
+                        tooltip: 'Open menu',
+                        onPressed: widget.onOpenDrawer,
+                      ),
+                      Expanded(
+                        child: _buildTopQueryField(theme, pal),
+                      ),
+                    ],
+                  ),
+                ),
+                _buildSearchHelper(theme, pal),
+                TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  padding: const EdgeInsets.only(left: 4, right: 8),
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  tabs: [
+                    const Tab(text: 'Search'),
+                    Tab(
+                      text: _savedAudio.isEmpty
+                          ? 'Saved audio'
+                          : 'Saved audio (${_savedAudio.length})',
+                    ),
+                    Tab(
+                      text: _savedLinks.isEmpty
+                          ? 'Saved links'
+                          : 'Saved links (${_savedLinks.length})',
+                    ),
+                    Tab(text: downloadTabLabel),
+                  ],
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: DaisyBackground(
               baseColor: pal.scaffoldBackground,
@@ -370,9 +650,10 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
                   _buildSearchTab(context, theme, pal, relevant),
                   _SavedTracksTab(
                     emptyMessage:
-                        'No saved audio yet.\nUse Save audio in Now Playing.',
+                        'No saved audio yet.\nUse Save audio in Now Playing or Downloads.',
                     tracks: _savedAudio,
                     leadingIcon: Icons.download_done_rounded,
+                    savedAudioTab: true,
                     onPlay: (track, index, all) =>
                         _playTracks(all, index),
                     onRemove: (id) async {
@@ -385,7 +666,7 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
                   ),
                   _SavedTracksTab(
                     emptyMessage:
-                        'No saved links yet.\nBookmark a track in Now Playing.',
+                        'No saved links yet.\nBookmark a track from search results.',
                     tracks: _savedLinks,
                     leadingIcon: Icons.bookmark_rounded,
                     onPlay: (track, index, all) =>
@@ -399,35 +680,10 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
                         : (track) => _saveTrackAudio(track),
                     showSaveAudioAction: false,
                   ),
+                  const YoutubeDownloadsTab(),
                 ],
               ),
             ),
-          ),
-          ListenableBuilder(
-            listenable: YoutubeAudioDownloadController.instance,
-            builder: (context, _) {
-              final dl = YoutubeAudioDownloadController.instance;
-              if (!dl.isRunning) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    LinearProgressIndicator(
-                      value: dl.progress?.clamp(0.0, 1.0),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      dl.status,
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: pal.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
           ),
           ListenableBuilder(
             listenable: player,
@@ -446,6 +702,123 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
     );
   }
 
+  Widget _buildTopQueryField(ThemeData theme, AppPalette pal) {
+    final parsed = OnlineSearchInput.parse(_queryController.text);
+    return Material(
+      color: pal.onScaffold.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(14),
+      child: TextField(
+        controller: _queryController,
+        focusNode: _focusNode,
+        textInputAction: TextInputAction.search,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: pal.onScaffold,
+          fontSize: 15,
+        ),
+        decoration: InputDecoration(
+          hintText: _selectedChannel != null
+              ? 'In ${_selectedChannel!.title}…'
+              : OnlineSearchInput.unifiedHint,
+          hintStyle: theme.textTheme.bodyMedium?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.72),
+            fontSize: 13,
+          ),
+          isDense: true,
+          filled: true,
+          fillColor: Colors.transparent,
+          prefixIcon: Icon(
+            parsed.prefixIcon,
+            color: pal.textMuted.withValues(alpha: 0.9),
+            size: 22,
+          ),
+          suffixIcon: _queryController.text.isNotEmpty
+              ? IconButton(
+                  tooltip: 'Clear search',
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: pal.onScaffold.withValues(alpha: 0.75),
+                    size: 20,
+                  ),
+                  onPressed: _clearSearch,
+                )
+              : null,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        ),
+        onChanged: _onQueryChanged,
+        onSubmitted: (_) => _runSearch(),
+      ),
+    );
+  }
+
+  Widget _buildSearchHelper(ThemeData theme, AppPalette pal) {
+    final parsed = OnlineSearchInput.parse(_queryController.text);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_selectedChannel != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: InputChip(
+                  avatar: const Icon(Icons.verified_outlined, size: 18),
+                  label: Text('In: ${_selectedChannel!.title}'),
+                  onDeleted: _clearChannel,
+                ),
+              ),
+            ),
+          if (_channelSearchHint != null &&
+              parsed.isTypingChannelLookup &&
+              _selectedChannel == null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                _channelSearchHint!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: pal.textMuted,
+                ),
+              ),
+            ),
+          if (_channelSuggestions.isNotEmpty &&
+              parsed.isTypingChannelLookup &&
+              _selectedChannel == null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: SizedBox(
+                height: 40,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _channelSuggestions.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, i) {
+                    final ch = _channelSuggestions[i];
+                    return ActionChip(
+                      avatar: ch.thumbnailUrl != null
+                          ? CircleAvatar(
+                              backgroundImage: NetworkImage(ch.thumbnailUrl!),
+                            )
+                          : null,
+                      label: Text(ch.title),
+                      onPressed: () => _selectChannel(
+                        ch,
+                        retainQuery: parsed.inChannelQuery,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSearchTab(
     BuildContext context,
     ThemeData theme,
@@ -455,207 +828,6 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Material(
-            color: pal.onScaffold.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(16),
-            child: TextField(
-              controller: _channelController,
-              textInputAction: TextInputAction.next,
-              decoration: InputDecoration(
-                hintText: 'Channel: @name, UC…, or channel URL',
-                prefixIcon: const Icon(Icons.account_circle_outlined),
-                suffixIcon: (_selectedChannel != null ||
-                        _channelController.text.isNotEmpty)
-                    ? IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: _clearChannel,
-                      )
-                    : null,
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 12,
-                ),
-              ),
-              onChanged: (value) {
-                if (_selectedChannel != null &&
-                    value.trim() != _selectedChannel!.title) {
-                  setState(() => _selectedChannel = null);
-                }
-                setState(() {});
-                _channelDebounce?.cancel();
-                final requestId = ++_latestChannelRequest;
-                if (value.trim().isEmpty) {
-                  setState(() {
-                    _channelSuggestions = [];
-                    _channelSearchHint = null;
-                  });
-                  return;
-                }
-                _channelDebounce = Timer(
-                  const Duration(milliseconds: 800),
-                  () async {
-                    final resolver = YoutubeChannelResolver.instance;
-                    if (YoutubeChannelResolver.isDirectChannelInput(value)) {
-                      final resolved =
-                          await resolver.resolveChannelInput(value);
-                      if (!mounted ||
-                          requestId != _latestChannelRequest ||
-                          _channelController.text != value) {
-                        return;
-                      }
-                      if (resolved != null) {
-                        _selectChannel(resolved);
-                        return;
-                      }
-                      setState(() {
-                        _channelSearchHint = resolver.lastChannelSearchError;
-                        _channelSuggestions = [];
-                      });
-                      return;
-                    }
-
-                    final suggestions =
-                        await resolver.searchChannels(value);
-                    if (!mounted ||
-                        requestId != _latestChannelRequest ||
-                        _channelController.text != value) {
-                      return;
-                    }
-                    setState(() {
-                      _channelSuggestions = suggestions;
-                      _channelSearchHint = resolver.lastChannelSearchError ??
-                          (suggestions.isEmpty && value.trim().length >= 3
-                              ? 'No channels found — try @handle or UC id'
-                              : null);
-                    });
-                  },
-                );
-              },
-              onSubmitted: (value) async {
-                final resolver = YoutubeChannelResolver.instance;
-                final resolved = await resolver.resolveChannelInput(value);
-                if (!mounted) return;
-                if (resolved != null) {
-                  _selectChannel(resolved);
-                  return;
-                }
-                setState(() {
-                  _channelSearchHint = resolver.lastChannelSearchError ??
-                      'Could not resolve channel';
-                });
-              },
-            ),
-          ),
-        ),
-        if (_selectedChannel != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: InputChip(
-                avatar: const Icon(Icons.verified_outlined, size: 18),
-                label: Text('In: ${_selectedChannel!.title}'),
-                onDeleted: _clearChannel,
-              ),
-            ),
-          ),
-        if (_channelSearchHint != null && _selectedChannel == null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Text(
-              _channelSearchHint!,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: pal.textMuted,
-              ),
-            ),
-          ),
-        if (_channelSuggestions.isNotEmpty && _selectedChannel == null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-            child: SizedBox(
-              height: 40,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _channelSuggestions.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, i) {
-                  final ch = _channelSuggestions[i];
-                  return ActionChip(
-                    avatar: ch.thumbnailUrl != null
-                        ? CircleAvatar(
-                            backgroundImage: NetworkImage(ch.thumbnailUrl!),
-                          )
-                        : null,
-                    label: Text(ch.title),
-                    onPressed: () => _selectChannel(ch),
-                  );
-                },
-              ),
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: Material(
-            color: pal.onScaffold.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(16),
-            child: TextField(
-              controller: _queryController,
-              focusNode: _focusNode,
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: _selectedChannel != null
-                    ? 'Search in ${_selectedChannel!.title}…'
-                    : 'Search songs on YouTube…',
-                prefixIcon: const Icon(Icons.search_rounded),
-                suffixIcon: _queryController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.close_rounded),
-                        onPressed: () {
-                          _queryController.clear();
-                          setState(() {
-                            _results = [];
-                            _suggestions = [];
-                            _submittedQuery = '';
-                            _errorMessage = null;
-                          });
-                        },
-                      )
-                    : null,
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 14,
-                ),
-              ),
-              onChanged: (value) {
-                setState(() {});
-                _debounce?.cancel();
-                final requestId = ++_latestSuggestionRequest;
-                if (value.trim().isEmpty) {
-                  setState(() => _suggestions = []);
-                  return;
-                }
-                _debounce = Timer(
-                  const Duration(milliseconds: 350),
-                  () async {
-                    final items = await YoutubeSearchService.instance
-                        .querySuggestions(value);
-                    if (!mounted ||
-                        requestId != _latestSuggestionRequest ||
-                        _queryController.text != value) {
-                      return;
-                    }
-                    setState(() => _suggestions = items);
-                  },
-                );
-              },
-              onSubmitted: (_) => _runSearch(),
-            ),
-          ),
-        ),
         if (relevant.isNotEmpty)
           _SuggestionStrip(
             title: _results.isEmpty
@@ -724,6 +896,7 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
           onTap: () => _playTracks(_results, index),
           onQueueAction: (action) =>
               unawaited(_onSearchQueueAction(action, _results, index)),
+          onToggleBookmark: () => unawaited(_toggleBookmark(track)),
         );
       },
     );
@@ -844,6 +1017,7 @@ class _SavedTracksTab extends StatelessWidget {
     required this.onRemove,
     this.onSaveAudio,
     this.showSaveAudioAction = true,
+    this.savedAudioTab = false,
   });
 
   final String emptyMessage;
@@ -853,6 +1027,7 @@ class _SavedTracksTab extends StatelessWidget {
   final Future<void> Function(String videoId) onRemove;
   final Future<void> Function(TrackItem track)? onSaveAudio;
   final bool showSaveAudioAction;
+  final bool savedAudioTab;
 
   @override
   Widget build(BuildContext context) {
@@ -897,6 +1072,15 @@ class _SavedTracksTab extends StatelessWidget {
           },
           onSaveAudio: onSaveAudio != null ? () => onSaveAudio!(track) : null,
           showSaveAudioAction: showSaveAudioAction,
+          onRename: savedAudioTab && id.isNotEmpty
+              ? () => showRenameSavedYoutubeAudioDialog(
+                    context,
+                    videoId: id,
+                    currentTitle: track.title.trim().isNotEmpty
+                        ? track.title
+                        : 'Untitled video',
+                  )
+              : null,
         );
       },
     );
@@ -915,6 +1099,7 @@ class _SavedTrackTile extends StatelessWidget {
     this.onSaveAudio,
     this.onShowInfo,
     this.showSaveAudioAction = false,
+    this.onRename,
   });
 
   final TrackItem track;
@@ -924,6 +1109,7 @@ class _SavedTrackTile extends StatelessWidget {
   final VoidCallback? onRemove;
   final Future<void> Function()? onSaveAudio;
   final Future<void> Function()? onShowInfo;
+  final Future<void> Function()? onRename;
   final bool showSaveAudioAction;
 
   bool get _canPlay =>
@@ -973,13 +1159,14 @@ class _SavedTrackTile extends StatelessWidget {
         onLongPress: onRemove,
         leading: ClipRRect(
           borderRadius: BorderRadius.circular(10),
-          child: _Thumbnail(url: track.thumbnailUrl),
+          child: YoutubeSearchThumbnail(url: track.thumbnailUrl),
         ),
         title: Text(
-          track.title,
+          track.title.trim().isNotEmpty ? track.title : 'Untitled video',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.titleSmall?.copyWith(
+            color: pal.onScaffold,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -999,6 +1186,8 @@ class _SavedTrackTile extends StatelessWidget {
                 switch (value) {
                   case 'info':
                     await onShowInfo?.call();
+                  case 'rename':
+                    await onRename?.call();
                   case 'download':
                     await onSaveAudio?.call();
                   case 'delete':
@@ -1022,6 +1211,15 @@ class _SavedTrackTile extends StatelessWidget {
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
+                  if (onRename != null && isDeviceAudio)
+                    const PopupMenuItem(
+                      value: 'rename',
+                      child: ListTile(
+                        leading: Icon(Icons.drive_file_rename_outline_rounded),
+                        title: Text('Rename'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
                   if (onSaveAudio != null && !isDeviceAudio)
                     PopupMenuItem(
                       value: 'download',
@@ -1090,6 +1288,7 @@ class _SavedTrackTile extends StatelessWidget {
 }
 
 enum _SearchQueueAction {
+  bookmark,
   playNext,
   addToQueue,
   playFromHere,
@@ -1101,18 +1300,27 @@ class _YoutubeResultTile extends StatelessWidget {
     required this.track,
     required this.onTap,
     required this.onQueueAction,
+    required this.onToggleBookmark,
   });
 
   final TrackItem track;
   final VoidCallback onTap;
   final void Function(_SearchQueueAction action) onQueueAction;
+  final VoidCallback onToggleBookmark;
 
   @override
   Widget build(BuildContext context) {
     final pal = context.palette;
     final theme = Theme.of(context);
+    final videoId = track.youtubeVideoId?.trim() ?? '';
 
-    return Material(
+    return ListenableBuilder(
+      listenable: SavedYoutubeLinksStore.revision,
+      builder: (context, _) {
+        final bookmarked =
+            videoId.isNotEmpty && SavedYoutubeLinksStore.isSaved(videoId);
+
+        return Material(
       color: pal.onScaffold.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
@@ -1124,7 +1332,7 @@ class _YoutubeResultTile extends StatelessWidget {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: _Thumbnail(url: track.thumbnailUrl),
+                child: YoutubeSearchThumbnail(url: track.thumbnailUrl),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1132,11 +1340,13 @@ class _YoutubeResultTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      track.title,
+                      track.title.trim().isNotEmpty
+                          ? track.title
+                          : 'Untitled video',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall?.copyWith(
-                        color: pal.textPrimary,
+                        color: pal.onScaffold,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1152,6 +1362,21 @@ class _YoutubeResultTile extends StatelessWidget {
                   ],
                 ),
               ),
+              IconButton(
+                tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark',
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                icon: Icon(
+                  bookmarked
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                  color: bookmarked
+                      ? context.controlAccent
+                      : pal.textMuted,
+                  size: 22,
+                ),
+                onPressed: onToggleBookmark,
+              ),
               PopupMenuButton<_SearchQueueAction>(
                 tooltip: 'Queue options',
                 padding: EdgeInsets.zero,
@@ -1161,8 +1386,24 @@ class _YoutubeResultTile extends StatelessWidget {
                   size: 22,
                 ),
                 onSelected: onQueueAction,
-                itemBuilder: (context) => const [
+                itemBuilder: (context) => [
                   PopupMenuItem(
+                    value: _SearchQueueAction.bookmark,
+                    child: ListTile(
+                      leading: Icon(
+                        bookmarked
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_border_rounded,
+                        size: 22,
+                      ),
+                      title: Text(
+                        bookmarked ? 'Remove bookmark' : 'Bookmark',
+                      ),
+                      contentPadding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                  const PopupMenuItem(
                     value: _SearchQueueAction.playNext,
                     child: ListTile(
                       leading: Icon(Icons.queue_play_next_rounded, size: 22),
@@ -1216,37 +1457,8 @@ class _YoutubeResultTile extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _Thumbnail extends StatelessWidget {
-  const _Thumbnail({this.url, this.size = 56});
-
-  final String? url;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    final u = url?.trim();
-    if (u == null || u.isEmpty) {
-      return Container(
-        width: size,
-        height: size,
-        color: context.palette.onScaffold.withValues(alpha: 0.12),
-        child: Icon(Icons.music_note_rounded, color: context.palette.textMuted),
-      );
-    }
-    return Image.network(
-      u,
-      width: size,
-      height: size,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Container(
-        width: size,
-        height: size,
-        color: context.palette.onScaffold.withValues(alpha: 0.12),
-        child: Icon(Icons.music_note_rounded, color: context.palette.textMuted),
-      ),
+      },
     );
   }
 }
+

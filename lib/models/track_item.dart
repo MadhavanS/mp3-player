@@ -83,13 +83,15 @@ class TrackItem {
   /// Maps a YouTube [Video] from [ytClient.search] into a queue-ready row.
   factory TrackItem.fromYoutubeVideo(Video video) {
     final id = video.id.value;
+    final title = video.title.trim();
+    final artist = video.author.trim();
     final duration = video.duration;
     final meta = duration != null
         ? _formatDurationLabel(duration)
         : (video.isLive ? 'Live' : 'YouTube');
     return TrackItem(
-      title: video.title,
-      artist: video.author,
+      title: title.isNotEmpty ? title : 'Untitled video',
+      artist: artist.isNotEmpty ? artist : 'Unknown artist',
       metaLine: meta,
       genres: '',
       artColors: _gradientForKey(id),

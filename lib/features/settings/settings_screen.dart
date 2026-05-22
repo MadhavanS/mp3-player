@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../platform/windows_window.dart';
+import '../../platform/youtube_platform_support.dart';
 import '../../services/library_tabs_store.dart';
 import '../../services/recent_list_limits_store.dart';
 import '../../services/recently_added_store.dart';
@@ -110,10 +111,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _searchHistoryLimitController = TextEditingController();
     unawaited(_loadLibraryTabRows());
     unawaited(_loadRecentListLimits());
-    unawaited(_loadOnlineSearchSettings());
+    if (YoutubePlatformSupport.isOnlinePlaybackSupported) {
+      unawaited(_loadOnlineSearchSettings());
+      YoutubeSearchHistoryStore.revision
+          .addListener(_onOnlineSearchStoresChanged);
+      YoutubeDownloadSettingsStore.revision
+          .addListener(_onOnlineSearchStoresChanged);
+    }
     unawaited(_loadWindowsWindowPrefs());
-    YoutubeSearchHistoryStore.revision.addListener(_onOnlineSearchStoresChanged);
-    YoutubeDownloadSettingsStore.revision.addListener(_onOnlineSearchStoresChanged);
   }
 
   Future<void> _loadWindowsWindowPrefs() async {
@@ -128,10 +133,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
-    YoutubeSearchHistoryStore.revision
-        .removeListener(_onOnlineSearchStoresChanged);
-    YoutubeDownloadSettingsStore.revision
-        .removeListener(_onOnlineSearchStoresChanged);
+    if (YoutubePlatformSupport.isOnlinePlaybackSupported) {
+      YoutubeSearchHistoryStore.revision
+          .removeListener(_onOnlineSearchStoresChanged);
+      YoutubeDownloadSettingsStore.revision
+          .removeListener(_onOnlineSearchStoresChanged);
+    }
     _recentlyAddedLimitController.dispose();
     _recentlyPlayedLimitController.dispose();
     _searchHistoryLimitController.dispose();
@@ -144,14 +151,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadLibraryTabRows() async {
     final rows = await LibraryTabsStore.loadConfig();
-    if (mounted) setState(() => _libraryTabRows = rows);
+    if (mounted) {
+      setState(
+        () => _libraryTabRows =
+            YoutubePlatformSupport.filterLibraryTabRows(rows),
+      );
+    }
   }
 
   Future<void> _persistLibraryTabRows(
     List<LibraryTabRow> rows, {
     VoidCallback? onUpdated,
   }) async {
-    await LibraryTabsStore.saveConfig(rows);
+    await LibraryTabsStore.saveConfig(
+      YoutubePlatformSupport.filterLibraryTabRows(rows),
+    );
     final next = await LibraryTabsStore.loadConfig();
     if (mounted) setState(() => _libraryTabRows = next);
     onUpdated?.call();
@@ -798,33 +812,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           onTap: () => _goToSection(_SettingsSection.recentLists),
         ),
-        Divider(height: 1, color: pal.dividerOnHero),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 6),
-          leading: Icon(
-            Icons.cloud_download_outlined,
-            color: pal.onScaffold.withValues(alpha: 0.88),
-            size: 28,
-          ),
-          title: Text(
-            'Online search',
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: pal.onScaffold,
-              fontWeight: FontWeight.w600,
+        if (YoutubePlatformSupport.isOnlinePlaybackSupported) ...[
+          Divider(height: 1, color: pal.dividerOnHero),
+          ListTile(
+            contentPadding: const EdgeInsets.symmetric(vertical: 6),
+            leading: Icon(
+              Icons.cloud_download_outlined,
+              color: pal.onScaffold.withValues(alpha: 0.88),
+              size: 28,
             ),
-          ),
-          subtitle: Text(
-            'Search history and saved audio folder',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: pal.textMuted.withValues(alpha: 0.95),
+            title: Text(
+              'Online search',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: pal.onScaffold,
+                fontWeight: FontWeight.w600,
+              ),
             ),
+            subtitle: Text(
+              'Search history and saved audio folder',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: pal.textMuted.withValues(alpha: 0.95),
+              ),
+            ),
+            trailing: Icon(
+              Icons.chevron_right_rounded,
+              color: pal.textMuted.withValues(alpha: 0.75),
+            ),
+            onTap: () => _goToSection(_SettingsSection.onlineSearch),
           ),
-          trailing: Icon(
-            Icons.chevron_right_rounded,
-            color: pal.textMuted.withValues(alpha: 0.75),
-          ),
-          onTap: () => _goToSection(_SettingsSection.onlineSearch),
-        ),
+        ],
         Divider(height: 1, color: pal.dividerOnHero),
         ListTile(
           contentPadding: const EdgeInsets.symmetric(vertical: 6),
@@ -1732,10 +1748,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       theme,
                       pal,
                     ),
-                    _SettingsSection.onlineSearch => _buildOnlineSearchDetail(
-                      theme,
-                      pal,
-                    ),
+                    _SettingsSection.onlineSearch =>
+                      YoutubePlatformSupport.isOnlinePlaybackSupported
+                          ? _buildOnlineSearchDetail(theme, pal)
+                          : _buildMainMenu(theme, pal),
                     _SettingsSection.help => const HelpContent(),
                     _SettingsSection.windows => _buildWindowsDetail(theme, pal),
                   },

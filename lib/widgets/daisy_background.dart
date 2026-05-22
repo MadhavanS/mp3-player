@@ -9,6 +9,7 @@ const String daisyTextureAssetPath =
     'assets/c__Users_smadh_AppData_Roaming_Cursor_User_workspaceStorage_0dbfe92190d87ed8cf776b817604569f_images_image-9647ab36-e7ec-435e-afe7-d85d50b88632.png';
 const String leahTextureAssetPath =
     'assets/c__Users_smadh_AppData_Roaming_Cursor_User_workspaceStorage_0dbfe92190d87ed8cf776b817604569f_images_image-f44a8fb3-4799-4ae6-8d61-ac2e01f71443.png';
+const String ivyTextureAssetPath = 'assets/ivy_background.png';
 
 class DaisyBackground extends StatelessWidget {
   const DaisyBackground({super.key, required this.baseColor, required this.child});
@@ -26,9 +27,20 @@ class DaisyBackground extends StatelessWidget {
       return ColoredBox(color: baseColor, child: child);
     }
     if (ivy) {
-      return _IvyLiquidGlassBackground(
-        baseColor: baseColor,
-        child: child,
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          // The base liquid glass background image
+          Image.asset(
+            ivyTextureAssetPath,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Container(color: baseColor),
+          ),
+          _IvyLiquidGlassBackground(
+            baseColor: baseColor,
+            child: child,
+          ),
+        ],
       );
     }
     return Stack(
@@ -89,34 +101,34 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Bottom-most layer: The animated liquid and fibers
-        AnimatedBuilder(
-          animation: _flow,
-          builder: (context, _) {
-            return CustomPaint(
-              painter: _IvyLiquidFlowPainter(
-                base: widget.baseColor,
-                phase: _flow.value,
-              ),
-            );
-          },
+        // Base Layer: The high-quality liquid glass background image
+        Image.asset(
+          ivyTextureAssetPath,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(color: widget.baseColor),
         ),
-        // Glass Layer 1: Screen-wide frosted plate
+        // Layer 2: Subtle organic liquid flow (reduced opacity to let the image shine)
+        Opacity(
+          opacity: 0.2,
+          child: AnimatedBuilder(
+            animation: _flow,
+            builder: (context, _) {
+              return CustomPaint(
+                painter: _IvyLiquidFlowPainter(
+                  base: widget.baseColor,
+                  phase: _flow.value,
+                ),
+              );
+            },
+          ),
+        ),
+        // Glass Layer 1: Screen-wide frosted plate with blur
         ClipRect(
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 36, sigmaY: 32),
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), // Reduced blur to see the image better
             child: DecoratedBox(
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white.withValues(alpha: 0.48),
-                    Colors.white.withValues(alpha: 0.14),
-                    Colors.white.withValues(alpha: 0.32),
-                  ],
-                  stops: const [0.0, 0.5, 1.0],
-                ),
+                color: Colors.white.withValues(alpha: 0.1),
               ),
             ),
           ),
