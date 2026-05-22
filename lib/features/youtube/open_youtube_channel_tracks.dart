@@ -4,10 +4,10 @@ import '../../models/track_item.dart';
 import '../../platform/youtube_platform_support.dart';
 import '../../models/youtube_channel_ref.dart';
 import '../../services/youtube_channel_resolver.dart';
+import '../shell/shell_navigation_hub.dart';
 import '../../widgets/action_pill_toast.dart';
-import 'youtube_search_screen.dart';
 
-/// Opens [YoutubeSearchScreen] scoped to the track's upload channel.
+/// Opens online search scoped to the track's upload channel.
 Future<void> openYoutubeChannelTracksFromTrack(
   BuildContext context,
   TrackItem track, {
@@ -52,12 +52,5 @@ Future<void> openYoutubeChannelTracksFromTrack(
   }
   if (!context.mounted) return;
 
-  await Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(
-      builder: (ctx) => YoutubeSearchScreen(
-        onOpenDrawer: () => Navigator.of(ctx).pop(),
-        initialChannel: channel,
-      ),
-    ),
-  );
+  ShellNavigationHub.navigateToOnlineSearch(initialChannel: channel);
 }

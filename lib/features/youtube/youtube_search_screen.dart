@@ -5,8 +5,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../audio/player_controller.dart';
-import '../../features/player/mini_player_bar.dart';
-import '../../features/player/now_playing_screen.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../models/youtube_channel_ref.dart';
@@ -25,6 +23,7 @@ import 'youtube_search_thumbnail.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format_bytes.dart';
 import '../../widgets/action_pill_toast.dart';
+import '../../widgets/app_scrollable_tab_bar.dart';
 import '../../widgets/daisy_background.dart';
 
 /// Online YouTube search (via [ytClient]) with playback through [PlayerController].
@@ -561,28 +560,10 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
     }
   }
 
-  void _openNowPlaying() {
-    final player = PlayerController.of(context);
-    if (player.currentTrack == null) return;
-    Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return FadeTransition(
-            opacity: animation,
-            child: NowPlayingScreen(
-              onCollapse: () => Navigator.of(context).pop(),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final pal = context.palette;
-    final player = PlayerController.of(context);
     final relevant = _relevantSuggestions;
 
     final dl = YoutubeAudioDownloadController.instance;
@@ -617,12 +598,8 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
                   ),
                 ),
                 _buildSearchHelper(theme, pal),
-                TabBar(
+                AppScrollableTabBar(
                   controller: _tabController,
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  padding: const EdgeInsets.only(left: 4, right: 8),
-                  labelPadding: const EdgeInsets.symmetric(horizontal: 12),
                   tabs: [
                     const Tab(text: 'Search'),
                     Tab(
@@ -684,18 +661,6 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen>
                 ],
               ),
             ),
-          ),
-          ListenableBuilder(
-            listenable: player,
-            builder: (context, _) {
-              if (player.currentTrack == null) {
-                return const SizedBox.shrink();
-              }
-              return MiniPlayerBar(
-                controller: player,
-                onTap: _openNowPlaying,
-              );
-            },
           ),
         ],
       ),

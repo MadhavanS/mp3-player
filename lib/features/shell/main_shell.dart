@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
+import '../../models/youtube_channel_ref.dart';
 import '../../services/file_path_mtime_sort.dart';
 import '../../services/first_run_library_hint_store.dart';
 import '../../services/mp3_scanner.dart';
@@ -40,6 +41,7 @@ import '../settings/settings_screen.dart';
 import '../../platform/youtube_platform_support.dart';
 import '../youtube/youtube_search_screen.dart';
 import 'now_playing_escape_bridge.dart';
+import 'shell_navigation_hub.dart';
 
 /// During folder scan, skip building a huge native playback queue until the user
 /// actually plays something (avoids hanging on "Loading tags…" for large libraries).
@@ -70,7 +72,7 @@ void dispatchEscapeToSongsLibrary() {
   EscapeToSongsLibraryHub.completeNavigationToSongs();
 }
 
-enum _ShellPage { library, settings }
+enum _ShellPage { library, settings, onlineSearch }
 
 class MainShell extends StatefulWidget {
   const MainShell({
@@ -116,6 +118,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   final ValueNotifier<Set<String>?> _songsBrowsePathKeysNotifier =
       ValueNotifier<Set<String>?>(null);
   _ShellPage _page = _ShellPage.library;
+  int _onlineSearchOpenToken = 0;
+  YoutubeChannelRef? _onlineSearchInitialChannel;
   List<String> _folderPaths = [];
   bool _scanning = false;
 
@@ -147,6 +151,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     EscapeToSongsLibraryHub.register(_onEscapeToSongsLibrary);
+    ShellNavigationHub.goOnlineSearch = _goOnlineSearch;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       NowPlayingWindowsEsc.handler = _windowsEscapeCloseNowPlaying;
     }
@@ -768,6 +773,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     EscapeToSongsLibraryHub.unregister();
+    ShellNavigationHub.goOnlineSearch = null;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       NowPlayingWindowsEsc.handler = null;
     }
@@ -1146,7 +1152,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     unawaited(PlaybackSessionStore.saveShellPageIsSettings(true));
   }
 
-  void _openYoutubeSearch() {
+  void _goOnlineSearch({YoutubeChannelRef? initialChannel}) {
     if (!YoutubePlatformSupport.isOnlinePlaybackSupported) {
       ActionPillToast.showUsingRootNavigator(
         'Online search is available on Android only',
@@ -1154,18 +1160,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       );
       return;
     }
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (ctx) => YoutubeSearchScreen(
-          onOpenDrawer: () {
-            Navigator.of(ctx).pop();
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _openDrawer();
-            });
-          },
-        ),
-      ),
-    );
+    setState(() {
+      _page = _ShellPage.onlineSearch;
+      _openMusicFoldersInSettings = false;
+      if (initialChannel != null) {
+        _onlineSearchOpenToken++;
+        _onlineSearchInitialChannel = initialChannel;
+      }
+    });
+    unawaited(PlaybackSessionStore.saveShellPageIsSettings(false));
   }
 
   void _openNowPlaying() {
@@ -1272,7 +1275,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           canPop: _page == _ShellPage.library,
           onPopInvokedWithResult: (didPop, _) {
             if (didPop) return;
-            if (_page == _ShellPage.settings) {
+            if (_page == _ShellPage.settings ||
+                _page == _ShellPage.onlineSearch) {
               _goLibrary();
             }
           },
@@ -1289,7 +1293,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               },
               onYoutubeSearch: () {
                 Navigator.pop(context);
-                _openYoutubeSearch();
+                _goOnlineSearch();
               },
               onFiles: () {
                 Navigator.pop(context);
@@ -1323,64 +1327,72 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 Column(
                   children: [
                     Expanded(
-                      child: _page == _ShellPage.library
-                          ? LibraryScreen(
-                              key: _libraryScreenKey,
-                              folderPaths: _folderPaths,
-                              onOpenMusicFolderSettings: () =>
-                                  _goSettings(openMusicFolders: true),
-                              songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
-                              onClearSongsBrowseFilter: () {
-                                _songsBrowsePathKeysNotifier.value = null;
-                                PlayerController.of(
-                                  context,
-                                ).setPlaybackPathKeyScope(null);
-                                unawaited(
-                                  PlaybackSessionStore.saveBrowsePathKeys(null),
+                      child: switch (_page) {
+                        _ShellPage.library => LibraryScreen(
+                            key: _libraryScreenKey,
+                            folderPaths: _folderPaths,
+                            onOpenMusicFolderSettings: () =>
+                                _goSettings(openMusicFolders: true),
+                            songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
+                            onClearSongsBrowseFilter: () {
+                              _songsBrowsePathKeysNotifier.value = null;
+                              PlayerController.of(
+                                context,
+                              ).setPlaybackPathKeyScope(null);
+                              unawaited(
+                                PlaybackSessionStore.saveBrowsePathKeys(null),
+                              );
+                            },
+                            onOpenDrawer: _openDrawer,
+                            onRefreshLibrary:
+                                _folderPaths.isEmpty ||
+                                    _scanning ||
+                                    _refreshInProgress
+                                ? null
+                                : () {
+                                    unawaited(_refreshLibraryScan());
+                                  },
+                          ),
+                        _ShellPage.settings => SettingsScreen(
+                            folderPaths: _folderPaths,
+                            onFoldersChanged: _onFoldersChanged,
+                            openMusicFoldersSection: _openMusicFoldersInSettings,
+                            onOpenMusicFoldersSectionHandled: () {
+                              if (mounted) {
+                                setState(
+                                  () => _openMusicFoldersInSettings = false,
                                 );
-                              },
-                              onOpenDrawer: _openDrawer,
-                              onRefreshLibrary:
-                                  _folderPaths.isEmpty ||
-                                      _scanning ||
-                                      _refreshInProgress
-                                  ? null
-                                  : () {
-                                      unawaited(_refreshLibraryScan());
-                                    },
-                            )
-                          : SettingsScreen(
-                              folderPaths: _folderPaths,
-                              onFoldersChanged: _onFoldersChanged,
-                              openMusicFoldersSection: _openMusicFoldersInSettings,
-                              onOpenMusicFoldersSectionHandled: () {
-                                if (mounted) {
-                                  setState(
-                                    () => _openMusicFoldersInSettings = false,
-                                  );
-                                }
-                              },
-                              onOpenDrawer: _openDrawer,
-                              themeSetting: widget.themeSetting,
-                              onThemeSettingChanged:
-                                  widget.onThemeSettingChanged,
-                              fontOption: widget.fontOption,
-                              onFontOptionChanged: widget.onFontOptionChanged,
-                              accentColorOption: widget.accentColorOption,
-                              customAccentColor: widget.customAccentColor,
-                              onAccentColorOptionChanged:
-                                  widget.onAccentColorOptionChanged,
-                              onCustomAccentColorChanged:
-                                  widget.onCustomAccentColorChanged,
-                              playerChromeBackgroundKind:
-                                  widget.playerChromeBackgroundKind,
-                              playerChromeCustomBackground:
-                                  widget.playerChromeCustomBackground,
-                              onPlayerChromeBackgroundKindChanged:
-                                  widget.onPlayerChromeBackgroundKindChanged,
-                              onPlayerChromeCustomBackgroundChanged:
-                                  widget.onPlayerChromeCustomBackgroundChanged,
+                              }
+                            },
+                            onOpenDrawer: _openDrawer,
+                            themeSetting: widget.themeSetting,
+                            onThemeSettingChanged:
+                                widget.onThemeSettingChanged,
+                            fontOption: widget.fontOption,
+                            onFontOptionChanged: widget.onFontOptionChanged,
+                            accentColorOption: widget.accentColorOption,
+                            customAccentColor: widget.customAccentColor,
+                            onAccentColorOptionChanged:
+                                widget.onAccentColorOptionChanged,
+                            onCustomAccentColorChanged:
+                                widget.onCustomAccentColorChanged,
+                            playerChromeBackgroundKind:
+                                widget.playerChromeBackgroundKind,
+                            playerChromeCustomBackground:
+                                widget.playerChromeCustomBackground,
+                            onPlayerChromeBackgroundKindChanged:
+                                widget.onPlayerChromeBackgroundKindChanged,
+                            onPlayerChromeCustomBackgroundChanged:
+                                widget.onPlayerChromeCustomBackgroundChanged,
+                          ),
+                        _ShellPage.onlineSearch => YoutubeSearchScreen(
+                            key: ValueKey(
+                              'online-search-$_onlineSearchOpenToken',
                             ),
+                            onOpenDrawer: _openDrawer,
+                            initialChannel: _onlineSearchInitialChannel,
+                          ),
+                      },
                     ),
                     if (current != null)
                       MiniPlayerBar(controller: player, onTap: _openNowPlaying),
@@ -1551,7 +1563,7 @@ class _GlossyDrawer extends StatelessWidget {
                         icon: Icons.search_rounded,
                         label: 'Online search',
                         onTap: onYoutubeSearch,
-                        selected: false,
+                        selected: currentPage == _ShellPage.onlineSearch,
                       ),
                     _GlossyDrawerTile(
                       icon: Icons.folder_open_rounded,

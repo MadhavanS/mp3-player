@@ -103,6 +103,13 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
+  void _notifyYoutubeResolveFailed(Object? lastError) {
+    ActionPillToast.showUsingRootNavigator(
+      YoutubePlaybackResolveResult.userMessageForFailure(lastError),
+      icon: Icons.cloud_off_outlined,
+    );
+  }
+
   /// One automatic re-resolve of the YouTube CDN URL per [errorGeneration].
   Future<bool> _tryRecoverYoutubeSourceError({
     required int errorGeneration,
@@ -1928,6 +1935,7 @@ class PlayerController extends ChangeNotifier {
   Future<({Uri uri, Map<String, String>? headers})?> _playbackSourceForTrack(
     TrackItem track, {
     void Function(int bitrateBitsPerSec)? onYoutubeBitrate,
+    void Function(Object? resolveError)? onYoutubeResolveFailed,
   }) async {
     final fp = track.filePath?.trim();
     if (fp != null && fp.isNotEmpty) {
@@ -1936,9 +1944,13 @@ class PlayerController extends ChangeNotifier {
     final yt = track.youtubeVideoId?.trim();
     if (yt == null || yt.isEmpty) return null;
     if (!YoutubePlatformSupport.isOnlinePlaybackSupported) return null;
-    final playback =
+    final resolved =
         await YoutubeSearchService.instance.resolveYoutubePlayback(yt);
-    if (playback == null) return null;
+    final playback = resolved.source;
+    if (playback == null) {
+      onYoutubeResolveFailed?.call(resolved.lastError);
+      return null;
+    }
     onYoutubeBitrate?.call(playback.bitrateBitsPerSec);
     return (uri: playback.uri, headers: playback.headers);
   }
@@ -2036,6 +2048,7 @@ class PlayerController extends ChangeNotifier {
       var initialConcatIndex = 0;
       var concatPos = 0;
       var resolvedYoutubeBitrate = 0;
+      Object? logicalYoutubeResolveError;
       final useSingleTrack = _useSingleTrackAudioSource();
       final sourceOrder = useSingleTrack ? <int>[logical] : order;
 
@@ -2049,6 +2062,9 @@ class PlayerController extends ChangeNotifier {
           t,
           onYoutubeBitrate: pi == logical
               ? (b) => resolvedYoutubeBitrate = b
+              : null,
+          onYoutubeResolveFailed: pi == logical
+              ? (e) => logicalYoutubeResolveError = e
               : null,
         );
         if (_isStaleLoad(loadId)) return;
@@ -2080,6 +2096,9 @@ class PlayerController extends ChangeNotifier {
       if (children.isEmpty) {
         _activeSourceOrder = <int>[];
         notifyListeners();
+        if (!_isStaleLoad(loadId) && logicalYoutubeResolveError != null) {
+          _notifyYoutubeResolveFailed(logicalYoutubeResolveError);
+        }
         return;
       }
       initialConcatIndex = initialConcatIndex.clamp(0, children.length - 1);

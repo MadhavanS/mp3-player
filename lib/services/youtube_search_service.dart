@@ -26,6 +26,35 @@ class YoutubePlaybackSource {
   final int totalBytes;
 }
 
+/// Outcome of [YoutubeSearchService.resolveYoutubePlayback].
+class YoutubePlaybackResolveResult {
+  const YoutubePlaybackResolveResult.success(this.source)
+      : lastError = null;
+
+  const YoutubePlaybackResolveResult.failure(this.lastError) : source = null;
+
+  final YoutubePlaybackSource? source;
+  final Object? lastError;
+
+  /// Short message for [ActionPillToast] when [source] is null.
+  static String userMessageForFailure(Object? lastError) {
+    final text = lastError?.toString().toLowerCase() ?? '';
+    if (text.contains('not a bot') || text.contains('sign in to confirm')) {
+      return 'YouTube blocked playback on this network — try another video or Wi-Fi';
+    }
+    if (lastError is TimeoutException) {
+      return 'YouTube stream timed out — tap play to retry';
+    }
+    if (text.contains('unplayable') ||
+        text.contains('not available') ||
+        text.contains('private') ||
+        text.contains('age')) {
+      return 'This video cannot be streamed — try another';
+    }
+    return 'Stream unavailable — tap play to retry';
+  }
+}
+
 const Duration _searchTimeout = Duration(seconds: 25);
 /// Per client-set attempt; we try several sets so total wait can be longer.
 const Duration _streamManifestTimeout = Duration(seconds: 18);
@@ -261,9 +290,13 @@ class YoutubeSearchService {
   }
 
   /// Resolves a direct audio stream URL + headers for [videoId] (URL expires).
-  Future<YoutubePlaybackSource?> resolveYoutubePlayback(String videoId) async {
+  Future<YoutubePlaybackResolveResult> resolveYoutubePlayback(
+    String videoId,
+  ) async {
     final id = videoId.trim();
-    if (id.isEmpty) return null;
+    if (id.isEmpty) {
+      return const YoutubePlaybackResolveResult.failure(null);
+    }
 
     final clientSets = <List<YoutubeApiClient>>[
       youtubeManifestClients,
@@ -280,11 +313,13 @@ class YoutubeSearchService {
         if (audioOnly.isEmpty) continue;
 
         final stream = audioOnly.withHighestBitrate();
-        return YoutubePlaybackSource(
-          uri: stream.url,
-          headers: Map<String, String>.from(youtubeStreamPlaybackHeaders),
-          bitrateBitsPerSec: stream.bitrate.bitsPerSecond,
-          totalBytes: stream.size.totalBytes,
+        return YoutubePlaybackResolveResult.success(
+          YoutubePlaybackSource(
+            uri: stream.url,
+            headers: Map<String, String>.from(youtubeStreamPlaybackHeaders),
+            bitrateBitsPerSec: stream.bitrate.bitsPerSecond,
+            totalBytes: stream.size.totalBytes,
+          ),
         );
       } on TimeoutException catch (e) {
         lastError = e;
@@ -307,6 +342,6 @@ class YoutubeSearchService {
         'client sets: $lastError',
       );
     }
-    return null;
+    return YoutubePlaybackResolveResult.failure(lastError);
   }
 }

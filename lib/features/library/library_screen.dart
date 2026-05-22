@@ -20,6 +20,7 @@ import '../../services/saved_youtube_audio_store.dart';
 import '../../services/saved_youtube_links_store.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_scrollable_tab_bar.dart';
 import '../../widgets/daisy_background.dart';
 import '../../widgets/library_setup_empty_state.dart';
 import '../../widgets/liquid_glass.dart';
@@ -1925,51 +1926,12 @@ class LibraryScreenState extends State<LibraryScreen>
                       LibrarySetupBanner(
                         onOpenSettings: widget.onOpenMusicFolderSettings,
                       ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: context.appliedThemePalette == AppThemePalette.ivy
-                          ? _IvyLibrarySegmentedTabBar(
-                              controller: _tabController,
-                              tabs: _visibleTabs,
-                            )
-                          : TabBar(
-                              key: ObjectKey(_tabController),
-                              controller: _tabController,
-                              isScrollable: true,
-                              padding: const EdgeInsets.only(left: 2, right: 8),
-                              labelPadding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                              ),
-                              tabAlignment: TabAlignment.start,
-                              indicatorColor: pal.onScaffold,
-                              indicatorWeight: 2.8,
-                              indicatorSize: TabBarIndicatorSize.label,
-                              labelColor: pal.onScaffold,
-                              unselectedLabelColor: pal.textMuted.withValues(
-                                alpha: 0.76,
-                              ),
-                              dividerColor: pal.onScaffold.withValues(alpha: 0.14),
-                              dividerHeight: 1,
-                              labelStyle: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.2,
-                                fontSize: 15,
-                              ),
-                              unselectedLabelStyle: theme.textTheme.titleSmall
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w500,
-                                    letterSpacing: -0.2,
-                                    fontSize: 15,
-                                  ),
-                              splashFactory: NoSplash.splashFactory,
-                              overlayColor: WidgetStateProperty.all<Color>(
-                                Colors.transparent,
-                              ),
-                              tabs: [
-                                for (final id in _visibleTabs)
-                                  Tab(text: id.shortTitle),
-                              ],
-                            ),
+                    AppScrollableTabBar(
+                      controller: _tabController,
+                      tabs: [
+                        for (final id in _visibleTabs)
+                          Tab(text: id.shortTitle),
+                      ],
                     ),
                     Expanded(
                       child: TabBarView(
@@ -3143,69 +3105,3 @@ class _TrackTile extends StatelessWidget {
   }
 }
 
-class _IvyLibrarySegmentedTabBar extends StatelessWidget {
-  const _IvyLibrarySegmentedTabBar({
-    required this.controller,
-    required this.tabs,
-  });
-
-  final TabController controller;
-  final List<LibraryTabId> tabs;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      height: 42,
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: const Color(0xFFC8C8D2).withValues(alpha: 0.22),
-        borderRadius: BorderRadius.circular(21),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.12),
-          width: 0.8,
-        ),
-      ),
-      child: TabBar(
-        controller: controller,
-        isScrollable: true,
-        tabAlignment: TabAlignment.start,
-        dividerColor: Colors.transparent,
-        indicatorSize: TabBarIndicatorSize.tab,
-        labelColor: const Color(0xFF1C1C1E),
-        unselectedLabelColor: const Color(0xFF48484A),
-        indicator: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        labelPadding: const EdgeInsets.symmetric(horizontal: 18),
-        labelStyle: theme.textTheme.titleSmall?.copyWith(
-          fontWeight: FontWeight.w700,
-          fontSize: 14,
-        ),
-        unselectedLabelStyle: theme.textTheme.titleSmall?.copyWith(
-          fontWeight: FontWeight.w600,
-          fontSize: 14,
-        ),
-        splashFactory: NoSplash.splashFactory,
-        overlayColor: WidgetStateProperty.all<Color>(Colors.transparent),
-        tabs: [
-          for (final id in tabs)
-            Tab(
-              height: 34,
-              child: Text(id.shortTitle),
-            ),
-        ],
-      ),
-    );
-  }
-}
