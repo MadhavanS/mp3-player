@@ -352,6 +352,10 @@ class PlayerController extends ChangeNotifier {
   PlaylistRepeatMode _repeat = PlaylistRepeatMode.off;
   ProcessingState? _previousProcessing;
   bool _isLoadingSource = false;
+
+  /// User tapped play while [_isLoadingSource]; resume after load, not stale ExoPlayer.
+  bool _playRequestedDuringLoad = false;
+
   int _loadCurrentDepth = 0;
   /// Bumped on each new [_loadCurrent] request; stale loads ignore errors/cleanup.
   int _loadRequestGeneration = 0;
@@ -722,7 +726,14 @@ class PlayerController extends ChangeNotifier {
     return out;
   }
 
-  bool get isPlaying => _player.playing || _retainPlayingUiForShuffleReload;
+  bool get isPlaying {
+    if (_isLoadingSource &&
+        currentTrack != null &&
+        _isRemoteYoutubeStreamTrack(currentTrack!)) {
+      return false;
+    }
+    return _player.playing || _retainPlayingUiForShuffleReload;
+  }
   Duration get position => _player.position;
   Duration? get duration => _player.duration;
 
@@ -731,9 +742,12 @@ class PlayerController extends ChangeNotifier {
 
   /// User-visible loading (YouTube stream resolve, [setAudioSource], early buffer).
   bool get isPreparingPlayback {
-    if (currentTrack == null) return false;
-    if (_isLoadingSource) return true;
-    if (!_isRemoteYoutubeStreamTrack(currentTrack!)) return false;
+    final track = currentTrack;
+    if (track == null) return false;
+    final remoteYoutube = _isRemoteYoutubeStreamTrack(track);
+    // Local files use [_isLoadingSource] for [setAudioSource] only — not a stream.
+    if (_isLoadingSource) return remoteYoutube;
+    if (!remoteYoutube) return false;
     switch (_player.processingState) {
       case ProcessingState.loading:
         return true;
@@ -748,7 +762,13 @@ class PlayerController extends ChangeNotifier {
 
   /// Short status for Now Playing / mini player while [isPreparingPlayback].
   String get playbackLoadingLabel {
-    if (_isLoadingSource) return 'Preparing stream…';
+    if (_isLoadingSource) {
+      final track = currentTrack;
+      if (track != null && _isRemoteYoutubeStreamTrack(track)) {
+        return 'Preparing stream…';
+      }
+      return 'Loading…';
+    }
     return switch (_player.processingState) {
       ProcessingState.buffering => 'Buffering…',
       ProcessingState.loading => 'Loading stream…',
@@ -1024,6 +1044,7 @@ class PlayerController extends ChangeNotifier {
       _resetShuffleState();
     }
     final loadId = ++_loadRequestGeneration;
+    _playRequestedDuringLoad = false;
     _stopYoutubeStreamStats();
     notifyListeners();
     await _loadCurrent(loadToken: loadId);
@@ -1509,23 +1530,22 @@ class PlayerController extends ChangeNotifier {
   /// Callers that invoke [stopForExternalFileEdit] before this must pass
   /// [resumePlaying] / [resumePosition] — after a stop, [isPlaying] and
   /// [position] are no longer the pre-edit values.
-  void replaceTrackPath(
+  Future<void> replaceTrackPath(
     String oldPath,
     TrackItem updated, {
     Duration? resumePosition,
     bool? resumePlaying,
-  }) {
+  }) async {
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    if (oldKey.isEmpty) return;
+
     final currentPathBeforeReplace = currentTrack?.filePath;
     final isCurrentTrackPathBeingReplaced =
         currentPathBeforeReplace != null &&
-        canonicalMusicLibraryPathKey(currentPathBeforeReplace) ==
-            canonicalMusicLibraryPathKey(oldPath);
-    final resumePlayingAfterReload =
-        resumePlaying ?? (isCurrentTrackPathBeingReplaced && _player.playing);
-    final resumePositionAfterReload =
-        resumePosition ??
-        (isCurrentTrackPathBeingReplaced ? _player.position : Duration.zero);
-    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+        canonicalMusicLibraryPathKey(currentPathBeforeReplace) == oldKey;
+    final resumePlayingAfterReload = resumePlaying ?? false;
+    final resumePositionAfterReload = resumePosition ?? Duration.zero;
+
     var changed = false;
     for (var i = 0; i < _playlist.length; i++) {
       final fp = _playlist[i].filePath;
@@ -1541,30 +1561,38 @@ class PlayerController extends ChangeNotifier {
         changed = true;
       }
     }
+    if (isCurrentTrackPathBeingReplaced) {
+      final idx = currentIndex;
+      if (idx >= 0 && idx < _playlist.length) {
+        final curKey = canonicalMusicLibraryPathKey(
+          _playlist[idx].filePath ?? '',
+        );
+        if (curKey == oldKey) {
+          _playlist[idx] = updated;
+          changed = true;
+        }
+      }
+    }
     if (!changed) return;
-    // The currently loaded audio source still points to old file URIs.
+
     _sourceNeedsReload = true;
     notifyListeners();
 
-    // Only reload the audio pipeline when the renamed/replaced file is the
-    // track currently loaded in the player.  For any other track in the queue,
-    // just leave _sourceNeedsReload = true so the pipeline is rebuilt lazily
-    // on the next skip/play — calling _loadCurrent for a non-current entry
-    // would hit setAudioSource and interrupt the currently playing song.
     if (!isCurrentTrackPathBeingReplaced) return;
 
-    unawaited(() async {
-      await _loadCurrent(
-        initialPosition: resumePositionAfterReload,
-        stopBeforeLoad: false, // already stopped by stopForExternalFileEdit
+    // Drop in-flight loads that still target the pre-rename file URI.
+    final loadId = ++_loadRequestGeneration;
+    await _loadCurrent(
+      loadToken: loadId,
+      initialPosition: resumePositionAfterReload,
+      stopBeforeLoad: false,
+    );
+    if (resumePlayingAfterReload) {
+      _playbackPausedByUser = false;
+      await _resumePlaybackAfterLoad(
+        context: 'replaceTrackPath.resumePlay',
       );
-      if (resumePlayingAfterReload) {
-        _playbackPausedByUser = false;
-        await _resumePlaybackAfterLoad(
-          context: 'replaceTrackPath.resumePlay',
-        );
-      }
-    }());
+    }
   }
 
   bool _prunePlaylistPathsNotInCatalog() {
@@ -2191,10 +2219,22 @@ class PlayerController extends ChangeNotifier {
       if (_loadCurrentDepth <= 0) {
         _loadCurrentDepth = 0;
         if (!_isStaleLoad(loadId)) {
+          final resumeAfterLoad = _playRequestedDuringLoad;
+          _playRequestedDuringLoad = false;
           _isLoadingSource = false;
           _suppressTrackCompletedAdvance = false;
           _ignoreSpuriousPlaybackCompletedUntil = null;
           _scheduleNotificationArtRefresh();
+          if (resumeAfterLoad &&
+              !_playbackPausedByUser &&
+              !_startingPlaybackFromLibrary &&
+              _activeSourceOrder.isNotEmpty) {
+            unawaited(
+              _resumePlaybackAfterLoad(
+                context: 'loadCurrent.requestedPlay',
+              ),
+            );
+          }
         }
       }
       final pending = _pendingConcatIndexWhileLoading;
@@ -2358,6 +2398,16 @@ class PlayerController extends ChangeNotifier {
     _playbackPausedByUser = false;
     _invalidatePlayResumeRetries();
     _schedulePlayerUiNotify();
+    if (_isLoadingSource) {
+      _playRequestedDuringLoad = true;
+      if (_player.playing) {
+        try {
+          await _player.pause();
+        } catch (_) {}
+      }
+      _schedulePlayerUiNotify();
+      return;
+    }
     final generation = _playControlGeneration;
     try {
       if (_sourceNeedsReload && _playlist.isNotEmpty) {
@@ -2404,6 +2454,14 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> togglePlayPause() async {
+    if (isPreparingPlayback) {
+      if (_player.playing) {
+        await pause();
+      } else {
+        await play();
+      }
+      return;
+    }
     if (isPlaying) {
       await pause();
     } else {

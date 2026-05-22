@@ -6,6 +6,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../models/track_item.dart';
 import 'youtube_api_clients.dart';
 import 'youtube_client.dart';
+import 'youtube_manifest_resolver.dart';
 
 /// Resolved YouTube audio stream for [just_audio].
 class YoutubePlaybackSource {
@@ -56,8 +57,6 @@ class YoutubePlaybackResolveResult {
 }
 
 const Duration _searchTimeout = Duration(seconds: 25);
-/// Per client-set attempt; we try several sets so total wait can be longer.
-const Duration _streamManifestTimeout = Duration(seconds: 18);
 const Duration _videoMetadataTimeout = Duration(seconds: 12);
 const int _enrichMetadataConcurrency = 6;
 
@@ -298,21 +297,11 @@ class YoutubeSearchService {
       return const YoutubePlaybackResolveResult.failure(null);
     }
 
-    final clientSets = <List<YoutubeApiClient>>[
-      youtubeManifestClients,
-      ...youtubeManifestClientFallbacks,
-    ];
-
     Object? lastError;
-    for (var i = 0; i < clientSets.length; i++) {
-      try {
-        final manifest = await ytClient.videos.streams
-            .getManifest(id, ytClients: clientSets[i])
-            .timeout(_streamManifestTimeout);
-        final audioOnly = manifest.audioOnly;
-        if (audioOnly.isEmpty) continue;
-
-        final stream = audioOnly.withHighestBitrate();
+    try {
+      final manifest = await resolveYoutubeAudioManifest(id);
+      if (manifest != null) {
+        final stream = manifest.audioOnly.withHighestBitrate();
         return YoutubePlaybackResolveResult.success(
           YoutubePlaybackSource(
             uri: stream.url,
@@ -321,26 +310,12 @@ class YoutubeSearchService {
             totalBytes: stream.size.totalBytes,
           ),
         );
-      } on TimeoutException catch (e) {
-        lastError = e;
-        if (kDebugMode) {
-          debugPrint(
-            'YouTube manifest slow for $id (client set ${i + 1}/'
-            '${clientSets.length})',
-          );
-        }
-      } catch (e, st) {
-        lastError = e;
-        if (kDebugMode) {
-          debugPrint('YouTube stream resolve error (set ${i + 1}): $e\n$st');
-        }
       }
-    }
-    if (kDebugMode && lastError != null) {
-      debugPrint(
-        'YouTube stream manifest failed for $id after ${clientSets.length} '
-        'client sets: $lastError',
-      );
+    } catch (e, st) {
+      lastError = e;
+      if (kDebugMode) {
+        debugPrint('YouTube stream resolve error: $e\n$st');
+      }
     }
     return YoutubePlaybackResolveResult.failure(lastError);
   }

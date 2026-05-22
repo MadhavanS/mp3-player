@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Icons;
 
 import '../models/track_item.dart';
 import '../models/youtube_download_job.dart';
+import '../widgets/action_pill_toast.dart';
 import 'youtube_audio_download_service.dart';
 
 /// Queued YouTube audio downloads with per-job cancel and pause/resume.
@@ -16,17 +18,16 @@ class YoutubeAudioDownloadController extends ChangeNotifier {
   final List<YoutubeDownloadJob> _jobs = [];
   bool _pumping = false;
 
+  /// Set for the whole [_runJob] call so cancel can drop UI while work unwinds.
+  YoutubeDownloadJob? _inFlightJob;
+
   List<YoutubeDownloadJob> get jobs => List.unmodifiable(_jobs);
 
   int get activeCount =>
       _jobs.where((j) => j.isActive).length;
 
-  YoutubeDownloadJob? get _downloadingJob {
-    for (final j in _jobs) {
-      if (j.state == YoutubeDownloadJobState.downloading) return j;
-    }
-    return null;
-  }
+  /// Non-null while [_runJob] is in progress (even if UI already removed the job).
+  YoutubeDownloadJob? get _downloadingJob => _inFlightJob;
 
   /// Legacy: any job actively downloading.
   bool get isRunning => _downloadingJob != null;
@@ -88,21 +89,13 @@ class YoutubeAudioDownloadController extends ChangeNotifier {
   void cancel(String videoId) {
     final id = videoId.trim();
     final job = _jobFor(id);
-    if (job == null) return;
+    if (job == null || !job.isActive) return;
     job.cancelled = true;
     job.paused = false;
-    if (job.state == YoutubeDownloadJobState.queued) {
-      job.state = YoutubeDownloadJobState.cancelled;
-      job.status = 'Cancelled';
-      notifyListeners();
-      _scheduleRemove(job);
-      return;
-    }
-    if (job.state == YoutubeDownloadJobState.downloading ||
-        job.state == YoutubeDownloadJobState.paused) {
-      job.status = 'Cancelling…';
-      notifyListeners();
-    }
+    job.state = YoutubeDownloadJobState.cancelled;
+    job.status = 'Cancelled';
+    notifyListeners();
+    _scheduleRemove(job);
   }
 
   void pause(String videoId) {
@@ -167,50 +160,69 @@ class YoutubeAudioDownloadController extends ChangeNotifier {
   }
 
   Future<void> _runJob(YoutubeDownloadJob job) async {
-    if (job.cancelled) {
-      job.state = YoutubeDownloadJobState.cancelled;
+    _inFlightJob = job;
+    try {
+      if (job.cancelled) {
+        return;
+      }
+
+      job.state = YoutubeDownloadJobState.downloading;
+      job.progress = null;
+      job.status = 'Preparing download…';
+      notifyListeners();
+
+      final saved = await YoutubeAudioDownloadService.instance.downloadAndSave(
+        job.track,
+        onProgress: (p) {
+          if (job.cancelled) return;
+          job.progress = p;
+          notifyListeners();
+        },
+        onStatus: (status) {
+          if (job.cancelled) return;
+          job.status = job.paused ? 'Paused' : status;
+          notifyListeners();
+        },
+        isCancelled: () => job.cancelled,
+        isPaused: () => job.paused,
+      );
+
+      if (job.cancelled) {
+        return;
+      }
+      if (saved != null) {
+        job.state = YoutubeDownloadJobState.completed;
+        job.progress = 1.0;
+        job.status = 'Saved to device';
+      } else {
+        job.state = YoutubeDownloadJobState.failed;
+        job.status = 'Download failed';
+        _notifyDownloadFailed(job);
+      }
+      notifyListeners();
       _scheduleRemove(job);
-      return;
+    } finally {
+      if (identical(_inFlightJob, job)) {
+        _inFlightJob = null;
+      }
+      unawaited(_pumpQueue());
     }
+  }
 
-    job.state = YoutubeDownloadJobState.downloading;
-    job.progress = null;
-    job.status = 'Preparing download…';
-    notifyListeners();
-
-    final saved = await YoutubeAudioDownloadService.instance.downloadAndSave(
-      job.track,
-      onProgress: (p) {
-        if (job.cancelled) return;
-        job.progress = p;
-        job.status = p == null
-            ? 'Preparing download…'
-            : job.paused
-                ? 'Paused'
-                : 'Saving… ${(p * 100).round()}%';
-        notifyListeners();
-      },
-      isCancelled: () => job.cancelled,
-      isPaused: () => job.paused,
+  void _notifyDownloadFailed(YoutubeDownloadJob job) {
+    ActionPillToast.showUsingRootNavigator(
+      'Download failed — check your connection and try again',
+      icon: Icons.cloud_off_outlined,
     );
-
-    if (job.cancelled) {
-      job.state = YoutubeDownloadJobState.cancelled;
-      job.status = 'Cancelled';
-    } else if (saved != null) {
-      job.state = YoutubeDownloadJobState.completed;
-      job.progress = 1.0;
-      job.status = 'Saved to device';
-    } else {
-      job.state = YoutubeDownloadJobState.failed;
-      job.status = 'Download failed';
-    }
-    notifyListeners();
-    _scheduleRemove(job);
-    unawaited(_pumpQueue());
   }
 
   void _scheduleRemove(YoutubeDownloadJob job) {
+    if (job.state == YoutubeDownloadJobState.cancelled) {
+      _jobs.remove(job);
+      notifyListeners();
+      unawaited(_pumpQueue());
+      return;
+    }
     unawaited(
       Future<void>.delayed(const Duration(seconds: 4), () {
         _jobs.remove(job);

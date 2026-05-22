@@ -18,20 +18,45 @@ Future<bool> showYoutubeSaveAudioDialog(
     return false;
   }
 
-  final dl = YoutubeAudioDownloadController.instance;
   final id = track.youtubeVideoId?.trim() ?? '';
-  if (id.isNotEmpty && (dl.isDownloading(id) || dl.isQueued(id))) {
-    ActionPillToast.show(context, 'Already in download queue');
+  if (id.isNotEmpty &&
+      (YoutubeAudioDownloadController.instance.isDownloading(id) ||
+          YoutubeAudioDownloadController.instance.isQueued(id))) {
+    reportYoutubeAudioDownloadEnqueue(context, track, enqueued: false);
     return false;
   }
 
   final ok = await startYoutubeAudioSave(track);
-  if (context.mounted && ok) {
-    ActionPillToast.show(
-      context,
-      'Added to download queue',
-      icon: Icons.download_rounded,
-    );
+  if (context.mounted) {
+    reportYoutubeAudioDownloadEnqueue(context, track, enqueued: ok);
   }
   return ok;
+}
+
+/// Pill feedback after tapping save/download (queue only — not saved yet).
+void reportYoutubeAudioDownloadEnqueue(
+  BuildContext context,
+  TrackItem track, {
+  required bool enqueued,
+}) {
+  if (!context.mounted) return;
+  if (enqueued) {
+    ActionPillToast.show(
+      context,
+      'Download started — see Downloads tab',
+      icon: Icons.download_rounded,
+    );
+    return;
+  }
+  final id = track.youtubeVideoId?.trim() ?? '';
+  final dl = YoutubeAudioDownloadController.instance;
+  if (id.isNotEmpty && (dl.isDownloading(id) || dl.isQueued(id))) {
+    ActionPillToast.show(context, 'Already in download queue');
+    return;
+  }
+  ActionPillToast.show(
+    context,
+    'Could not start download',
+    icon: Icons.cloud_off_outlined,
+  );
 }

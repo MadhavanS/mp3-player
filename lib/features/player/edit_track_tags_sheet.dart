@@ -30,6 +30,42 @@ String _mimeFromFileName(String name) {
 
 /// Shown when tag save / site-rename write fails — root overlay so it is visible
 /// above the bottom sheet and matches success [ActionPillToast] behavior.
+/// After a failed save, reload from [diskPath] when the file was renamed on disk.
+Future<void> recoverPlaybackAfterFailedTagWrite({
+  required PlayerController player,
+  required String originalPath,
+  required String diskPath,
+  required bool stoppedForEdit,
+  required bool saveSucceeded,
+  required Duration resumePos,
+  required bool wasPlaying,
+}) async {
+  if (!stoppedForEdit || saveSucceeded) return;
+
+  if (diskPath != originalPath) {
+    try {
+      final file = File(diskPath);
+      if (await file.exists()) {
+        final refreshed = await readAudioMetadata(
+          TrackItem.fromFilePath(diskPath),
+        );
+        await player.replaceTrackPath(
+          originalPath,
+          refreshed,
+          resumePosition: resumePos,
+          resumePlaying: wasPlaying,
+        );
+        return;
+      }
+    } catch (_) {}
+  }
+
+  await player.reloadCurrentSourceAfterTagWrite(
+    resumePosition: resumePos,
+    resumePlaying: wasPlaying,
+  );
+}
+
 void _showTagEditFailureToast(String message) {
   var text = message.trim();
   if (text.isEmpty) return;
@@ -361,6 +397,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     final resumePos = player.position;
     var stoppedForEdit = false;
     var saveSucceeded = false;
+    var diskPath = path;
 
     try {
       final isCurrent = player.isCurrentTrackFilePath(path);
@@ -373,6 +410,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       if (!tagOnlyFlow && suggestion.filenameChanged) {
         newPath = await renameMp3File(path, suggestion.newBasenameWithoutExt);
       }
+      diskPath = newPath;
 
       await writeEmbeddedAudioTags(
         filePath: newPath,
@@ -388,7 +426,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       final base = TrackItem.fromFilePath(newPath);
       final refreshed = await readAudioMetadata(base);
       if (!tagOnlyFlow && suggestion.filenameChanged) {
-        player.replaceTrackPath(
+        await player.replaceTrackPath(
           path,
           refreshed,
           resumePosition: isCurrent ? resumePos : null,
@@ -469,12 +507,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         );
       }
     } finally {
-      if (stoppedForEdit && !saveSucceeded) {
-        await player.reloadCurrentSourceAfterTagWrite(
-          resumePosition: resumePos,
-          resumePlaying: wasPlaying,
-        );
-      }
+      await recoverPlaybackAfterFailedTagWrite(
+        player: player,
+        originalPath: path,
+        diskPath: diskPath,
+        stoppedForEdit: stoppedForEdit,
+        saveSucceeded: saveSucceeded,
+        resumePos: resumePos,
+        wasPlaying: wasPlaying,
+      );
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -506,6 +547,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     final resumePos = player.position;
     var stoppedForEdit = false;
     var saveSucceeded = false;
+    var diskPath = path;
 
     try {
       final isCurrent = player.isCurrentTrackFilePath(path);
@@ -520,6 +562,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       if (desiredBasename != currentBasename) {
         targetPath = await renameMp3File(path, desiredBasename);
       }
+      diskPath = targetPath;
       await writeEmbeddedAudioTags(
         filePath: targetPath,
         title: _title.text,
@@ -534,7 +577,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         TrackItem.fromFilePath(targetPath),
       );
       if (targetPath != path) {
-        player.replaceTrackPath(
+        await player.replaceTrackPath(
           path,
           refreshed,
           resumePosition: isCurrent ? resumePos : null,
@@ -614,12 +657,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         );
       }
     } finally {
-      if (stoppedForEdit && !saveSucceeded) {
-        await player.reloadCurrentSourceAfterTagWrite(
-          resumePosition: resumePos,
-          resumePlaying: wasPlaying,
-        );
-      }
+      await recoverPlaybackAfterFailedTagWrite(
+        player: player,
+        originalPath: path,
+        diskPath: diskPath,
+        stoppedForEdit: stoppedForEdit,
+        saveSucceeded: saveSucceeded,
+        resumePos: resumePos,
+        wasPlaying: wasPlaying,
+      );
       if (mounted) setState(() => _saving = false);
     }
   }

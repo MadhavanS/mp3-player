@@ -8,10 +8,8 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../models/track_item.dart';
 import 'saved_youtube_audio_store.dart';
 import 'youtube_download_settings_store.dart';
-import 'youtube_api_clients.dart';
 import 'youtube_client.dart';
-
-const Duration _downloadManifestTimeout = Duration(seconds: 45);
+import 'youtube_manifest_resolver.dart';
 
 /// Downloads YouTube audio to app storage via [ytClient].
 class YoutubeAudioDownloadService {
@@ -27,6 +25,7 @@ class YoutubeAudioDownloadService {
   Future<TrackItem?> downloadAndSave(
     TrackItem source, {
     void Function(double? progress)? onProgress,
+    void Function(String status)? onStatus,
     bool Function()? isCancelled,
     bool Function()? isPaused,
   }) async {
@@ -39,16 +38,25 @@ class YoutubeAudioDownloadService {
     final existingPath = SavedYoutubeAudioStore.filePathForVideoId(videoId);
     if (existingPath != null && await File(existingPath).exists()) {
       onProgress?.call(1.0);
+      onStatus?.call('Already saved');
       for (final t in await SavedYoutubeAudioStore.load()) {
         if (t.youtubeVideoId == videoId) return t;
       }
     }
 
     try {
+      if (isCancelled?.call() == true) throw _DownloadCancelled();
       onProgress?.call(null);
-      final manifest = await ytClient.videos.streams
-          .getManifest(videoId, ytClients: youtubeManifestClients)
-          .timeout(_downloadManifestTimeout);
+      onStatus?.call('Preparing download…');
+
+      final manifest = await resolveYoutubeAudioManifest(
+        videoId,
+        isCancelled: isCancelled,
+        onStatus: onStatus,
+      );
+      if (isCancelled?.call() == true) throw _DownloadCancelled();
+      if (manifest == null) return null;
+
       final audioOnly = manifest.audioOnly;
       if (audioOnly.isEmpty) return null;
 
@@ -62,6 +70,7 @@ class YoutubeAudioDownloadService {
         await outFile.delete();
       }
 
+      onStatus?.call('Saving… 0%');
       final byteStream = ytClient.videos.streamsClient.get(streamInfo);
 
       final total = streamInfo.size.totalBytes;
@@ -82,7 +91,9 @@ class YoutubeAudioDownloadService {
           sink.add(chunk);
           received += chunk.length;
           if (total > 0) {
-            onProgress?.call((received / total).clamp(0.0, 0.99));
+            final p = (received / total).clamp(0.0, 0.99);
+            onProgress?.call(p);
+            onStatus?.call('Saving… ${(p * 100).round()}%');
           }
         }
         await sink.flush();
@@ -112,6 +123,7 @@ class YoutubeAudioDownloadService {
       }
 
       onProgress?.call(1.0);
+      onStatus?.call('Saved to device');
 
       final saved = TrackItem(
         title: source.title,
@@ -126,10 +138,12 @@ class YoutubeAudioDownloadService {
       );
       await SavedYoutubeAudioStore.add(saved);
       return saved;
-    } on TimeoutException {
-      debugPrint('YouTube download timed out for $videoId');
+    } on _DownloadCancelled {
       return null;
     } catch (e, st) {
+      if (isManifestResolveCancelled(e)) {
+        return null;
+      }
       debugPrint('YouTube download error: $e\n$st');
       return null;
     }

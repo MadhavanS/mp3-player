@@ -12,6 +12,7 @@ import '../../services/storage_access.dart';
 import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
 import '../../widgets/action_pill_toast.dart';
+import 'edit_track_tags_sheet.dart' show recoverPlaybackAfterFailedTagWrite;
 
 String _genrePlain(TrackItem t) {
   return t.genres.replaceAll('#', ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -160,6 +161,7 @@ Future<void> _applySiteRenameStandalone(
   final resumePos = player.position;
   var stoppedForEdit = false;
   var saveSucceeded = false;
+  var diskPath = originalPath;
 
   try {
     final isCurrent = player.isCurrentTrackFilePath(originalPath);
@@ -175,6 +177,7 @@ Future<void> _applySiteRenameStandalone(
         suggestion.newBasenameWithoutExt,
       );
     }
+    diskPath = newPath;
 
     await writeEmbeddedAudioTags(
       filePath: newPath,
@@ -188,7 +191,7 @@ Future<void> _applySiteRenameStandalone(
     final base = TrackItem.fromFilePath(newPath);
     final refreshed = await readAudioMetadata(base);
     if (suggestion.filenameChanged) {
-      player.replaceTrackPath(
+      await player.replaceTrackPath(
         originalPath,
         refreshed,
         resumePosition: isCurrent ? resumePos : null,
@@ -245,11 +248,14 @@ Future<void> _applySiteRenameStandalone(
     if (!context.mounted) return;
     messenger?.showSnackBar(SnackBar(content: Text('Error: $e')));
   } finally {
-    if (stoppedForEdit && !saveSucceeded) {
-      await player.reloadCurrentSourceAfterTagWrite(
-        resumePosition: resumePos,
-        resumePlaying: wasPlaying,
-      );
-    }
+    await recoverPlaybackAfterFailedTagWrite(
+      player: player,
+      originalPath: originalPath,
+      diskPath: diskPath,
+      stoppedForEdit: stoppedForEdit,
+      saveSucceeded: saveSucceeded,
+      resumePos: resumePos,
+      wasPlaying: wasPlaying,
+    );
   }
 }

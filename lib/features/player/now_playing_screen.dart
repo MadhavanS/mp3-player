@@ -14,6 +14,8 @@ import '../../services/saved_youtube_audio_store.dart';
 import '../../services/saved_youtube_links_store.dart';
 import '../../services/youtube_audio_download_controller.dart'
     show YoutubeAudioDownloadController, startYoutubeAudioSave;
+import '../youtube/youtube_save_audio_dialog.dart'
+    show reportYoutubeAudioDownloadEnqueue;
 import '../../theme/album_art_title_color.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
@@ -432,11 +434,23 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           onPressed: saved || downloading
               ? null
               : () async {
+                  final id = track.youtubeVideoId?.trim() ?? '';
+                  if (id.isNotEmpty &&
+                      (dl.isDownloading(id) || dl.isQueued(id))) {
+                    reportYoutubeAudioDownloadEnqueue(
+                      context,
+                      track,
+                      enqueued: false,
+                    );
+                    return;
+                  }
                   final ok = await startYoutubeAudioSave(track);
                   if (!context.mounted) return;
-                  if (ok) {
-                    ActionPillToast.show(context, 'Audio saved');
-                  }
+                  reportYoutubeAudioDownloadEnqueue(
+                    context,
+                    track,
+                    enqueued: ok,
+                  );
                 },
         );
       },
