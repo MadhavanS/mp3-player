@@ -241,10 +241,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (!mounted) return;
     _storagePermissionGranted = permGranted;
 
-    final showSettings = await PlaybackSessionStore.loadShellPageIsSettings();
-    final browseKeys = await PlaybackSessionStore.loadBrowsePathKeys();
-    var paths = await SavedMusicFolders.load();
+    final bootData = await Future.wait<dynamic>([
+      PlaybackSessionStore.loadShellPageIsSettings(),
+      PlaybackSessionStore.loadBrowsePathKeys(),
+      SavedMusicFolders.load(),
+    ]);
     if (!mounted) return;
+    final showSettings = bootData[0] as bool;
+    final browseKeys = bootData[1] as Set<String>?;
+    var paths = List<String>.from(bootData[2] as List<String>);
 
     // Prune saved folder paths whose directory no longer exists on disk so that
     // stale cached tracks from deleted folders are never loaded or played.
@@ -254,17 +259,22 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             defaultTargetPlatform == TargetPlatform.linux ||
             defaultTargetPlatform == TargetPlatform.macOS ||
             defaultTargetPlatform == TargetPlatform.windows)) {
+      final existence = await Future.wait<bool>(
+        paths.map((folder) async {
+          try {
+            return await Directory(folder).exists();
+          } catch (_) {
+            return true;
+          }
+        }),
+      );
       final live = <String>[];
-      for (final p in paths) {
-        try {
-          if (await Directory(p).exists()) live.add(p);
-        } catch (_) {
-          live.add(p); // keep on error — don't silently remove
-        }
+      for (var i = 0; i < paths.length; i++) {
+        if (existence[i]) live.add(paths[i]);
       }
       if (live.length != paths.length) {
         paths = live;
-        await SavedMusicFolders.save(paths);
+        unawaited(SavedMusicFolders.save(paths));
       }
     }
     if (!mounted) return;
@@ -285,8 +295,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
     await _restoreLibraryFromCacheAndSession(player, paths);
-    await _applyWidgetLaunchAction(player);
-    _scheduleBackgroundSync(delay: const Duration(seconds: 2));
+    if (!mounted) return;
+    unawaited(_applyWidgetLaunchAction(player));
+    _scheduleBackgroundSync(delay: const Duration(seconds: 4));
     _scheduleIdleRescan();
   }
 
@@ -420,19 +431,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               return bm.compareTo(am);
             });
       player.setLibraryCatalog(tracks);
-    }
 
-    final restoreTracks = cachedByPath.values
-        .map((s) => s.track)
-        .toList(growable: false);
-    if (restoreTracks.isNotEmpty) {
-      await PlaybackSessionStore.restorePlayer(
-        player,
-        restoreTracks,
-        resumePlaying: false,
+      // Show the library immediately; restore queue/position without blocking first paint.
+      unawaited(
+        PlaybackSessionStore.restorePlayer(
+          player,
+          tracks,
+          resumePlaying: false,
+        ),
       );
     }
-    _scheduleAlbumArtWarmup(player, delay: const Duration(seconds: 3));
+    _scheduleAlbumArtWarmup(player, delay: const Duration(seconds: 5));
   }
 
   Future<void> _applyWidgetLaunchAction(PlayerController player) async {

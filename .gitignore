@@ -42,6 +42,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Generated locally by Gradle (daemon JVM toolchain); not shared project config
+android/gradle/gradle-daemon-jvm.properties
+
 # Coverage
 coverage/
 

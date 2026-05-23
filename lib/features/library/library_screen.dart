@@ -432,7 +432,14 @@ class LibraryScreenState extends State<LibraryScreen>
       if (player.currentTrack != null) player.currentTrack!,
       ...visible,
     ];
-    await player.enrichTracksArtIfMissing(batch, maxTracks: 14);
+    // Reading tags + decoding covers while ExoPlayer is active caused ANRs on MIUI.
+    if (player.isPlaying) return;
+
+    await player.enrichTracksArtIfMissing(
+      batch,
+      maxTracks: 4,
+      interTrackDelay: const Duration(milliseconds: 120),
+    );
   }
 
   Future<void> _syncTabsFromStore() async {

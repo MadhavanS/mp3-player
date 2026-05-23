@@ -2005,6 +2005,7 @@ class PlayerController extends ChangeNotifier {
     int maxTracks = 8,
     CatalogNotifyMode notify = CatalogNotifyMode.throttled,
     bool refreshNotificationArt = false,
+    Duration interTrackDelay = const Duration(milliseconds: 80),
   }) async {
     if (kIsWeb) return;
     final limit = maxTracks.clamp(1, 32);
@@ -2019,8 +2020,10 @@ class PlayerController extends ChangeNotifier {
         refreshNotificationArt: refreshNotificationArt,
       );
       done++;
-      if (done < limit) {
-        await Future<void>.delayed(const Duration(milliseconds: 40));
+      if (done < limit && interTrackDelay > Duration.zero) {
+        await Future<void>.delayed(interTrackDelay);
+        // Let the UI thread paint between heavy cover decodes.
+        await Future<void>.delayed(Duration.zero);
       }
     }
   }
