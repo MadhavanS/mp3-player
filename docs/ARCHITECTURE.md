@@ -1,0 +1,248 @@
+# MadPlayer — architecture notes
+
+Living document for playback, library, metadata, and Android widget behavior.  
+Update this when you change `PlayerController`, catalog sync, or home-screen widgets.
+
+---
+
+## Project layout (actual)
+
+```
+lib/
+  main.dart, app.dart              # App shell, theme, Android widget sync
+  audio/
+    player_controller.dart         # Playback coordinator (not a ChangeNotifier)
+    player_notifiers.dart          # position / track / playback / queue notifiers
+    library_catalog.dart           # Full-library index (tags only, no embedded art)
+  features/
+    library/                       # Songs tab, Files explorer, queue tab
+    player/                        # Now playing, mini player
+    shell/                         # Main shell, folder scan, background sync
+  services/
+    library_track_sort.dart        # Shared sort modes (Songs + Files)
+    song_metadata_cache_io.dart    # Isar tag cache (fingerprints, no art bytes)
+    album_art_cache_io.dart        # Path-keyed PNG disk cache for list art
+    track_metadata_io.dart         # metadata_god → Dart fallback reads
+  platform/
+    android_home_widget_bridge.dart
+android/.../Mp3Player*.kt           # Home widgets + MethodChannel sync
+```
+
+---
+
+## Playback: `ConcatenatingAudioSource`
+
+**Platform:** Android (and non-Windows targets) use one `AudioPlayer` with a single  
+`ConcatenatingAudioSource` (`useLazyPreparation: true` on Android). Only the current  
+track and immediate neighbors are prepared — not the entire library at once.
+
+**Windows:** `just_audio_windows` is unreliable with concat + `initialIndex`, so each  
+navigation reloads a **single** `AudioSource.uri` for the current track only.
+
+### Fast path (normal skip)
+
+```
+skipNext() / skipPrevious()
+  → update Dart _index (or shuffle position)
+  → _seekToPlaylistIndexFast()
+  → player.seek(Duration.zero, index: concatIndex)   // same concat, no decoder teardown
+```
+
+### Full reload (`_loadCurrent` → `setAudioSource`)
+
+Used when the native child list must be rebuilt:
+
+| Trigger | Notes |
+|--------|--------|
+| `setPlaylist` / `setPlaylistAndPlay` / `jumpToIndex` | New queue or start index |
+| `tryResyncQueueWithLibraryScan` | Full library queue replaced |
+| `_sourceNeedsReload == true` | Reorder, shuffle toggle, failed in-place mutation, scope change |
+| Current track path change | `replaceTrackPath` while playing |
+| `removePlaylistEntryAt` when current row removed | |
+| Windows | Every skip uses reload |
+
+### In-place concat mutation (`_concatSource`)
+
+`PlayerController` keeps a reference to the live `ConcatenatingAudioSource` after  
+`_loadCurrent()` and updates **`_activeSourceOrder`** (playlist index per concat child).
+
+| Operation | In-place when possible | Fallback |
+|-----------|------------------------|----------|
+| `appendToPlaylist` (queue not empty) | `addAll()` | `_loadCurrent()` |
+| `playTrackNext` (no shuffle) | `insert()` after current | `_sourceNeedsReload` |
+| `removePlaylistEntryAt` (not current) | `removeAt()` | `_loadCurrent()` |
+
+**Guards:** `_canMutateConcatInPlace` — not Windows, `_concatSource != null`,  
+not loading, not `_sourceNeedsReload`.
+
+### Large queues
+
+Building thousands of `AudioSource` children runs on the main isolate with a  
+**yield every 64 tracks** (`Future.delayed(Duration.zero)`) to avoid long UI freezes.  
+Notification art URIs are resolved lazily after load (`_scheduleNotificationArtRefresh`),  
+not during concat child construction.
+
+### Shuffle
+
+- Dart owns shuffle order: `_shuffleOrder`, `_shufflePos`, `_index`.
+- **`toggleShuffle()`** sets **`_sourceNeedsReload = true`** so the next skip/reload  
+  rebuilds concat children in the new order (native order is not updated immediately).
+- Does **not** use `AudioPlayer.setShuffleModeEnabled` — that would conflict with  
+  folder scope and custom queue semantics.
+
+### Repeat modes (`PlaylistRepeatMode`)
+
+| Mode | Behavior |
+|------|----------|
+| `off` | End of queue → pause (`skipNext` at end) |
+| `all` | Wrap in scoped/shuffle order |
+| `one` | Intercept concat **auto-advance** in `_onConcatIndexChanged`; seek to  
+  current concat index at 0 and replay. Also handled in `_handleTrackCompleted`.  
+  Deduped via `_scheduleRepeatOneReplay`. |
+
+Concat advances to the next child **before** `ProcessingState.completed` on some  
+platforms — repeat-one must not rely on completion alone.
+
+### Sleep timer (end of song)
+
+Same auto-advance issue as repeat-one: intercept in `_onConcatIndexChanged`, pause,  
+seek to end of current child, do not start the next track.
+
+### `_playbackPausedByUser` vs `stop()` during load
+
+`playerStateStream` must **not** treat `playing: false` from `_loadCurrent()`'s `stop()` as a  
+user pause. That blocked `_resumePlaybackAfterLoad` (tap track → silence).
+
+Guards:
+
+- Ignore while `_isLoadingSource`, `_manualQueueAdvance`, or **`_transportPauseGuardDepth > 0`**
+  (`_guardedTransport` wraps `setPlaylistAndPlay`, load+play paths).
+- `_resumePlaybackAfterLoad` clears `_playbackPausedByUser` at entry (callers intend to play).
+- **`AudioSession.setActive(true)`** before `play()` on Android/iOS (session init is awaited).
+
+---
+
+## Player UI state (split notifiers)
+
+`PlayerController` is **not** a `ChangeNotifier`. UI listens to narrow notifiers:
+
+| Notifier | Fires on | Typical UI |
+|----------|----------|------------|
+| `positionNotifier` | Position/duration ~500 ms | Seek bars (mini + now playing) |
+| `track` | Current track, metadata enrichment | Title, art, play icon on row |
+| `playback` | Play/pause, processing (coalesced) | Transport buttons |
+| `queue` | Playlist, shuffle, repeat, catalog | Queue tab, skip availability |
+
+**Helpers on controller:**
+
+- `playbackListenable`, `queueListenable`, `trackAndQueueListenable`  
+  (`canSkipNext` needs track + queue).
+- `uiListenable` — merge of track + playback + queue (**avoid for new UI**;  
+  rebuilds too much).
+
+**`PlayerControllerScope`** (InheritedWidget) exposes `of(context)` and  
+`positionOf` / `trackOf` / etc.
+
+### UI rebuild guidelines
+
+| Widget concern | Listen to |
+|----------------|-----------|
+| Seek bar | `positionNotifier` only — not `audioPlayer.positionStream` |
+| Play/pause | `playback` |
+| Next enabled | `trackAndQueueListenable` or `track` + `queue` |
+| Now-playing row highlight (library) | `track` per row via `_TrackTile` + `highlightWhenCurrent` — not `queue` |
+| Library list data | `queue` (catalog size/order only); scope `ListenableBuilder` to tab body |
+| Path → row lookup | `libraryTracksByPathKey()` once per rebuild — not `_trackForPath` in `itemBuilder` |
+| Playback queue storage | `_playlistPaths` (strings); `playlist` getter resolves tags from catalog |
+
+---
+
+## Library & metadata
+
+### Two layers
+
+1. **`LibraryCatalog`** — full disk library for Songs tab (paths + tags, **no**  
+   `albumArtBytes` in catalog rows). Art: disk cache + small RAM LRU (`_artHot`).
+2. **`PlayerController._playlist`** — current playback queue (may be favourites,  
+   user playlist, or full library subset).
+
+### Persistence & sync
+
+- **Isar `SongMetadataCache`:** tags + `fileModifiedMs` + **`fileSizeBytes`** for  
+  change detection. Must preserve fingerprints on save or every restart re-parses all files.
+- **Disk art cache:** `album_art_cache_io.dart` — PNG per path key; list rows use  
+  `TrackListAlbumArt` (per-row notifier, deferred scroll, hot LRU promotion).
+- **Startup:** restore Isar → background sync only **changed** files (when fingerprints OK) →  
+  optional art warmup (skips paths that already have disk cache).
+- **Folder add:** scan + enrich; idle rescan may run later.
+
+### Metadata backends
+
+- Default: `audio_metadata_reader`
+- Optional: `metadata_god` (Rust) with Dart fallback — see README for Windows build policy.
+- `metadata_backend_config.dart` / `--dart-define=USE_METADATA_GOD`
+
+### Refresh without stopping playback
+
+- `refreshLibraryDuringPlayback` — update in-memory tags only, no `setAudioSource`.
+- `tryResyncQueueWithLibraryScan` — replace queue when origin is Songs library.
+
+---
+
+## Library sort
+
+Defined in `lib/services/library_track_sort.dart`, persisted via `LibraryTrackSortStore`.
+
+| Mode | Order |
+|------|--------|
+| `folderOrder` (**default**) | Settings music-folder order, then relative path under each root |
+| `modifiedNewest` / `modifiedOldest` | Catalog scan order / reverse |
+| `titleAZ` / `titleZA` | Title, then path |
+
+Shared by **Library → Songs** and **drawer → Files** (MP3 listings).
+
+---
+
+## Android home-screen widgets
+
+Two providers: `Mp3PlayerAppWidget`, `Mp3PlayerGlassCardWidget`.
+
+**Flutter → native:** `MethodChannel` `com.example.mp3_player/widget`
+
+- `sync` — full state (track, art path, playing, position, theme).
+- `syncPlaybackProgress` — position/playing only while app is foreground + playing.
+- `setPlaying` — play/pause icon only.
+
+**Prefs:** `mp3_player_home_widget` (`Mp3PlayerWidgetPrefs`).
+
+**When app UI closes:** `Mp3PlayerAudioServiceActivity.onDestroy` / `onStop(finishing)`  
+and Flutter `AppLifecycleState.detached` set **`playing: false`** so widgets show  
+**play** (track info unchanged). Resumed lifecycle runs a full sync again.
+
+**Transport buttons:** `WidgetMediaActionReceiver` → MediaSession (same as notification).
+
+Widget placeholder art is drawn in Kotlin (`WidgetArtPlaceholderBitmap`); notification  
+may still rasterize placeholders in Dart.
+
+---
+
+## Git & agent conventions
+
+- **No Cursor co-author** in commit messages (see `.cursor/git-no-cursor-coauthor.mdc`).
+- Optional hook: `git config core.hooksPath githooks` strips co-author trailers.
+- **SMFACN** — *Stage Min Files and Commit New*: stage only files for the change,  
+  one new commit, no co-author line.
+
+---
+
+## Related files (quick index)
+
+| Topic | File |
+|-------|------|
+| Playback coordinator | `lib/audio/player_controller.dart` |
+| Notifiers | `lib/audio/player_notifiers.dart` |
+| Catalog | `lib/audio/library_catalog.dart` |
+| Sort | `lib/services/library_track_sort.dart` |
+| Widget bridge | `lib/platform/android_home_widget_bridge.dart` |
+| Widget sync | `lib/app.dart` (`_pushAndroidHomeWidgetState`) |
+| Native widget | `android/.../Mp3PlayerWidgetSync.kt` |

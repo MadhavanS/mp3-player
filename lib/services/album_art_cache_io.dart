@@ -146,6 +146,27 @@ Future<Uint8List?> _loadPathDiskCache(
   return null;
 }
 
+/// Warms path-keyed disk/memory cache for the first screen of a library list.
+Future<void> prewarmPathAlbumArtForPaths(
+  Iterable<String> filePaths, {
+  int maxCount = 15,
+  int maxDimension = 192,
+}) async {
+  final paths = filePaths
+      .map((p) => p.trim())
+      .where((p) => p.isNotEmpty)
+      .take(maxCount)
+      .toList(growable: false);
+  if (paths.isEmpty) return;
+
+  await Future.wait(
+    paths.map(
+      (path) => cachedAlbumArtForPath(path, maxDimension: maxDimension),
+    ),
+    eagerError: false,
+  );
+}
+
 void prewarmAlbumArtCache(
   Iterable<TrackItem> tracks, {
   int maxCount = 50,

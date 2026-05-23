@@ -597,21 +597,15 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     player.setPlaybackPathKeyScope(keys, reloadQueue: false);
     if (cb != null) await cb(keys);
 
-    final library = player.metadataLibrary;
-    final tracks = scanned
-        .map((path) {
-          final j = library.indexWhere((t) => t.filePath == path);
-          return j >= 0 ? library[j] : TrackItem.fromFilePath(path);
-        })
-        .toList(growable: false);
     final startIndex = startFilePath == null
         ? 0
-        : tracks
-              .indexWhere((t) => t.filePath == startFilePath)
-              .clamp(0, tracks.length - 1);
-    await player.setPlaylistAndPlay(
-      tracks,
-      startIndex: startIndex,
+        : scanned
+              .indexWhere((p0) => p0 == startFilePath)
+              .clamp(0, scanned.length - 1);
+    final slicePaths = scanned.sublist(startIndex);
+    await player.setPlaylistPathsAndPlay(
+      slicePaths,
+      startIndex: 0,
       playbackOriginTab: LibraryTabId.songs,
       keepShuffleMode: keepShuffleMode,
       enableShuffle: shuffle,

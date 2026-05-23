@@ -21,12 +21,19 @@ import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/daisy_background.dart';
 import '../../widgets/liquid_glass.dart';
-import '../../widgets/track_album_art.dart';
+import '../../widgets/track_list_album_art.dart';
 import '../help/search_help_text.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
+import 'library_track_lookup.dart';
 import 'playing_queue_tab.dart';
+
+/// Max rows joined from persisted path lists per tab build (favourites / recent).
+const int _kMaxPathListJoinRows = 500;
+
+/// First screen of Songs rows to prewarm from disk art cache after catalog rebuild.
+const int _kSongsArtPrewarmRows = 15;
 
 /// Key for the library search field (widget tests).
 const Key librarySearchFieldKey = Key('library_search_field');
@@ -543,6 +550,19 @@ class LibraryScreenState extends State<LibraryScreen>
     return (null, songsTabIndices.length);
   }
 
+  void _prewarmSongsListArt(List<TrackItem> tracks, List<int> filteredIndices) {
+    if (filteredIndices.isEmpty) return;
+    final paths = <String>[];
+    for (var i = 0;
+        i < filteredIndices.length && paths.length < _kSongsArtPrewarmRows;
+        i++) {
+      final p = tracks[filteredIndices[i]].filePath?.trim();
+      if (p != null && p.isNotEmpty) paths.add(p);
+    }
+    if (paths.isEmpty) return;
+    unawaited(prewarmPathAlbumArtForPaths(paths));
+  }
+
   void _scheduleSongsVisibleArtEnrichment(
     List<TrackItem> tracks,
     List<int> filteredIndices,
@@ -723,7 +743,11 @@ class LibraryScreenState extends State<LibraryScreen>
         final ordered = await RecentlyAddedStore.orderedPathsForLibrary(tracks);
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(ordered, browsePathKeys);
-        paths = _filterPathsBySearch(paths, searchQuery, tracks);
+        paths = _filterPathsBySearch(
+          paths,
+          searchQuery,
+          libraryTracksByPathKey(tracks),
+        );
         final idx = paths.indexWhere(
           (p) => canonicalMusicLibraryPathKey(p) == pathKey,
         );
@@ -765,7 +789,11 @@ class LibraryScreenState extends State<LibraryScreen>
         final favPaths = await FavoriteSongsStore.loadPaths();
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(favPaths, null);
-        paths = _filterPathsBySearch(paths, searchQuery, tracks);
+        paths = _filterPathsBySearch(
+          paths,
+          searchQuery,
+          libraryTracksByPathKey(tracks),
+        );
         final idx = paths.indexWhere(
           (p) => canonicalMusicLibraryPathKey(p) == pathKey,
         );
@@ -781,7 +809,11 @@ class LibraryScreenState extends State<LibraryScreen>
         final played = await RecentlyPlayedStore.loadPaths();
         if (!mounted) return;
         var paths = _pathsMatchingBrowse(played, browsePathKeys);
-        paths = _filterPathsBySearch(paths, searchQuery, tracks);
+        paths = _filterPathsBySearch(
+          paths,
+          searchQuery,
+          libraryTracksByPathKey(tracks),
+        );
         final idx = paths.indexWhere(
           (p) => canonicalMusicLibraryPathKey(p) == pathKey,
         );
@@ -864,11 +896,11 @@ class LibraryScreenState extends State<LibraryScreen>
   List<String> _filterPathsBySearch(
     List<String> paths,
     LibrarySearchQuery query,
-    List<TrackItem> library,
+    Map<String, TrackItem> libraryByPathKey,
   ) {
     if (query.isEmpty) return paths;
     return paths.where((path) {
-      final t = _trackForPath(path, library);
+      final t = _trackForPath(path, libraryByPathKey);
       if (query.matchesTrack(t)) return true;
       // For title/default searches also fall back to filename matching.
       if (query.field == LibrarySearchField.title) {
@@ -882,26 +914,19 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   /// Resolves a library [TrackItem] for [path] using canonical path keys (stable on Android).
-  static TrackItem _trackForPath(String path, List<TrackItem> library) {
-    final key = canonicalMusicLibraryPathKey(path);
-    if (key.isNotEmpty) {
-      for (final t in library) {
-        final fp = t.filePath;
-        if (fp == null || fp.isEmpty) continue;
-        if (canonicalMusicLibraryPathKey(fp) == key) return t;
-      }
-    }
-    return TrackItem.fromFilePath(path);
-  }
+  static TrackItem _trackForPath(
+    String path,
+    Map<String, TrackItem> libraryByPathKey,
+  ) =>
+      trackForPathKey(path, libraryByPathKey);
 
-  int _playlistIndexForPath(PlayerController player, String path) {
+  int _playlistIndexForPath(
+    String path,
+    Map<String, int> playlistIndexByPathKey,
+  ) {
     final key = canonicalMusicLibraryPathKey(path);
     if (key.isEmpty) return -1;
-    return player.playlist.indexWhere((t) {
-      final fp = t.filePath;
-      if (fp == null || fp.isEmpty) return false;
-      return canonicalMusicLibraryPathKey(fp) == key;
-    });
+    return playlistIndexByPathKey[key] ?? -1;
   }
 
   Future<void> _playOrderedPathsFrom(
@@ -914,18 +939,18 @@ class LibraryScreenState extends State<LibraryScreen>
   }) async {
     if (orderedPaths.isEmpty) return;
     final player = PlayerController.of(context);
-    final library = player.metadataLibrary;
-    final tracks = orderedPaths
-        .map((path) => _trackForPath(path, library))
-        .toList();
+    final safeStart = startIndex.clamp(0, orderedPaths.length - 1);
+    // Queue from the tapped song forward so ExoPlayer does not build thousands of
+    // [AudioSource] children before the first [play] (see [_loadCurrentFastStart]).
+    final slicePaths = orderedPaths.sublist(safeStart);
     if (pathKeyScope != null) {
       player.setPlaybackPathKeyScope(pathKeyScope, reloadQueue: false);
     } else {
       player.setPlaybackPathKeyScope(null, reloadQueue: false);
     }
-    await player.setPlaylistAndPlay(
-      tracks,
-      startIndex: startIndex.clamp(0, tracks.length - 1),
+    await player.setPlaylistPathsAndPlay(
+      slicePaths,
+      startIndex: 0,
       playbackOriginTab: playbackOriginTab,
       playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
       keepShuffleMode: true,
@@ -1176,9 +1201,10 @@ class LibraryScreenState extends State<LibraryScreen>
                           ),
                           Builder(
                             builder: (_) {
-                              final resolvedTracks = paths
-                                  .map((p) => _trackForPath(p, library))
-                                  .toList();
+                              final resolvedTracks = tracksForPaths(
+                                paths,
+                                libraryTracksByPathKey(library),
+                              );
                               return SizedBox(
                                 height: min(
                                   MediaQuery.sizeOf(ctx).height * 0.55,
@@ -1216,10 +1242,7 @@ class LibraryScreenState extends State<LibraryScreen>
                                               horizontal: 12,
                                               vertical: 4,
                                             ),
-                                        leading: TrackAlbumArt(
-                                          track: track,
-                                          display: TrackArtDisplay.list,
-                                        ),
+                                        leading: TrackListAlbumArt(track: track),
                                         title: Text(
                                           track.title,
                                           maxLines: 1,
@@ -1563,40 +1586,39 @@ class LibraryScreenState extends State<LibraryScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final player = PlayerController.of(context);
+    final searchQuery = _parseSearchQuery(_searchController.text);
+    final pal = context.palette;
+    final hint = _searchHintForTab(_currentLibraryTabId);
+    final onSongsTab = _currentLibraryTabId == LibraryTabId.songs;
+    final inSongsSelect = onSongsTab && _songsMultiSelectMode;
 
-    return ListenableBuilder(
-      listenable: player.queue,
-      builder: (context, _) {
-        return ValueListenableBuilder<Set<String>?>(
-          valueListenable: widget.songsBrowsePathKeys,
-          builder: (context, browsePathKeys, _) {
-            final tracks = player.metadataLibrary;
-            final searchQuery = _parseSearchQuery(_searchController.text);
-            final songsTabIndices = _sortedSongsTabIndices(
-              tracks,
-              searchQuery,
-              browsePathKeys,
-            );
-
-            final pal = context.palette;
-            final hint = _searchHintForTab(_currentLibraryTabId);
-
-            final onSongsTab = _currentLibraryTabId == LibraryTabId.songs;
-            final inSongsSelect =
-                onSongsTab && _songsMultiSelectMode;
-
-            return PopScope(
+    return PopScope(
               canPop: !inSongsSelect,
               onPopInvokedWithResult: (didPop, _) {
                 if (didPop) return;
                 _exitSongsMultiSelectMode();
               },
-              child: DaisyBackground(
-              baseColor: pal.scaffoldBackground,
-              child: SafeArea(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
+      child: DaisyBackground(
+        baseColor: pal.scaffoldBackground,
+        child: SafeArea(
+          child: ListenableBuilder(
+            listenable: PlayerControllerScope.queueOf(context),
+            builder: (context, _) {
+              return ValueListenableBuilder<Set<String>?>(
+                valueListenable: widget.songsBrowsePathKeys,
+                builder: (context, browsePathKeys, _) {
+                  final tracks = player.metadataLibrary;
+                  final songsTabIndices = _sortedSongsTabIndices(
+                    tracks,
+                    searchQuery,
+                    browsePathKeys,
+                  );
+                  final libraryByPathKey = libraryTracksByPathKey(tracks);
+                  final queueIndexByPathKey =
+                      playlistIndexByPathKey(player.playlistPaths);
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
                       child: Row(
@@ -1800,6 +1822,8 @@ class LibraryScreenState extends State<LibraryScreen>
                               context,
                               pal,
                               tracks,
+                              libraryByPathKey,
+                              queueIndexByPathKey,
                               songsTabIndices,
                               player,
                               browsePathKeys,
@@ -1808,14 +1832,14 @@ class LibraryScreenState extends State<LibraryScreen>
                         ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ),
-            );
-          },
-        );
-      },
+                    ],
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 
@@ -1825,6 +1849,8 @@ class LibraryScreenState extends State<LibraryScreen>
     BuildContext context,
     AppPalette pal,
     List<TrackItem> tracks,
+    Map<String, TrackItem> libraryByPathKey,
+    Map<String, int> playlistIndexByPathKey,
     List<int> songsTabIndices,
     PlayerController player,
     Set<String>? browsePathKeys,
@@ -1837,6 +1863,7 @@ class LibraryScreenState extends State<LibraryScreen>
         tracks,
         songsTabIndices,
         player,
+        playlistIndexByPathKey,
         searchQuery,
         browsePathKeys: browsePathKeys,
         onClearBrowseFolder: browsePathKeys == null
@@ -1867,7 +1894,8 @@ class LibraryScreenState extends State<LibraryScreen>
         pal,
         searchQuery,
         player,
-        tracks,
+        libraryByPathKey,
+        playlistIndexByPathKey,
         browsePathKeys,
       ),
       LibraryTabId.playlist => _buildPlaylistTab(
@@ -1883,7 +1911,8 @@ class LibraryScreenState extends State<LibraryScreen>
         pal,
         searchQuery,
         player,
-        tracks,
+        libraryByPathKey,
+        playlistIndexByPathKey,
         null,
       ),
       LibraryTabId.recentlyPlayed => _buildRecentTab(
@@ -1891,7 +1920,8 @@ class LibraryScreenState extends State<LibraryScreen>
         pal,
         searchQuery,
         player,
-        tracks,
+        libraryByPathKey,
+        playlistIndexByPathKey,
         browsePathKeys,
       ),
     };
@@ -1902,7 +1932,8 @@ class LibraryScreenState extends State<LibraryScreen>
     AppPalette pal,
     LibrarySearchQuery rawQuery,
     PlayerController player,
-    List<TrackItem> tracks,
+    Map<String, TrackItem> libraryByPathKey,
+    Map<String, int> playlistIndexByPathKey,
     Set<String>? browsePathKeys,
   ) {
     return ValueListenableBuilder<int>(
@@ -1918,7 +1949,10 @@ class LibraryScreenState extends State<LibraryScreen>
             }
 
             var paths = _pathsMatchingBrowse(snap.data ?? [], browsePathKeys);
-            paths = _filterPathsBySearch(paths, rawQuery, tracks);
+            paths = _filterPathsBySearch(paths, rawQuery, libraryByPathKey);
+            if (paths.length > _kMaxPathListJoinRows) {
+              paths = paths.sublist(0, _kMaxPathListJoinRows);
+            }
 
             if ((snap.data ?? []).isEmpty) {
               return Center(
@@ -1967,7 +2001,6 @@ class LibraryScreenState extends State<LibraryScreen>
               );
             }
 
-            final library = player.metadataLibrary;
             return ListView.separated(
               controller: _favoritesScrollController,
               padding: const EdgeInsets.only(bottom: 8),
@@ -1976,16 +2009,10 @@ class LibraryScreenState extends State<LibraryScreen>
                   Divider(height: 1, color: pal.dividerOnHero, indent: 88),
               itemBuilder: (context, i) {
                 final path = paths[i];
-                final track = _trackForPath(path, library);
-                final plIndex = _playlistIndexForPath(player, path);
-                final selected = _isCurrentTrackPath(player, path);
-                final attachScrollKey =
-                    selected && _isActiveTab(LibraryTabId.favourites);
+                final track = _trackForPath(path, libraryByPathKey);
+                final plIndex = _playlistIndexForPath(path, playlistIndexByPathKey);
                 return Material(
-                  key: attachScrollKey ? _scrollAnchorFavorites : null,
-                  color: selected
-                      ? pal.onScaffold.withValues(alpha: 0.08)
-                      : Colors.transparent,
+                  color: Colors.transparent,
                   child: InkWell(
                     onTap: () => _playOrderedPathsFrom(
                       context,
@@ -2001,10 +2028,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          TrackAlbumArt(
-                            track: track,
-                            display: TrackArtDisplay.list,
-                          ),
+                          TrackListAlbumArt(track: track),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -2048,9 +2072,11 @@ class LibraryScreenState extends State<LibraryScreen>
                             pal: pal,
                             track: track,
                             onSelected: (action) {
-                              final resolvedTracks = paths
-                                  .map((p) => _trackForPath(p, library))
-                                  .toList();
+                              final resolvedTracks = tracksForPaths(
+                                paths,
+                                libraryByPathKey,
+                                maxCount: _kMaxPathListJoinRows,
+                              );
                               unawaited(
                                 _onTrackOverflow(
                                   context,
@@ -2088,10 +2114,11 @@ class LibraryScreenState extends State<LibraryScreen>
     AppPalette pal,
     LibrarySearchQuery rawQuery,
     PlayerController player,
-    List<TrackItem> tracks,
+    Map<String, TrackItem> libraryByPathKey,
+    Map<String, int> playlistIndexByPathKey,
     Set<String>? browsePathKeys,
   ) {
-    if (tracks.isEmpty) {
+    if (libraryByPathKey.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -2128,7 +2155,7 @@ class LibraryScreenState extends State<LibraryScreen>
       valueListenable: RecentlyAddedStore.revision,
       builder: (context, _, __) {
         return FutureBuilder<List<String>>(
-          future: _recentlyAddedPathsFuture(tracks),
+          future: _recentlyAddedPathsFuture(libraryByPathKey.values.toList()),
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
               return Center(
@@ -2138,7 +2165,10 @@ class LibraryScreenState extends State<LibraryScreen>
 
             final baseOrdered = snap.data ?? [];
             var paths = _pathsMatchingBrowse(baseOrdered, browsePathKeys);
-            paths = _filterPathsBySearch(paths, rawQuery, tracks);
+            paths = _filterPathsBySearch(paths, rawQuery, libraryByPathKey);
+            if (paths.length > _kMaxPathListJoinRows) {
+              paths = paths.sublist(0, _kMaxPathListJoinRows);
+            }
 
             if (baseOrdered.isEmpty) {
               return Center(
@@ -2192,7 +2222,6 @@ class LibraryScreenState extends State<LibraryScreen>
               );
             }
 
-            final library = player.metadataLibrary;
             return ListView.separated(
               controller: _recentAddedScrollController,
               padding: const EdgeInsets.only(bottom: 8),
@@ -2201,16 +2230,10 @@ class LibraryScreenState extends State<LibraryScreen>
                   Divider(height: 1, color: pal.dividerOnHero, indent: 88),
               itemBuilder: (context, i) {
                 final path = paths[i];
-                final track = _trackForPath(path, library);
-                final plIndex = _playlistIndexForPath(player, path);
-                final selected = _isCurrentTrackPath(player, path);
-                final attachScrollKey =
-                    selected && _isActiveTab(LibraryTabId.recentlyAdded);
+                final track = _trackForPath(path, libraryByPathKey);
+                final plIndex = _playlistIndexForPath(path, playlistIndexByPathKey);
                 return Material(
-                  key: attachScrollKey ? _scrollAnchorRecentAdded : null,
-                  color: selected
-                      ? pal.onScaffold.withValues(alpha: 0.08)
-                      : Colors.transparent,
+                  color: Colors.transparent,
                   child: InkWell(
                     onTap: () => _playOrderedPathsFrom(
                       context,
@@ -2226,10 +2249,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          TrackAlbumArt(
-                            track: track,
-                            display: TrackArtDisplay.list,
-                          ),
+                          TrackListAlbumArt(track: track),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -2273,9 +2293,11 @@ class LibraryScreenState extends State<LibraryScreen>
                             pal: pal,
                             track: track,
                             onSelected: (action) {
-                              final resolvedTracks = paths
-                                  .map((p) => _trackForPath(p, library))
-                                  .toList();
+                              final resolvedTracks = tracksForPaths(
+                                paths,
+                                libraryByPathKey,
+                                maxCount: _kMaxPathListJoinRows,
+                              );
                               unawaited(
                                 _onTrackOverflow(
                                   context,
@@ -2313,7 +2335,8 @@ class LibraryScreenState extends State<LibraryScreen>
     AppPalette pal,
     LibrarySearchQuery rawQuery,
     PlayerController player,
-    List<TrackItem> tracks,
+    Map<String, TrackItem> libraryByPathKey,
+    Map<String, int> playlistIndexByPathKey,
     Set<String>? browsePathKeys,
   ) {
     return ValueListenableBuilder<int>(
@@ -2329,7 +2352,10 @@ class LibraryScreenState extends State<LibraryScreen>
             }
 
             var paths = _pathsMatchingBrowse(snap.data ?? [], browsePathKeys);
-            paths = _filterPathsBySearch(paths, rawQuery, tracks);
+            paths = _filterPathsBySearch(paths, rawQuery, libraryByPathKey);
+            if (paths.length > _kMaxPathListJoinRows) {
+              paths = paths.sublist(0, _kMaxPathListJoinRows);
+            }
 
             if ((snap.data ?? []).isEmpty) {
               return Center(
@@ -2382,7 +2408,6 @@ class LibraryScreenState extends State<LibraryScreen>
               );
             }
 
-            final library = player.metadataLibrary;
             return ListView.separated(
               controller: _recentPlayedScrollController,
               padding: const EdgeInsets.only(bottom: 8),
@@ -2391,16 +2416,10 @@ class LibraryScreenState extends State<LibraryScreen>
                   Divider(height: 1, color: pal.dividerOnHero, indent: 88),
               itemBuilder: (context, i) {
                 final path = paths[i];
-                final track = _trackForPath(path, library);
-                final plIndex = _playlistIndexForPath(player, path);
-                final selected = _isCurrentTrackPath(player, path);
-                final attachScrollKey =
-                    selected && _isActiveTab(LibraryTabId.recentlyPlayed);
+                final track = _trackForPath(path, libraryByPathKey);
+                final plIndex = _playlistIndexForPath(path, playlistIndexByPathKey);
                 return Material(
-                  key: attachScrollKey ? _scrollAnchorRecentPlayed : null,
-                  color: selected
-                      ? pal.onScaffold.withValues(alpha: 0.08)
-                      : Colors.transparent,
+                  color: Colors.transparent,
                   child: InkWell(
                     onTap: () => _playOrderedPathsFrom(
                       context,
@@ -2416,10 +2435,7 @@ class LibraryScreenState extends State<LibraryScreen>
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          TrackAlbumArt(
-                            track: track,
-                            display: TrackArtDisplay.list,
-                          ),
+                          TrackListAlbumArt(track: track),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -2463,9 +2479,11 @@ class LibraryScreenState extends State<LibraryScreen>
                             pal: pal,
                             track: track,
                             onSelected: (action) {
-                              final resolvedTracks = paths
-                                  .map((p) => _trackForPath(p, library))
-                                  .toList();
+                              final resolvedTracks = tracksForPaths(
+                                paths,
+                                libraryByPathKey,
+                                maxCount: _kMaxPathListJoinRows,
+                              );
                               unawaited(
                                 _onTrackOverflow(
                                   context,
@@ -2505,6 +2523,7 @@ class LibraryScreenState extends State<LibraryScreen>
     List<TrackItem> tracks,
     List<int> filteredIndices,
     PlayerController player,
+    Map<String, int> playlistIndexByPathKey,
     LibrarySearchQuery searchQuery, {
     Set<String>? browsePathKeys,
     VoidCallback? onClearBrowseFolder,
@@ -2634,9 +2653,10 @@ class LibraryScreenState extends State<LibraryScreen>
         final path = track.filePath;
         final multiSelected = _isSongPathSelected(path);
         final plIndex = path != null && path.isNotEmpty
-            ? _playlistIndexForPath(player, path)
+            ? _playlistIndexForPath(path, playlistIndexByPathKey)
             : -1;
         return _TrackTile(
+          key: path != null && path.isNotEmpty ? ValueKey(path) : null,
           track: track,
           selected: inSelect ? multiSelected : false,
           highlightWhenCurrent: !inSelect,
@@ -2707,6 +2727,7 @@ class LibraryScreenState extends State<LibraryScreen>
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _prewarmSongsListArt(tracks, filteredIndices);
       _scheduleSongsVisibleArtEnrichment(tracks, filteredIndices, player);
     });
 
@@ -2800,6 +2821,7 @@ class _SongsMultiSelectActionBar extends StatelessWidget {
 
 class _TrackTile extends StatelessWidget {
   const _TrackTile({
+    super.key,
     required this.track,
     required this.selected,
     this.highlightWhenCurrent = false,
@@ -2909,7 +2931,7 @@ class _TrackTileBody extends StatelessWidget {
           ),
           const SizedBox(width: 8),
         ],
-        TrackAlbumArt(track: track, display: TrackArtDisplay.list),
+        TrackListAlbumArt(track: track),
         const SizedBox(width: 16),
         Expanded(
           child: Column(

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../models/track_item.dart';
 import '../services/music_library_path_key.dart';
 
@@ -114,5 +116,27 @@ class LibraryCatalog {
     while (_artHot.length > _artHotMax) {
       _artHot.remove(_artHot.keys.first);
     }
+  }
+
+  /// Recently displayed list art (PNG bytes), keyed by canonical path key.
+  Uint8List? hotArtBytesForPathKey(String pathKey) {
+    if (pathKey.isEmpty) return null;
+    final art = _artHot[pathKey]?.albumArtBytes;
+    if (art == null || art.isEmpty) return null;
+    return art;
+  }
+
+  /// Promotes decoded list art into the catalog hot LRU for instant re-display.
+  void promoteArtBytes(String pathKey, Uint8List art) {
+    if (pathKey.isEmpty || art.isEmpty) return;
+    final base = _byKey[pathKey];
+    if (base == null) return;
+    _putArtHot(
+      pathKey,
+      base.withEmbeddedMetadata(
+        albumArtBytes: art,
+        replaceAlbumArtFromFile: true,
+      ),
+    );
   }
 }

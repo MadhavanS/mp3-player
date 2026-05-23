@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 // audio_session exposes output device types as experimental, but this is the
 // supported way to pause on Bluetooth output removal in the current package.
@@ -33,7 +34,7 @@ enum CatalogNotifyMode {
   /// One [notifyListeners] immediately.
   immediate,
 
-  /// At most one [notifyListeners] per ~200ms while updates keep arriving.
+  /// At most one [notifyListeners] per ~300ms while updates keep arriving.
   throttled,
 }
 
@@ -64,6 +65,7 @@ class PlayerController {
 
   Future<void> _playSafely({String context = 'play'}) async {
     try {
+      await _activateAudioSessionForPlayback();
       await _player.play();
     } catch (e, st) {
       if (_isInterruptedAbort(e)) return;
@@ -79,11 +81,48 @@ class PlayerController {
   /// a fast `loading → ready` transition can happen between the synchronous `!= ready`
   /// check and subscribing, so the stream never emits `ready` and playback never starts
   /// until a long timeout (or never, if [play] keeps no-op'ing).
+  /// While > 0, [playerStateStream] must not treat [stop] / load pauses as user pause.
+  int _transportPauseGuardDepth = 0;
+
+  bool get _ignoreSpuriousTransportPause => _transportPauseGuardDepth > 0;
+
+  Future<void> _guardedTransport(Future<void> Function() action) async {
+    _transportPauseGuardDepth++;
+    try {
+      await action();
+    } finally {
+      _transportPauseGuardDepth--;
+    }
+  }
+
+  Future<void>? _audioSessionInit;
+
+  Future<void> _ensureAudioSessionReady() async {
+    final init = _audioSessionInit;
+    if (init != null) await init;
+  }
+
+  Future<void> _activateAudioSessionForPlayback() async {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    try {
+      await _ensureAudioSessionReady();
+      final session = await AudioSession.instance;
+      await session.setActive(true);
+    } catch (e, st) {
+      debugPrint('AudioSession.setActive: $e\n$st');
+    }
+  }
+
   Future<void> _resumePlaybackAfterLoad({
     String context = 'resumeAfterLoad',
   }) async {
-    if (_playbackPausedByUser) return;
-    _invalidatePlayResumeRetries();
+    // Explicit play-after-load (tap track, setPlaylistAndPlay, skip, …). Clear stale
+    // pause flag from a late stop() event that arrived after [_loadCurrent] finished.
+    _playbackPausedByUser = false;
     final generation = _playControlGeneration;
     await _waitForPlayerPreparedAfterSourceChange();
     if (_playbackPausedByUser || _playControlGeneration != generation) return;
@@ -98,7 +137,7 @@ class PlayerController {
 
   Future<void> _waitForPlayerPreparedAfterSourceChange() async {
     const step = Duration(milliseconds: 40);
-    final deadline = DateTime.now().add(const Duration(seconds: 8));
+    final deadline = DateTime.now().add(const Duration(seconds: 15));
     while (DateTime.now().isBefore(deadline)) {
       switch (_player.processingState) {
         case ProcessingState.ready:
@@ -136,6 +175,9 @@ class PlayerController {
     for (var i = 0; i < attempts; i++) {
       if (_playbackPausedByUser || _playControlGeneration != generation) return;
       try {
+        if (_player.processingState == ProcessingState.completed) {
+          await _player.seek(Duration.zero);
+        }
         await _playSafely(context: context);
       } catch (e, st) {
         if (_isInterruptedAbort(e)) {
@@ -160,7 +202,7 @@ class PlayerController {
   PlayerController() {
     positionNotifier.attach();
     unawaited(_loadPersistedVolume());
-    unawaited(_initAudioSessionInterruptions());
+    _audioSessionInit = _initAudioSessionInterruptions();
     // Single subscription: listening to [processingStateStream] and
     // [playerStateStream] both triggered platform init; concurrent inits caused
     // "Platform player … already exists" on some devices (just_audio / Android).
@@ -171,7 +213,14 @@ class PlayerController {
 
       // When the player becomes paused (e.g. via notification button or auto-pause),
       // invalidate any in-flight retry loops so they don't overwrite the pause.
-      if (!playing && _lastDispatchedPlaying) {
+      // Ignore pauses caused by [_loadCurrent]'s stop() or manual skip seeks — those
+      // emit playing=false after load and used to set [_playbackPausedByUser], so
+      // [_resumePlaybackAfterLoad] never called [play] (songs appeared "stuck").
+      if (!playing &&
+          _lastDispatchedPlaying &&
+          !_isLoadingSource &&
+          !_manualQueueAdvance &&
+          !_ignoreSpuriousTransportPause) {
         _invalidatePlayResumeRetries();
         _playbackPausedByUser = true;
       }
@@ -228,8 +277,66 @@ class PlayerController {
   /// (e.g. phone call). Cleared after we attempt resume.
   bool _shouldResumeAfterTransientFocusLoss = false;
 
-  List<TrackItem> _playlist = [];
+  /// Playback queue as file paths; [TrackItem] rows resolve from [LibraryCatalog].
+  List<String> _playlistPaths = [];
+  List<TrackItem>? _playlistCache;
   int _index = 0;
+
+  void _invalidatePlaylistCache() => _playlistCache = null;
+
+  TrackItem _trackAt(int playlistIndex) {
+    final path = _playlistPaths[playlistIndex];
+    return _libraryCatalog.trackForPath(path) ??
+        TrackItem.fromFilePath(path);
+  }
+
+  void _setPlaylistPaths(List<String> paths) {
+    _playlistPaths = List<String>.from(paths);
+    _invalidatePlaylistCache();
+  }
+
+  void _assignPlaylistFromTracks(List<TrackItem> tracks) {
+    _playlistPaths = [
+      for (final t in tracks)
+        if (t.filePath != null && t.filePath!.trim().isNotEmpty)
+          t.filePath!.trim(),
+    ];
+    _invalidatePlaylistCache();
+  }
+
+  String? _pathAt(int playlistIndex) {
+    if (playlistIndex < 0 || playlistIndex >= _playlistPaths.length) {
+      return null;
+    }
+    return _playlistPaths[playlistIndex];
+  }
+
+  bool _anyQueuePath(bool Function(String path) test) =>
+      _playlistPaths.any(test);
+
+  static String? _pathForTrack(TrackItem track) {
+    final p = track.filePath?.trim();
+    if (p == null || p.isEmpty) return null;
+    return p;
+  }
+
+  List<String> _pathsForTracks(List<TrackItem> tracks) => [
+        for (final t in tracks)
+          if (_pathForTrack(t) != null) _pathForTrack(t)!,
+      ];
+
+  static bool _sameQueuePaths(String a, String b) {
+    final ka = canonicalMusicLibraryPathKey(a);
+    final kb = canonicalMusicLibraryPathKey(b);
+    if (ka.isNotEmpty && kb.isNotEmpty) return ka == kb;
+    return a == b;
+  }
+
+  static bool _sameQueuePathAndTrack(String queuePath, TrackItem track) {
+    final pb = _pathForTrack(track);
+    if (pb == null) return false;
+    return _sameQueuePaths(queuePath, pb);
+  }
 
   bool _shuffle = false;
   List<int> _shuffleOrder = [];
@@ -264,7 +371,15 @@ class PlayerController {
   bool _stopAtTrackEndForSleepTimer = false;
   VoidCallback? _sleepTimerTrackEndNotifier;
   List<int> _activeSourceOrder = <int>[];
+  ConcatenatingAudioSource? _concatSource;
   double _preferredVolume = 1.0;
+
+  /// Whether the loaded [ConcatenatingAudioSource] can be mutated with [add]/[insert]/[removeAt].
+  bool get _canMutateConcatInPlace =>
+      !_useSingleTrackAudioSourceForPlatform() &&
+      _concatSource != null &&
+      !_sourceNeedsReload &&
+      !_isLoadingSource;
 
   /// While rebuilding [ConcatenatingAudioSource] for shuffle, [AudioPlayer.stop] makes
   /// `playing` false briefly; UI uses [isPlaying] which ORs this in so play/pause
@@ -274,8 +389,10 @@ class PlayerController {
   /// Dedupes [repeat-one] replay when both [currentIndexStream] and completion fire.
   bool _repeatOneReplayScheduled = false;
 
-  Timer? _catalogNotifyThrottleTimer;
-  bool _catalogNotifyThrottlePending = false;
+  /// Load the current track first, then [add]/[insert] the rest in the background.
+  static const int _fastStartConcatThreshold = 2;
+
+  int _concatExpandGeneration = 0;
 
   /// Avoid rebuilding the whole app (Library lists, etc.) on every [playerStateStream]
   /// tick — only notify when play/pause or processing state actually changes.
@@ -285,23 +402,9 @@ class PlayerController {
   void _notifyCatalogListeners(CatalogNotifyMode mode) {
     switch (mode) {
       case CatalogNotifyMode.immediate:
-        _catalogNotifyThrottleTimer?.cancel();
-        _catalogNotifyThrottleTimer = null;
-        _catalogNotifyThrottlePending = false;
-        queue.cancelThrottle();
-        queue.notifyNow();
+        queue.notifyImmediate();
       case CatalogNotifyMode.throttled:
-        _catalogNotifyThrottlePending = true;
-        _catalogNotifyThrottleTimer ??= Timer(
-          const Duration(milliseconds: 200),
-          () {
-            _catalogNotifyThrottleTimer = null;
-            if (_catalogNotifyThrottlePending) {
-              _catalogNotifyThrottlePending = false;
-              queue.notifyNow();
-            }
-          },
-        );
+        queue.notifyThrottled();
     }
   }
 
@@ -449,9 +552,25 @@ class PlayerController {
 
   List<TrackItem> get libraryCatalog => _libraryCatalog.tracks;
 
+  /// In-memory list art from [LibraryCatalog] hot LRU (no disk read).
+  Uint8List? hotArtBytesForPath(String filePath) {
+    final key = canonicalMusicLibraryPathKey(filePath.trim());
+    if (key.isEmpty) return null;
+    return _libraryCatalog.hotArtBytesForPathKey(key);
+  }
+
+  void promoteArtBytesForPath(String filePath, Uint8List art) {
+    final key = canonicalMusicLibraryPathKey(filePath.trim());
+    if (key.isEmpty) return;
+    _libraryCatalog.promoteArtBytes(key, art);
+  }
+
   /// Use for tag resolution in Library: full scan when available, else active queue.
   List<TrackItem> get metadataLibrary =>
-      _libraryCatalog.isNotEmpty ? _libraryCatalog.tracks : _playlist;
+      _libraryCatalog.isNotEmpty ? _libraryCatalog.tracks : playlist;
+
+  /// Path keys for the active queue (for O(1) library row ↔ queue mapping).
+  List<String> get playlistPaths => List<String>.unmodifiable(_playlistPaths);
 
   LibraryTabId? get playbackOriginTab => _playbackOriginTab;
 
@@ -464,6 +583,7 @@ class PlayerController {
     CatalogNotifyMode notify = CatalogNotifyMode.immediate,
   }) {
     _libraryCatalog.setAll(tracks);
+    if (_playlistPaths.isNotEmpty) _invalidatePlaylistCache();
     _notifyCatalogListeners(notify);
   }
 
@@ -472,29 +592,39 @@ class PlayerController {
     if (_libraryCatalog.removeAtPath(path)) queue.notifyNow();
   }
 
-  List<TrackItem> get playlist => _playlist;
+  List<TrackItem> get playlist {
+    final cached = _playlistCache;
+    if (cached != null) return cached;
+    final resolved = List<TrackItem>.generate(
+      _playlistPaths.length,
+      _trackAt,
+      growable: false,
+    );
+    _playlistCache = List<TrackItem>.unmodifiable(resolved);
+    return _playlistCache!;
+  }
 
   /// Index into [playlist] for the currently playing file (list row / highlight).
   int get currentIndex {
-    if (_playlist.isEmpty) return 0;
+    if (_playlistPaths.isEmpty) return 0;
     return _shuffle ? _shuffleOrder[_shufflePos] : _index;
   }
 
-  TrackItem? get currentTrack => _playlist.isEmpty
+  TrackItem? get currentTrack => _playlistPaths.isEmpty
       ? null
-      : _playlist[currentIndex.clamp(0, _playlist.length - 1)];
+      : _trackAt(currentIndex.clamp(0, _playlistPaths.length - 1));
 
   /// Track that will play after the current one ([skipNext] semantics), or `null`
   /// when nothing follows (end of queue without [PlaylistRepeatMode.all] wrap).
   TrackItem? get upcomingTrack {
-    if (_playlist.isEmpty) return null;
+    if (_playlistPaths.isEmpty) return null;
     if (_shuffle) {
       if (_shuffleOrder.isEmpty) return null;
       if (_shufflePos < _shuffleOrder.length - 1) {
-        return _playlist[_shuffleOrder[_shufflePos + 1]];
+        return _trackAt(_shuffleOrder[_shufflePos + 1]);
       }
       if (_repeat == PlaylistRepeatMode.all) {
-        return _playlist[_shuffleOrder.first];
+        return _trackAt(_shuffleOrder.first);
       }
       return null;
     }
@@ -506,23 +636,23 @@ class PlayerController {
     /// Stale folder filter vs queue — fall back to full-library sequence once.
     if (p < 0) {
       if (_playbackPathKeysScope != null) {
-        final n = _playlist.length;
+        final n = _playlistPaths.length;
         final i = _index;
         if (i >= 0 && i < n - 1) {
-          return _playlist[i + 1];
+          return _trackAt(i + 1);
         }
         if (_repeat == PlaylistRepeatMode.all) {
-          return _playlist.first;
+          return _trackAt(0);
         }
       }
       return null;
     }
 
     if (p < ordered.length - 1) {
-      return _playlist[ordered[p + 1]];
+      return _trackAt(ordered[p + 1]);
     }
     if (_repeat == PlaylistRepeatMode.all) {
-      return _playlist[ordered.first];
+      return _trackAt(ordered.first);
     }
     return null;
   }
@@ -538,7 +668,7 @@ class PlayerController {
 
   /// Whether the queue tab may reorder rows (folder filter + non-shuffle uses a non-contiguous subset).
   bool get canReorderPlaybackQueue {
-    if (_playlist.length < 2) return false;
+    if (_playlistPaths.length < 2) return false;
     if (_playbackPathKeysScope != null && !_shuffle) return false;
     return true;
   }
@@ -567,15 +697,15 @@ class PlayerController {
 
   bool _playlistIndexMatchesScope(int i) {
     if (_playbackPathKeysScope == null) return true;
-    if (i < 0 || i >= _playlist.length) return false;
-    final fp = _playlist[i].filePath;
+    if (i < 0 || i >= _playlistPaths.length) return false;
+    final fp = _pathAt(i);
     if (fp == null || fp.trim().isEmpty) return false;
     final k = canonicalMusicLibraryPathKey(fp);
     return k.isNotEmpty && _playbackPathKeysScope!.contains(k);
   }
 
   List<int> _playbackScopedIndices() {
-    final n = _playlist.length;
+    final n = _playlistPaths.length;
     if (n == 0) return [];
     final scope = _playbackPathKeysScope;
     if (scope == null) {
@@ -583,7 +713,7 @@ class PlayerController {
     }
     final out = <int>[];
     for (var i = 0; i < n; i++) {
-      final fp = _playlist[i].filePath;
+      final fp = _pathAt(i);
       if (fp == null || fp.trim().isEmpty) continue;
       final k = canonicalMusicLibraryPathKey(fp);
       if (k.isNotEmpty && scope.contains(k)) {
@@ -638,7 +768,7 @@ class PlayerController {
 
   Future<void> _handleTrackCompleted() async {
     if (_suppressTrackCompletedAdvance || _isLoadingSource) return;
-    if (_playlist.isEmpty) return;
+    if (_playlistPaths.isEmpty) return;
     if (_stopAtTrackEndForSleepTimer) {
       debugPrint('Sleep timer (end of song) triggered by natural completion');
       _stopAtTrackEndForSleepTimer = false;
@@ -676,17 +806,17 @@ class PlayerController {
 
   /// Playback order mirrored as [ConcatenatingAudioSource] children (shuffle or scoped).
   List<int> _effectiveQueueOrder() {
-    if (_playlist.isEmpty) return [];
+    if (_playlistPaths.isEmpty) return [];
     if (_shuffle) return List<int>.from(_shuffleOrder);
     final scoped = _playbackScopedIndices();
     if (scoped.isNotEmpty) return scoped;
-    return List<int>.generate(_playlist.length, (i) => i);
+    return List<int>.generate(_playlistPaths.length, (i) => i);
   }
 
   int _logicalPlaylistIndex() => _shuffle ? _shuffleOrder[_shufflePos] : _index;
 
   bool _applyConcatIndexChanged(int concatIdx) {
-    if (_playlist.isEmpty) return false;
+    if (_playlistPaths.isEmpty) return false;
     final order = _activeSourceOrder.isNotEmpty
         ? _activeSourceOrder
         : _effectiveQueueOrder();
@@ -716,6 +846,202 @@ class PlayerController {
     return idx >= 0 ? idx : null;
   }
 
+  Future<AudioSource?> _audioSourceForPlaylistIndex(
+    int playlistIndex, {
+    Map<int, Uri?>? notificationArtUris,
+    bool resolveArtUri = true,
+  }) async {
+    if (playlistIndex < 0 || playlistIndex >= _playlistPaths.length) return null;
+    final fp = _pathAt(playlistIndex)?.trim();
+    if (fp == null || fp.isEmpty) return null;
+    final t = _trackAt(playlistIndex);
+    Uri? artUri;
+    if (notificationArtUris != null &&
+        notificationArtUris.containsKey(playlistIndex)) {
+      artUri = notificationArtUris[playlistIndex];
+    } else if (resolveArtUri) {
+      artUri = await uriForNotificationAlbumArt(t);
+    }
+    return AudioSource.uri(
+      Uri.file(fp),
+      tag: MediaItem(
+        id: fp,
+        title: t.title,
+        artist: t.artist,
+        album: t.metaLine,
+        artUri: artUri,
+      ),
+    );
+  }
+
+  /// Appends [playlistIndices] to the live concat (playback order), updating [_activeSourceOrder].
+  Future<bool> _appendPlaylistIndicesToConcat(List<int> playlistIndices) async {
+    if (!_canMutateConcatInPlace || playlistIndices.isEmpty) return false;
+    final sources = <AudioSource>[];
+    final indices = <int>[];
+    try {
+      for (final pi in playlistIndices) {
+        final source = await _audioSourceForPlaylistIndex(pi);
+        if (source == null) continue;
+        sources.add(source);
+        indices.add(pi);
+      }
+      if (sources.isEmpty) return false;
+      await _concatSource!.addAll(sources);
+      _activeSourceOrder.addAll(indices);
+      return true;
+    } catch (e, st) {
+      debugPrint('_appendPlaylistIndicesToConcat: $e\n$st');
+      return false;
+    }
+  }
+
+  /// Inserts [playlistIndex] into the concat immediately after [afterPlaylistIndex].
+  Future<bool> _insertPlaylistIndexIntoConcat(
+    int playlistIndex, {
+    int? afterPlaylistIndex,
+  }) async {
+    if (!_canMutateConcatInPlace) return false;
+    final anchorPl = afterPlaylistIndex ?? _logicalPlaylistIndex();
+    final concatAfter = _concatIndexForLogical(anchorPl);
+    if (concatAfter == null) return false;
+    final insertConcatIndex = concatAfter + 1;
+    try {
+      final source = await _audioSourceForPlaylistIndex(playlistIndex);
+      if (source == null) return false;
+      await _concatSource!.insert(insertConcatIndex, source);
+      _activeSourceOrder.insert(insertConcatIndex, playlistIndex);
+      return true;
+    } catch (e, st) {
+      debugPrint('_insertPlaylistIndexIntoConcat: $e\n$st');
+      return false;
+    }
+  }
+
+  Future<bool> _removeConcatChildAtPlaylistIndex(int playlistIndex) async {
+    if (!_canMutateConcatInPlace) return false;
+    final concatIdx = _activeSourceOrder.indexOf(playlistIndex);
+    if (concatIdx < 0) return false;
+    try {
+      await _concatSource!.removeAt(concatIdx);
+      _activeSourceOrder.removeAt(concatIdx);
+      return true;
+    } catch (e, st) {
+      debugPrint('_removeConcatChildAtPlaylistIndex: $e\n$st');
+      return false;
+    }
+  }
+
+  void _deferMetadataEnrichForPlaylistIndex(int logical) {
+    if (logical < 0 || logical >= _playlistPaths.length) return;
+    final track = _trackAt(logical);
+    final enrichPath = track.filePath?.trim();
+    if (enrichPath == null || enrichPath.isEmpty) return;
+    if (track.albumArtBytes != null && track.albumArtBytes!.isNotEmpty) {
+      return;
+    }
+    unawaited(() async {
+      try {
+        final enriched = await readAudioMetadata(track);
+        if (enriched.albumArtBytes != null &&
+            enriched.albumArtBytes!.isNotEmpty) {
+          updateTrackByPath(
+            enrichPath,
+            enriched,
+            refreshNotificationArt: false,
+          );
+        }
+      } catch (e, st) {
+        debugPrint('_deferMetadataEnrichForPlaylistIndex: $e\n$st');
+      }
+    }());
+  }
+
+  Future<void> _expandConcatToFullOrder(
+    List<int> fullOrder,
+    int logical,
+  ) async {
+    final gen = ++_concatExpandGeneration;
+    final concat = _concatSource;
+    if (concat == null) return;
+    final pos = fullOrder.indexOf(logical);
+    if (pos < 0) return;
+
+    for (var i = pos - 1; i >= 0; i--) {
+      if (gen != _concatExpandGeneration || _concatSource != concat) return;
+      final pi = fullOrder[i];
+      final source = await _audioSourceForPlaylistIndex(
+        pi,
+        resolveArtUri: false,
+      );
+      if (source == null) continue;
+      try {
+        await concat.insert(0, source);
+        _activeSourceOrder.insert(0, pi);
+      } catch (e, st) {
+        debugPrint('_expandConcatToFullOrder insert: $e\n$st');
+        return;
+      }
+      if (i % 8 == 0) await Future<void>.delayed(Duration.zero);
+    }
+
+    for (var i = pos + 1; i < fullOrder.length; i++) {
+      if (gen != _concatExpandGeneration || _concatSource != concat) return;
+      final pi = fullOrder[i];
+      final source = await _audioSourceForPlaylistIndex(
+        pi,
+        resolveArtUri: false,
+      );
+      if (source == null) continue;
+      try {
+        await concat.add(source);
+        _activeSourceOrder.add(pi);
+      } catch (e, st) {
+        debugPrint('_expandConcatToFullOrder add: $e\n$st');
+        return;
+      }
+      if (i % 16 == 0) await Future<void>.delayed(Duration.zero);
+    }
+    _scheduleNotificationArtRefresh();
+  }
+
+  Future<void> _loadCurrentFastStart({
+    required int logical,
+    required List<int> sourceOrder,
+    required Duration initialPosition,
+  }) async {
+    _deferMetadataEnrichForPlaylistIndex(logical);
+    final source = await _audioSourceForPlaylistIndex(
+      logical,
+      resolveArtUri: false,
+    );
+    if (source == null) {
+      debugPrint('_loadCurrentFastStart: no AudioSource for playlist index $logical');
+      return;
+    }
+    _concatSource = ConcatenatingAudioSource(
+      useLazyPreparation: _concatUseLazyPreparationForPlatform(),
+      children: [source],
+    );
+    _activeSourceOrder = [logical];
+    await _player.setAudioSource(
+      _concatSource!,
+      initialIndex: 0,
+      initialPosition: initialPosition,
+    );
+    await _applyPreferredVolume();
+    _postLoadExpectedConcatIndex = 0;
+    _postLoadConcatGuardUntil = DateTime.now().add(
+      const Duration(milliseconds: 650),
+    );
+    _sourceNeedsReload = false;
+    debugPrint(
+      '_loadCurrentFastStart: playing index $logical, expanding '
+      '${sourceOrder.length - 1} more tracks in background',
+    );
+    unawaited(_expandConcatToFullOrder(sourceOrder, logical));
+  }
+
   bool _isConcatAutoAdvance(int concatIdx) {
     final currentConcatIdx = _concatIndexForLogical(_logicalPlaylistIndex());
     return currentConcatIdx != null && concatIdx != currentConcatIdx;
@@ -738,7 +1064,7 @@ class PlayerController {
     int? concatIndex,
   }) async {
     if (_suppressTrackCompletedAdvance || _isLoadingSource) return;
-    if (_playlist.isEmpty || _repeat != PlaylistRepeatMode.one) return;
+    if (_playlistPaths.isEmpty || _repeat != PlaylistRepeatMode.one) return;
     if (_stopAtTrackEndForSleepTimer) return;
 
     final idx = concatIndex ?? _concatIndexForLogical(_logicalPlaylistIndex());
@@ -870,28 +1196,6 @@ class PlayerController {
     prewarmAlbumArtCache(tracks, maxCount: tracks.length);
   }
 
-  /// Playlist indices in [sourceOrder] that should get [MediaItem.artUri] when
-  /// building a concat source. Large libraries only tag the current item so
-  /// scan/load does not rasterize thousands of covers.
-  List<int> _notificationArtPlaylistIndices(
-    List<int> sourceOrder,
-    int logical,
-  ) {
-    if (sourceOrder.isEmpty) return const <int>[];
-    if (_playlist.length <= 80) return List<int>.from(sourceOrder);
-    final pos = sourceOrder.indexOf(logical);
-    if (pos < 0) return <int>[logical];
-    const radius = 2;
-    final out = <int>{};
-    for (var d = -radius; d <= radius; d++) {
-      final i = pos + d;
-      if (i >= 0 && i < sourceOrder.length) {
-        out.add(sourceOrder[i]);
-      }
-    }
-    return out.toList();
-  }
-
   /// During [setAudioSource] with lazy preparation, [currentIndexStream] can briefly
   /// report index `0`. That value is queued as [_pendingConcatIndexWhileLoading] and
   /// would otherwise overwrite [_index] in [_loadCurrent]'s `finally`, switching the
@@ -906,8 +1210,8 @@ class PlayerController {
         : _effectiveQueueOrder();
     if (concatIdx < 0 || concatIdx >= order.length) return false;
     final pl = order[concatIdx];
-    if (pl < 0 || pl >= _playlist.length) return false;
-    final fp = _playlist[pl].filePath?.trim();
+    if (pl < 0 || pl >= _playlistPaths.length) return false;
+    final fp = _pathAt(pl)?.trim();
     if (fp == null || fp.isEmpty) return false;
     return canonicalMusicLibraryPathKey(fp) == loadTargetKey;
   }
@@ -927,18 +1231,20 @@ class PlayerController {
           : null;
     }
     final preserveShuffle = keepShuffleMode && _shuffle && tracks.length > 1;
-    _playlist = List<TrackItem>.from(tracks);
-    _index = _playlist.isEmpty ? 0 : startIndex.clamp(0, _playlist.length - 1);
+    _assignPlaylistFromTracks(tracks);
+    _index = _playlistPaths.isEmpty
+        ? 0
+        : startIndex.clamp(0, _playlistPaths.length - 1);
     if (preserveShuffle) {
       final cur = _index;
-      final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
       _shuffle = true;
     } else if (enableShuffle && tracks.length > 1) {
       final cur = _index;
-      final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
@@ -961,7 +1267,7 @@ class PlayerController {
     if (origin != null && origin != LibraryTabId.songs) {
       return false;
     }
-    if (_playlist.isEmpty) return false;
+    if (_playlistPaths.isEmpty) return false;
 
     final byKey = <String, TrackItem>{};
     for (final t in catalogTracks) {
@@ -973,17 +1279,17 @@ class PlayerController {
     if (byKey.isEmpty) return true;
 
     var changed = false;
-    for (var i = 0; i < _playlist.length; i++) {
-      final fp = _playlist[i].filePath?.trim();
-      if (fp == null || fp.isEmpty) continue;
-      final k = canonicalMusicLibraryPathKey(fp);
-      final fresh = byKey[k];
-      if (fresh != null && fresh != _playlist[i]) {
-        _playlist[i] = fresh;
+    for (final path in _playlistPaths) {
+      final k = canonicalMusicLibraryPathKey(path);
+      if (k.isNotEmpty && byKey.containsKey(k)) {
         changed = true;
+        break;
       }
     }
-    if (changed) queue.notifyNow();
+    if (changed) {
+      _invalidatePlaylistCache();
+      queue.notifyNow();
+    }
     return true;
   }
 
@@ -1010,18 +1316,19 @@ class PlayerController {
       return;
     }
 
+    final newPaths = _pathsForTracks(tracks);
+    if (listEquals(_playlistPaths, newPaths)) return;
+
     final pathPreserve = currentTrack?.filePath?.trim();
     final keepShuffle = _shuffle && tracks.length > 1;
-    _playlist = List<TrackItem>.from(tracks);
+    _assignPlaylistFromTracks(tracks);
 
     var newIndex = 0;
     if (pathPreserve != null && pathPreserve.isNotEmpty) {
       final preserveKey = canonicalMusicLibraryPathKey(pathPreserve);
       if (preserveKey.isNotEmpty) {
-        final ix = _playlist.indexWhere(
-          (t) =>
-              canonicalMusicLibraryPathKey((t.filePath ?? '').trim()) ==
-              preserveKey,
+        final ix = _playlistPaths.indexWhere(
+          (p) => canonicalMusicLibraryPathKey(p) == preserveKey,
         );
         if (ix >= 0) newIndex = ix;
       }
@@ -1029,7 +1336,7 @@ class PlayerController {
 
     if (keepShuffle) {
       final cur = newIndex;
-      final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
@@ -1044,10 +1351,12 @@ class PlayerController {
     await _loadCurrent(initialPosition: resumePosition, stopBeforeLoad: false);
     _sourceNeedsReload = false;
     if (resumePlaying) {
-      _playbackPausedByUser = false;
-      await _resumePlaybackAfterLoad(
-        context: 'tryResyncQueueWithLibraryScan.play',
-      );
+      await _guardedTransport(() async {
+        _playbackPausedByUser = false;
+        await _resumePlaybackAfterLoad(
+          context: 'tryResyncQueueWithLibraryScan.play',
+        );
+      });
     } else {
       await pause();
     }
@@ -1059,25 +1368,78 @@ class PlayerController {
   /// Shuffle is turned off so indices stay consistent (current song keeps playing).
   Future<void> appendToPlaylist(List<TrackItem> items) async {
     if (items.isEmpty) return;
-    final wasEmpty = _playlist.isEmpty;
+    final wasEmpty = _playlistPaths.isEmpty;
     final resumePos = wasEmpty ? Duration.zero : _player.position;
-    if (_shuffle && _playlist.isNotEmpty) {
-      _index = _shuffleOrder[_shufflePos].clamp(0, _playlist.length - 1);
+    if (_shuffle && _playlistPaths.isNotEmpty) {
+      _index = _shuffleOrder[_shufflePos].clamp(0, _playlistPaths.length - 1);
       _shuffle = false;
       _shuffleOrder = [];
       _shufflePos = 0;
     }
-    _playlist = [..._playlist, ...items];
+    final oldLen = _playlistPaths.length;
+    _playlistPaths = [..._playlistPaths, ..._pathsForTracks(items)];
+    _invalidatePlaylistCache();
     _notifyTrackPlaybackQueue();
     if (wasEmpty) {
       _index = 0;
-      await _loadCurrent();
-      await _resumePlaybackAfterLoad(
-        context: 'appendToPlaylist.play',
-      );
-    } else {
-      await _loadCurrent(initialPosition: resumePos);
+      await _guardedTransport(() async {
+        await _loadCurrent();
+        await _resumePlaybackAfterLoad(
+          context: 'appendToPlaylist.play',
+        );
+      });
+      return;
     }
+    final newIndices = List<int>.generate(items.length, (i) => oldLen + i);
+    final order = _effectiveQueueOrder();
+    final toAppend = order.where(newIndices.contains).toList();
+    if (await _appendPlaylistIndicesToConcat(toAppend)) {
+      return;
+    }
+    await _loadCurrent(initialPosition: resumePos);
+  }
+
+  /// Sets the queue from [paths] (tags resolved from [LibraryCatalog]) and loads audio.
+  Future<void> setPlaylistPaths(
+    List<String> paths, {
+    int startIndex = 0,
+    LibraryTabId? playbackOriginTab,
+    String? playbackOriginUserPlaylistId,
+    bool keepShuffleMode = false,
+    bool enableShuffle = false,
+  }) async {
+    if (playbackOriginTab != null) {
+      _playbackOriginTab = playbackOriginTab;
+      _playbackOriginUserPlaylistId = playbackOriginTab == LibraryTabId.playlist
+          ? playbackOriginUserPlaylistId
+          : null;
+    }
+    final trackCount = paths.length;
+    final preserveShuffle = keepShuffleMode && _shuffle && trackCount > 1;
+    _setPlaylistPaths(paths);
+    _index = _playlistPaths.isEmpty
+        ? 0
+        : startIndex.clamp(0, _playlistPaths.length - 1);
+    if (preserveShuffle) {
+      final cur = _index;
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
+      order.remove(cur);
+      _shuffleOrder = [cur, ...order];
+      _shufflePos = 0;
+      _shuffle = true;
+    } else if (enableShuffle && trackCount > 1) {
+      final cur = _index;
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
+      order.remove(cur);
+      _shuffleOrder = [cur, ...order];
+      _shufflePos = 0;
+      _shuffle = true;
+    } else {
+      _resetShuffleState();
+    }
+    _notifyTrackPlaybackQueue();
+    await _loadCurrent();
+    _sourceNeedsReload = false;
   }
 
   /// Replaces the queue with [tracks] and starts playback at [startIndex].
@@ -1089,41 +1451,59 @@ class PlayerController {
     bool keepShuffleMode = false,
     bool enableShuffle = false,
   }) async {
-    _playbackPausedByUser = false;
-    await setPlaylist(
-      tracks,
-      startIndex: startIndex,
-      playbackOriginTab: playbackOriginTab,
-      playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
-      keepShuffleMode: keepShuffleMode,
-      enableShuffle: enableShuffle,
-    );
-    // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
-    // returns; [play] can no-op until [ProcessingState.ready].
-    await _resumePlaybackAfterLoad(
-      context: 'setPlaylistAndPlay.play',
-    );
+    await _guardedTransport(() async {
+      _playbackPausedByUser = false;
+      await setPlaylist(
+        tracks,
+        startIndex: startIndex,
+        playbackOriginTab: playbackOriginTab,
+        playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
+        keepShuffleMode: keepShuffleMode,
+        enableShuffle: enableShuffle,
+      );
+      // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
+      // returns; [play] can no-op until [ProcessingState.ready].
+      await _resumePlaybackAfterLoad(
+        context: 'setPlaylistAndPlay.play',
+      );
+    });
   }
 
-  static bool _sameQueuedIdentity(TrackItem a, TrackItem b) {
-    final pa = a.filePath;
-    final pb = b.filePath;
-    if (pa != null && pa.isNotEmpty && pb != null && pb.isNotEmpty) {
-      return pa == pb;
-    }
-    return a.title == b.title && a.artist == b.artist;
+  /// Path-key queue + play (avoids copying [TrackItem] rows from the catalog).
+  Future<void> setPlaylistPathsAndPlay(
+    List<String> paths, {
+    int startIndex = 0,
+    LibraryTabId? playbackOriginTab,
+    String? playbackOriginUserPlaylistId,
+    bool keepShuffleMode = false,
+    bool enableShuffle = false,
+  }) async {
+    await _guardedTransport(() async {
+      _playbackPausedByUser = false;
+      await setPlaylistPaths(
+        paths,
+        startIndex: startIndex,
+        playbackOriginTab: playbackOriginTab,
+        playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
+        keepShuffleMode: keepShuffleMode,
+        enableShuffle: enableShuffle,
+      );
+      await _resumePlaybackAfterLoad(
+        context: 'setPlaylistPathsAndPlay.play',
+      );
+    });
   }
 
   /// Whether [track] is already in the queue (same path or same title + artist).
   bool isTrackInPlaylist(TrackItem track) =>
-      _playlist.any((t) => _sameQueuedIdentity(t, track));
+      _anyQueuePath((p) => _sameQueuePathAndTrack(p, track));
 
   /// Appends [track] to the end of the queue only if it is not already present.
   /// Returns `false` if it was already queued (same file path, or same title + artist
   /// when paths are missing). Starts playback if the queue was empty and the track
   /// was added.
   Future<bool> addToPlaylistIfAbsent(TrackItem track) async {
-    if (_playlist.any((t) => _sameQueuedIdentity(t, track))) {
+    if (isTrackInPlaylist(track)) {
       return false;
     }
     await appendToPlaylist([track]);
@@ -1139,14 +1519,17 @@ class PlayerController {
     TrackItem track, {
     LibraryTabId? playbackOriginTab,
   }) async {
-    if (_playlist.isEmpty) {
+    if (_playlistPaths.isEmpty) {
       await setPlaylistAndPlay([track], playbackOriginTab: playbackOriginTab);
       return true;
     }
 
+    final trackPath = _pathForTrack(track);
+    if (trackPath == null) return false;
+
     int? existingIx;
-    for (var i = 0; i < _playlist.length; i++) {
-      if (_sameQueuedIdentity(_playlist[i], track)) {
+    for (var i = 0; i < _playlistPaths.length; i++) {
+      if (_sameQueuePathAndTrack(_playlistPaths[i], track)) {
         existingIx = i;
         break;
       }
@@ -1157,13 +1540,20 @@ class PlayerController {
         return false;
       }
       if (existingIx != null) {
-        _playlist.removeAt(existingIx);
+        await _removeConcatChildAtPlaylistIndex(existingIx);
+        _playlistPaths.removeAt(existingIx);
+        _invalidatePlaylistCache();
         if (existingIx < _index) {
           _index--;
         }
       }
-      final insertAt = (_index + 1).clamp(0, _playlist.length);
-      _playlist.insert(insertAt, track);
+      final insertAt = (_index + 1).clamp(0, _playlistPaths.length);
+      _playlistPaths.insert(insertAt, trackPath);
+      _invalidatePlaylistCache();
+      if (await _insertPlaylistIndexIntoConcat(insertAt)) {
+        _notifyTrackPlaybackQueue();
+        return true;
+      }
       _sourceNeedsReload = true;
       _notifyTrackPlaybackQueue();
       return true;
@@ -1176,32 +1566,9 @@ class PlayerController {
     if (existingIx != null) {
       _removePlaylistIndexWhileShuffling(existingIx);
     }
-    if (!_shuffle) {
-      int? ex;
-      for (var i = 0; i < _playlist.length; i++) {
-        if (_sameQueuedIdentity(_playlist[i], track)) {
-          ex = i;
-          break;
-        }
-      }
-      if (ex == _index) {
-        return false;
-      }
-      if (ex != null) {
-        _playlist.removeAt(ex);
-        if (ex < _index) {
-          _index--;
-        }
-      }
-      final insertAt = (_index + 1).clamp(0, _playlist.length);
-      _playlist.insert(insertAt, track);
-      _sourceNeedsReload = true;
-      _notifyTrackPlaybackQueue();
-      return true;
-    }
-
-    _playlist.add(track);
-    final newIx = _playlist.length - 1;
+    _playlistPaths.add(trackPath);
+    _invalidatePlaylistCache();
+    final newIx = _playlistPaths.length - 1;
     final insertPos = (_shufflePos + 1).clamp(0, _shuffleOrder.length);
     _shuffleOrder.insert(insertPos, newIx);
 
@@ -1214,7 +1581,8 @@ class PlayerController {
     final curKey = canonicalMusicLibraryPathKey(
       (currentTrack?.filePath ?? '').trim(),
     );
-    _playlist.removeAt(rm);
+    _playlistPaths.removeAt(rm);
+    _invalidatePlaylistCache();
     final nextOrder = <int>[];
     for (final oi in _shuffleOrder) {
       if (oi == rm) continue;
@@ -1222,26 +1590,26 @@ class PlayerController {
     }
     _shuffleOrder = nextOrder;
     if (_shuffleOrder.isEmpty) {
-      if (_playlist.isEmpty) {
+      if (_playlistPaths.isEmpty) {
         _resetShuffleState();
         return;
       }
       _shuffle = false;
       _shuffleOrder = [];
       _shufflePos = 0;
-      _index = _index.clamp(0, _playlist.length - 1);
+      _index = _index.clamp(0, _playlistPaths.length - 1);
       return;
     }
     if (curKey.isEmpty) {
       _shufflePos = _shufflePos.clamp(0, _shuffleOrder.length - 1);
-      _index = _shuffleOrder[_shufflePos].clamp(0, _playlist.length - 1);
+      _index = _shuffleOrder[_shufflePos].clamp(0, _playlistPaths.length - 1);
       return;
     }
     var found = false;
     for (var i = 0; i < _shuffleOrder.length; i++) {
       final pi = _shuffleOrder[i];
-      if (pi < 0 || pi >= _playlist.length) continue;
-      final fp = _playlist[pi].filePath?.trim() ?? '';
+      if (pi < 0 || pi >= _playlistPaths.length) continue;
+      final fp = _pathAt(pi)?.trim() ?? '';
       if (fp.isNotEmpty && canonicalMusicLibraryPathKey(fp) == curKey) {
         _shufflePos = i;
         _index = pi;
@@ -1251,7 +1619,7 @@ class PlayerController {
     }
     if (!found) {
       _shufflePos = 0;
-      _index = _shuffleOrder[0].clamp(0, _playlist.length - 1);
+      _index = _shuffleOrder[0].clamp(0, _playlistPaths.length - 1);
     }
   }
 
@@ -1300,13 +1668,16 @@ class PlayerController {
             !listEquals(cur.albumArtBytes, updated.albumArtBytes));
 
     var changed = false;
-    for (var i = 0; i < _playlist.length; i++) {
-      final fp = _playlist[i].filePath;
-      if (fp != null && canonicalMusicLibraryPathKey(fp) == key) {
-        _playlist[i] = updated;
+    for (var i = 0; i < _playlistPaths.length; i++) {
+      if (canonicalMusicLibraryPathKey(_playlistPaths[i]) == key) {
         changed = true;
+        final newPath = updated.filePath?.trim();
+        if (newPath != null && newPath.isNotEmpty) {
+          _playlistPaths[i] = newPath;
+        }
       }
     }
+    if (changed) _invalidatePlaylistCache();
     if (_libraryCatalog.updateAtPath(path, updated)) {
       changed = true;
     }
@@ -1343,7 +1714,7 @@ class PlayerController {
   /// Pushes late artwork to the Android/iOS media notification without
   /// reloading the audio source or resetting the native decoder.
   Future<void> _refreshNotificationAlbumArt() async {
-    if (_playlist.isEmpty) return;
+    if (_playlistPaths.isEmpty) return;
     if (_notificationArtRefreshInProgress) return;
     _notificationArtRefreshInProgress = true;
     try {
@@ -1424,13 +1795,16 @@ class PlayerController {
         (isCurrentTrackPathBeingReplaced ? _player.position : Duration.zero);
     final oldKey = canonicalMusicLibraryPathKey(oldPath);
     var changed = false;
-    for (var i = 0; i < _playlist.length; i++) {
-      final fp = _playlist[i].filePath;
-      if (fp != null && canonicalMusicLibraryPathKey(fp) == oldKey) {
-        _playlist[i] = updated;
+    final newPath = updated.filePath?.trim();
+    for (var i = 0; i < _playlistPaths.length; i++) {
+      if (canonicalMusicLibraryPathKey(_playlistPaths[i]) == oldKey) {
+        if (newPath != null && newPath.isNotEmpty) {
+          _playlistPaths[i] = newPath;
+        }
         changed = true;
       }
     }
+    if (changed) _invalidatePlaylistCache();
     if (_libraryCatalog.updateAtPath(oldPath, updated)) {
       changed = true;
     }
@@ -1461,27 +1835,26 @@ class PlayerController {
   }
 
   bool _prunePlaylistPathsNotInCatalog() {
-    if (_libraryCatalog.isEmpty || _playlist.isEmpty) return false;
+    if (_libraryCatalog.isEmpty || _playlistPaths.isEmpty) return false;
     final validKeys = _libraryCatalog.canonicalPathKeys;
     if (validKeys.isEmpty) return false;
 
-    final before = _playlist.length;
-    _playlist.removeWhere((t) {
-      final fp = t.filePath;
-      if (fp == null || fp.trim().isEmpty) return true;
-      final k = canonicalMusicLibraryPathKey(fp);
+    final before = _playlistPaths.length;
+    _playlistPaths.removeWhere((path) {
+      final k = canonicalMusicLibraryPathKey(path);
       if (k.isEmpty) return true;
       return !validKeys.contains(k);
     });
-    if (_playlist.length == before) return false;
+    if (_playlistPaths.length == before) return false;
+    _invalidatePlaylistCache();
 
-    if (_playlist.isEmpty) {
+    if (_playlistPaths.isEmpty) {
       _index = 0;
       _resetShuffleState();
     } else {
-      _index = _index.clamp(0, _playlist.length - 1);
+      _index = _index.clamp(0, _playlistPaths.length - 1);
       if (_shuffle) {
-        _shuffleOrder = List<int>.generate(_playlist.length, (i) => i);
+        _shuffleOrder = List<int>.generate(_playlistPaths.length, (i) => i);
         _shufflePos = _shufflePos.clamp(0, _shuffleOrder.length - 1);
       }
     }
@@ -1498,10 +1871,10 @@ class PlayerController {
     int i, {
     bool resumePlayingIfCurrentRemoved = false,
   }) async {
-    if (_playlist.isEmpty || i < 0 || i >= _playlist.length) return;
+    if (_playlistPaths.isEmpty || i < 0 || i >= _playlistPaths.length) return;
 
     if (_shuffle) {
-      _index = currentIndex.clamp(0, _playlist.length - 1);
+      _index = currentIndex.clamp(0, _playlistPaths.length - 1);
       _resetShuffleState();
     }
 
@@ -1510,11 +1883,17 @@ class PlayerController {
       await stopForExternalFileEdit();
     }
 
-    _playlist.removeAt(i);
+    final removedViaConcat =
+        !isCurrent && await _removeConcatChildAtPlaylistIndex(i);
 
-    final len = _playlist.length;
+    _playlistPaths.removeAt(i);
+    _invalidatePlaylistCache();
+
+    final len = _playlistPaths.length;
     if (len == 0) {
       _index = 0;
+      _concatSource = null;
+      _activeSourceOrder = <int>[];
       _notifyTrackPlaybackQueue();
       return;
     }
@@ -1527,19 +1906,23 @@ class PlayerController {
 
     _notifyTrackPlaybackQueue();
     if (isCurrent) {
-      await _loadCurrent();
-      if (resumePlayingIfCurrentRemoved) {
-        await _resumePlaybackAfterLoad(
-          context: 'removePlaylistEntryAt.resume',
-        );
-      }
+      await _guardedTransport(() async {
+        await _loadCurrent();
+        if (resumePlayingIfCurrentRemoved) {
+          await _resumePlaybackAfterLoad(
+            context: 'removePlaylistEntryAt.resume',
+          );
+        }
+      });
+    } else if (removedViaConcat) {
+      return;
     } else {
       await _loadCurrent(initialPosition: _player.position);
     }
   }
 
   Future<void> jumpToIndex(int i, {bool autoPlay = true}) async {
-    if (i < 0 || i >= _playlist.length) return;
+    if (i < 0 || i >= _playlistPaths.length) return;
     if (autoPlay) {
       _playbackPausedByUser = false;
     }
@@ -1548,7 +1931,7 @@ class PlayerController {
     }
     if (_shuffle) {
       _shuffleOrder.remove(i);
-      final rest = List<int>.generate(_playlist.length, (j) => j)
+      final rest = List<int>.generate(_playlistPaths.length, (j) => j)
         ..remove(i)
         ..shuffle();
       _shuffleOrder = [i, ...rest];
@@ -1557,11 +1940,15 @@ class PlayerController {
       _index = i;
     }
     _notifyTrackPlaybackQueue();
-    await _loadCurrent();
     if (autoPlay) {
-      await _resumePlaybackAfterLoad(
-        context: 'jumpToIndex.play',
-      );
+      await _guardedTransport(() async {
+        await _loadCurrent();
+        await _resumePlaybackAfterLoad(
+          context: 'jumpToIndex.play',
+        );
+      });
+    } else {
+      await _loadCurrent();
     }
   }
 
@@ -1583,8 +1970,9 @@ class PlayerController {
       _shufflePos = _shuffleOrder.indexOf(curPl);
       if (_shufflePos < 0) _shufflePos = 0;
     } else {
-      final moving = _playlist.removeAt(oldOrderIndex);
-      _playlist.insert(newOrderIndex, moving);
+      final moving = _playlistPaths.removeAt(oldOrderIndex);
+      _playlistPaths.insert(newOrderIndex, moving);
+      _invalidatePlaylistCache();
       if (oldOrderIndex == _index) {
         _index = newOrderIndex;
       } else if (oldOrderIndex < _index && newOrderIndex >= _index) {
@@ -1612,6 +2000,7 @@ class PlayerController {
           await _player.stop();
         } catch (_) {}
       }
+      _concatSource = null;
       _activeSourceOrder = <int>[];
       _notifyTrackPlaybackQueue();
       return;
@@ -1627,14 +2016,19 @@ class PlayerController {
     _loadCurrentDepth++;
     _isLoadingSource = true;
     try {
-      if (_prunePlaylistPathsNotInCatalog() && _playlist.isNotEmpty) {
+      if (_prunePlaylistPathsNotInCatalog() && _playlistPaths.isNotEmpty) {
         _notifyTrackPlaybackQueue();
       }
       final order = _effectiveQueueOrder();
-      if (order.isEmpty || _playlist.isEmpty) {
+      if (order.isEmpty || _playlistPaths.isEmpty) {
+        debugPrint(
+          '_loadCurrent: no playable order (playlist=${_playlistPaths.length} '
+          'scope=${_playbackPathKeysScope?.length})',
+        );
         try {
           await _player.stop();
         } catch (_) {}
+        _concatSource = null;
         _activeSourceOrder = <int>[];
         _notifyTrackPlaybackQueue();
         return;
@@ -1654,8 +2048,8 @@ class PlayerController {
           _shufflePos = spi >= 0 ? spi : 0;
         }
       }
-      if (logical < 0 || logical >= _playlist.length) {
-        logical = order.first.clamp(0, _playlist.length - 1);
+      if (logical < 0 || logical >= _playlistPaths.length) {
+        logical = order.first.clamp(0, _playlistPaths.length - 1);
         _index = logical;
         if (_shuffle) {
           final spi = _shuffleOrder.indexOf(logical);
@@ -1663,76 +2057,50 @@ class PlayerController {
         }
       }
 
-      final enrichPath = _playlist[logical].filePath?.trim();
-      if (enrichPath != null &&
-          enrichPath.isNotEmpty &&
-          (_playlist[logical].albumArtBytes == null ||
-              _playlist[logical].albumArtBytes!.isEmpty)) {
-        final enriched = await readAudioMetadata(_playlist[logical]);
-        if (enriched.albumArtBytes != null &&
-            enriched.albumArtBytes!.isNotEmpty) {
-          updateTrackByPath(
-            enrichPath,
-            enriched,
-            refreshNotificationArt: false,
-          );
-        }
-      }
+      _deferMetadataEnrichForPlaylistIndex(logical);
 
-      final children = <AudioSource>[];
-      final loadedOrder = <int>[];
-      var initialConcatIndex = 0;
-      var concatPos = 0;
       final sourceOrder = _useSingleTrackAudioSourceForPlatform()
           ? <int>[logical]
           : order;
 
-      final logicalTrack = logical >= 0 && logical < _playlist.length
-          ? _playlist[logical]
-          : preview;
-      final artIndices = _notificationArtPlaylistIndices(sourceOrder, logical);
-      final notificationArtUris = <int, Uri?>{};
-      await Future.wait(
-        artIndices.map((pi) async {
-          if (pi < 0 || pi >= _playlist.length) return;
-          notificationArtUris[pi] =
-              await uriForNotificationAlbumArt(_playlist[pi]);
-        }),
-      );
-      if (logical >= 0 &&
-          logical < _playlist.length &&
-          !notificationArtUris.containsKey(logical)) {
-        notificationArtUris[logical] =
-            await uriForNotificationAlbumArt(logicalTrack);
-      }
-
-      for (final pi in sourceOrder) {
-        if (pi < 0 || pi >= _playlist.length) continue;
-        final t = _playlist[pi];
-        final fp = t.filePath?.trim();
-        if (fp == null || fp.isEmpty) continue;
-
-        final artUri = notificationArtUris[pi];
-        children.add(
-          AudioSource.uri(
-            Uri.file(fp),
-            tag: MediaItem(
-              id: fp,
-              title: t.title,
-              artist: t.artist,
-              album: t.metaLine,
-              artUri: artUri,
-            ),
-          ),
+      final useFastStart = !_useSingleTrackAudioSourceForPlatform() &&
+          sourceOrder.length > _fastStartConcatThreshold;
+      if (useFastStart) {
+        await _loadCurrentFastStart(
+          logical: logical,
+          sourceOrder: sourceOrder,
+          initialPosition: initialPosition,
         );
+      } else {
+      final children = <AudioSource>[];
+      final loadedOrder = <int>[];
+      var initialConcatIndex = 0;
+      var concatPos = 0;
+
+      var built = 0;
+      for (final pi in sourceOrder) {
+        if (pi < 0 || pi >= _playlistPaths.length) continue;
+        final source = await _audioSourceForPlaylistIndex(
+          pi,
+          resolveArtUri: false,
+        );
+        if (source == null) continue;
+
+        children.add(source);
         loadedOrder.add(pi);
         if (pi == logical) {
           initialConcatIndex = concatPos;
         }
         concatPos++;
+        built++;
+        // Yield so very large queues do not freeze the UI isolate.
+        if (built % 64 == 0) {
+          await Future<void>.delayed(Duration.zero);
+        }
       }
 
       if (children.isEmpty) {
+        _concatSource = null;
         _activeSourceOrder = <int>[];
         _notifyTrackPlaybackQueue();
         return;
@@ -1741,16 +2109,18 @@ class PlayerController {
       _activeSourceOrder = loadedOrder;
 
       if (_useSingleTrackAudioSourceForPlatform()) {
+        _concatSource = null;
         await _player.setAudioSource(
           children.single,
           initialPosition: initialPosition,
         );
       } else {
+        _concatSource = ConcatenatingAudioSource(
+          useLazyPreparation: _concatUseLazyPreparationForPlatform(),
+          children: children,
+        );
         await _player.setAudioSource(
-          ConcatenatingAudioSource(
-            useLazyPreparation: _concatUseLazyPreparationForPlatform(),
-            children: children,
-          ),
+          _concatSource!,
           initialIndex: initialConcatIndex,
           initialPosition: initialPosition,
         );
@@ -1761,13 +2131,14 @@ class PlayerController {
         const Duration(milliseconds: 650),
       );
       _sourceNeedsReload = false;
+      } // !useFastStart
     } catch (e, st) {
       debugPrint('Playback load error: $e\n$st');
       if (retryAfterMissingPath) {
         final missingPath = _extractMissingPathFromLoadError(e);
         if (missingPath != null && missingPath.isNotEmpty) {
           final removed = _removeMissingTrackPath(missingPath);
-          if (removed && _playlist.isNotEmpty) {
+          if (removed && _playlistPaths.isNotEmpty) {
             await _loadCurrent(
               initialPosition: Duration.zero,
               stopBeforeLoad: true,
@@ -1813,20 +2184,23 @@ class PlayerController {
   }
 
   bool _removeMissingTrackPath(String path) {
-    final beforePlaylist = _playlist.length;
-    _playlist.removeWhere((t) => t.filePath == path);
+    final beforePlaylist = _playlistPaths.length;
+    _playlistPaths.removeWhere(
+      (p) => canonicalMusicLibraryPathKey(p) == canonicalMusicLibraryPathKey(path),
+    );
+    _invalidatePlaylistCache();
     final beforeCatalog = _libraryCatalog.length;
     _libraryCatalog.removeAtPath(path);
 
-    if (_playlist.isEmpty) {
+    if (_playlistPaths.isEmpty) {
       _index = 0;
       _resetShuffleState();
     } else {
-      if (_index >= _playlist.length) {
-        _index = _playlist.length - 1;
+      if (_index >= _playlistPaths.length) {
+        _index = _playlistPaths.length - 1;
       }
       if (_shuffle) {
-        _shuffleOrder = List<int>.generate(_playlist.length, (i) => i);
+        _shuffleOrder = List<int>.generate(_playlistPaths.length, (i) => i);
         if (_shufflePos >= _shuffleOrder.length) {
           _shufflePos = _shuffleOrder.length - 1;
         }
@@ -1834,7 +2208,7 @@ class PlayerController {
     }
 
     final changed =
-        _playlist.length != beforePlaylist ||
+        _playlistPaths.length != beforePlaylist ||
         _libraryCatalog.length != beforeCatalog;
     if (changed) queue.notifyNow();
     return changed;
@@ -1980,10 +2354,14 @@ class PlayerController {
     int playlistIndex, {
     required String playContext,
   }) async {
+    Future<void> reloadAndPlay() => _guardedTransport(() async {
+          await _loadCurrent();
+          _sourceNeedsReload = false;
+          await _resumePlaybackAfterLoad(context: playContext);
+        });
+
     if (_sourceNeedsReload || _useSingleTrackAudioSourceForPlatform()) {
-      await _loadCurrent();
-      _sourceNeedsReload = false;
-      await _resumePlaybackAfterLoad(context: playContext);
+      await reloadAndPlay();
       return;
     }
     final order = _activeSourceOrder.isNotEmpty
@@ -1991,9 +2369,7 @@ class PlayerController {
         : _effectiveQueueOrder();
     final concatIndex = order.indexOf(playlistIndex);
     if (concatIndex < 0) {
-      await _loadCurrent();
-      _sourceNeedsReload = false;
-      await _resumePlaybackAfterLoad(context: playContext);
+      await reloadAndPlay();
       return;
     }
     try {
@@ -2001,22 +2377,18 @@ class PlayerController {
       await _waitForPlayerPreparedAfterSourceChange();
       final actual = _player.currentIndex;
       if (actual != null && actual != concatIndex) {
-        await _loadCurrent();
-        _sourceNeedsReload = false;
-        await _resumePlaybackAfterLoad(context: playContext);
+        await reloadAndPlay();
         return;
       }
       await _playSafely(context: playContext);
     } catch (_) {
-      await _loadCurrent();
-      _sourceNeedsReload = false;
-      await _resumePlaybackAfterLoad(context: playContext);
+      await reloadAndPlay();
     }
   }
 
   /// Next track; at end pauses unless [PlaylistRepeatMode.all].
   Future<void> skipNext() async {
-    if (_playlist.isEmpty) return;
+    if (_playlistPaths.isEmpty) return;
     _playbackPausedByUser = false;
     _manualQueueAdvance = true;
     try {
@@ -2080,7 +2452,7 @@ class PlayerController {
   }
 
   Future<void> skipPrevious() async {
-    if (_playlist.isEmpty) return;
+    if (_playlistPaths.isEmpty) return;
     _playbackPausedByUser = false;
     _manualQueueAdvance = true;
     try {
@@ -2144,7 +2516,7 @@ class PlayerController {
   }
 
   void toggleShuffle() {
-    if (_playlist.length < 2) return;
+    if (_playlistPaths.length < 2) return;
     if (_shuffle) {
       _index = _shuffleOrder[_shufflePos];
       _shuffle = false;
@@ -2155,12 +2527,13 @@ class PlayerController {
         _playbackPathKeysScope = null;
       }
       final cur = _index;
-      final order = List<int>.generate(_playlist.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
       _shuffle = true;
     }
+    _sourceNeedsReload = true;
     _notifyTrackPlaybackQueue();
   }
 
@@ -2175,7 +2548,7 @@ class PlayerController {
 
   /// Persisted playback snapshot (`PlaybackSessionStore` v2 schema).
   Map<String, dynamic> buildPlaybackPersistenceJson() {
-    final paths = _playlist.map((t) => t.filePath).whereType<String>().toList();
+    final paths = List<String>.from(_playlistPaths);
     final ct = currentTrack;
     final curKey = ct?.filePath == null
         ? ''
@@ -2222,9 +2595,9 @@ class PlayerController {
 
     _repeat = repeat;
 
-    _playlist = List<TrackItem>.from(queue);
+    _assignPlaylistFromTracks(queue);
 
-    if (_playlist.isEmpty) {
+    if (_playlistPaths.isEmpty) {
       _resetShuffleState();
       _index = 0;
       try {
@@ -2234,7 +2607,7 @@ class PlayerController {
       return;
     }
 
-    final n = _playlist.length;
+    final n = _playlistPaths.length;
     bool validShuffle =
         shuffle &&
         shuffleOrder.length == n &&
@@ -2287,9 +2660,7 @@ class PlayerController {
   }
 
   void dispose() {
-    _catalogNotifyThrottleTimer?.cancel();
-    _catalogNotifyThrottleTimer = null;
-    _catalogNotifyThrottlePending = false;
+    queue.cancelThrottle();
     _notificationArtRefreshDebounce?.cancel();
     _notificationArtRefreshDebounce = null;
     _audioInterruptionSub?.cancel();

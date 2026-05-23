@@ -11,6 +11,12 @@ Future<Uint8List?> cachedAlbumArt(TrackItem track, {int maxDimension = 512}) {
 
 void evictCachedAlbumArt(TrackItem track) {}
 
+Future<void> prewarmPathAlbumArtForPaths(
+  Iterable<String> filePaths, {
+  int maxCount = 15,
+  int maxDimension = 192,
+}) async {}
+
 void prewarmAlbumArtCache(
   Iterable<TrackItem> tracks, {
   int maxCount = 50,

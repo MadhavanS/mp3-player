@@ -97,28 +97,40 @@ class PlaybackNotifier extends ChangeNotifier {
   bool _scheduled = false;
 }
 
-/// Playlist, shuffle, repeat, library catalog.
+/// Playlist, shuffle, repeat, library catalog size/order.
 class QueueNotifier extends ChangeNotifier {
-  Timer? _throttle;
-  bool _pending = false;
+  Timer? _throttleTimer;
+  bool _pendingNotify = false;
 
-  void notifyNow() => notifyListeners();
+  static const _throttleDelay = Duration(milliseconds: 300);
 
+  void notifyNow() => notifyImmediate();
+
+  /// User-driven or structural queue changes — rebuild immediately.
+  void notifyImmediate() {
+    _throttleTimer?.cancel();
+    _throttleTimer = null;
+    _pendingNotify = false;
+    notifyListeners();
+  }
+
+  /// Background catalog sync — coalesce to one rebuild after batches settle.
   void notifyThrottled() {
-    _pending = true;
-    _throttle ??= Timer(const Duration(milliseconds: 200), () {
-      _throttle = null;
-      if (_pending) {
-        _pending = false;
-        notifyListeners();
-      }
+    if (_pendingNotify) return;
+    _pendingNotify = true;
+    _throttleTimer?.cancel();
+    _throttleTimer = Timer(_throttleDelay, () {
+      _throttleTimer = null;
+      if (!_pendingNotify) return;
+      _pendingNotify = false;
+      notifyListeners();
     });
   }
 
   void cancelThrottle() {
-    _throttle?.cancel();
-    _throttle = null;
-    _pending = false;
+    _throttleTimer?.cancel();
+    _throttleTimer = null;
+    _pendingNotify = false;
   }
 
   @override
