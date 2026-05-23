@@ -35,6 +35,17 @@ internal object Mp3PlayerWidgetSync {
         Mp3PlayerGlassCardWidget.refreshAll(context)
     }
 
+    /** When the app UI closes, show the play icon on home-screen widgets. */
+    fun setPlayingIndicator(context: Context, playing: Boolean) {
+        val prefs = context.getSharedPreferences(Mp3PlayerWidgetPrefs.PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(Mp3PlayerWidgetPrefs.HAS_TRACK, false)) return
+        prefs.edit()
+            .putBoolean(Mp3PlayerWidgetPrefs.PLAYING, playing)
+            .commit()
+        Mp3PlayerAppWidget.refreshAll(context)
+        Mp3PlayerGlassCardWidget.refreshAll(context)
+    }
+
     private fun Map<*, *>.bool(key: String, default: Boolean = false): Boolean {
         val v = this[key] ?: return default
         return when (v) {

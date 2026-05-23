@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, Tar
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'permission_request_lock.dart';
+
 /// **Step B strategy (Android):** ask for audio-library access first (`READ_MEDIA_AUDIO`
 /// on API 33+), then legacy storage (`READ_EXTERNAL_STORAGE` on API ≤32). Folder choice
 /// uses the system picker ([`file_picker`]), which grants a tree without needing
@@ -32,7 +34,9 @@ Future<bool> ensureCanReadMusicFiles(
   // Only show the system permission prompt when allowed (on initial startup or
   // when the user is actively trying to add a folder).
   if (showDialogIfDenied) {
-    final audioReq = await Permission.audio.request();
+    final audioReq = await runWithExclusivePermissionRequest(
+      Permission.audio.request,
+    );
     if (granted(audioReq)) {
       return true;
     }
@@ -44,7 +48,9 @@ Future<bool> ensureCanReadMusicFiles(
   if (granted(await Permission.storage.status)) {
     return true;
   }
-  final storageReq = await Permission.storage.request();
+  final storageReq = await runWithExclusivePermissionRequest(
+    Permission.storage.request,
+  );
   if (granted(storageReq)) {
     return true;
   }
@@ -83,7 +89,9 @@ Future<bool> ensureCanWriteLibraryFiles(BuildContext context) async {
   if (await Permission.manageExternalStorage.isGranted) {
     return true;
   }
-  final manage = await Permission.manageExternalStorage.request();
+  final manage = await runWithExclusivePermissionRequest(
+    Permission.manageExternalStorage.request,
+  );
   if (manage.isGranted) {
     return true;
   }
@@ -91,7 +99,9 @@ Future<bool> ensureCanWriteLibraryFiles(BuildContext context) async {
   if (granted(await Permission.storage.status)) {
     return true;
   }
-  final storage = await Permission.storage.request();
+  final storage = await runWithExclusivePermissionRequest(
+    Permission.storage.request,
+  );
   if (granted(storage)) {
     return true;
   }

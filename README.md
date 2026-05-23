@@ -25,8 +25,22 @@ Implement layout and navigation first with placeholder data; wire real audio and
 | **Flutter** | Stable channel, Android as first target. |
 | **Audio playback** | [`just_audio`](https://pub.dev/packages/just_audio) — reliable for local files; add [`audio_service`](https://pub.dev/packages/audio_service) later if you want background playback and media controls. |
 | **Folder / file picking** | [`file_picker`](https://pub.dev/packages/file_picker) (directory pick on supported Android versions) or [`saf_stream`](https://pub.dev/packages/saf_stream) / platform channels if you need SAF URIs; alternately [`permission_handler`](https://pub.dev/packages/permission_handler) + [`path_provider`](https://pub.dev/packages/path_provider) + manual path entry for debugging. |
-| **Local metadata (optional)** | [`metadata_god`](https://pub.dev/packages/metadata_god) or similar for title/artist/album art from file tags. |
-| **State** | `ChangeNotifier`, `Riverpod`, or `Bloc` — pick one and keep playlist + current index + position in one place. |
+| **Local metadata** | Default: [`audio_metadata_reader`](https://pub.dev/packages/audio_metadata_reader). Branch `perf/metadata-god-experiment` tries [`metadata_god`](https://pub.dev/packages/metadata_god) first with Dart fallback. Requires [Rust](https://www.rust-lang.org/tools/install) to build; `pubspec.yaml` pins `flutter_rust_bridge: 2.11.1` to match `metadata_god` 1.1.0. |
+
+### `metadata_god` build fails on Windows (os error 4551)
+
+If Cargokit logs **“An Application Control policy has blocked this file”** while compiling `anyhow` (or another crate) under `build\metadata_god\`, Windows is blocking Rust **build scripts** from running—not your Dart/Gradle setup.
+
+**Fix (pick one):**
+
+1. **Allow dev builds (recommended if you want `metadata_god`):**
+   - **Settings → Privacy & security → Windows Security → App & browser control → Smart App Control → Off** (Win11; may require reinstall to turn back on).
+   - If you use **Controlled folder access**, add allow rules for `rustc.exe`, `cargo.exe`, and your project folder (or turn it off for dev).
+   - Corporate **WDAC/AppLocker**: ask IT to allow Cargo build scripts under your repo’s `build\` tree and `%USERPROFILE%\.cargo`.
+2. **Skip Rust for now:** remove `metadata_god` from `pubspec.yaml` (and the `flutter_rust_bridge` override if unused). The app already falls back to `audio_metadata_reader`; `--dart-define=USE_METADATA_GOD=false` only disables runtime use—it does **not** skip compiling the native plugin while the dependency stays in `pubspec.yaml`.
+
+After changing policy, run `flutter clean`, delete `build\metadata_god`, then `flutter run` again.
+| **State** | `PlayerController` coordinator + split `ChangeNotifier`s (`positionNotifier` ~500ms, `track`, `playback`, `queue`); `*Store` + SharedPreferences/Isar for persistence. |
 
 ## Android storage and permissions
 

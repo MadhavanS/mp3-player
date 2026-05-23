@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
+import '../../services/album_art_cache.dart';
 import '../../services/file_path_mtime_sort.dart';
 import '../../services/first_run_library_hint_store.dart';
 import '../../services/mp3_scanner.dart';
@@ -153,16 +154,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final player = PlayerController.of(context);
     _playerRef = player;
     if (!identical(_playerForRecentHistory, player)) {
-      _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
+      _playerForRecentHistory?.track.removeListener(_recordRecentlyPlayedTrack);
       _playerForRecentHistory = player;
-      player.addListener(_recordRecentlyPlayedTrack);
+      player.track.addListener(_recordRecentlyPlayedTrack);
     }
     if (!identical(_playerForPlaybackPersistence, player)) {
-      _playerForPlaybackPersistence?.removeListener(
+      _playerForPlaybackPersistence?.track.removeListener(
+        _schedulePlaybackSessionPersist,
+      );
+      _playerForPlaybackPersistence?.playback.removeListener(
         _schedulePlaybackSessionPersist,
       );
       _playerForPlaybackPersistence = player;
-      player.addListener(_schedulePlaybackSessionPersist);
+      player.track.addListener(_schedulePlaybackSessionPersist);
+      player.playback.addListener(_schedulePlaybackSessionPersist);
     }
   }
 
@@ -419,16 +424,34 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       }
       final changedPaths = <ScannedMp3File>[];
 
+      final repairSnapshots = <CachedTrackSnapshot>[];
+
       for (final f in scanned) {
         final snap = cachedByPath[f.path];
-        if (snap == null ||
-            snap.fileModifiedMs != f.lastModifiedMs ||
-            snap.fileSizeBytes != f.fileSizeBytes) {
+        if (snap == null) {
+          changedPaths.add(f);
+        } else if (snap.fileModifiedMs != f.lastModifiedMs) {
+          changedPaths.add(f);
+        } else if (snap.fileSizeBytes == 0) {
+          // Legacy rows from [saveTracks] before fingerprint preservation; repair
+          // without re-parsing tags when mtime still matches.
+          live[f.path] = snap.track;
+          repairSnapshots.add(
+            CachedTrackSnapshot(
+              track: snap.track,
+              fileModifiedMs: f.lastModifiedMs,
+              fileSizeBytes: f.fileSizeBytes,
+            ),
+          );
+        } else if (snap.fileSizeBytes != f.fileSizeBytes) {
           changedPaths.add(f);
         } else {
-          // Keep in-memory version if already seeded above (may be fresher).
           live[f.path] ??= snap.track;
         }
+      }
+
+      if (repairSnapshots.isNotEmpty) {
+        await SongMetadataCache.saveTrackSnapshots(repairSnapshots);
       }
 
       const batchSize = 4;
@@ -508,14 +531,23 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _albumArtWarmupInProgress = true;
     unawaited(() async {
       try {
-        final tracksNeedingArt = player.metadataLibrary
+        final candidates = player.metadataLibrary
             .where((t) {
               final p = t.filePath;
               final art = t.albumArtBytes;
               return p != null && p.isNotEmpty && (art == null || art.isEmpty);
             })
             .toList(growable: false);
+        if (candidates.isEmpty) return;
+
+        final tracksNeedingArt = <TrackItem>[];
+        for (final t in candidates) {
+          final path = t.filePath!.trim();
+          if (await hasAlbumArtDiskCache(path)) continue;
+          tracksNeedingArt.add(t);
+        }
         if (tracksNeedingArt.isEmpty) return;
+
         await enrichPlaylistTracks(
           tracks: tracksNeedingArt,
           batchSize: 1,
@@ -527,7 +559,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               notify: CatalogNotifyMode.throttled,
               refreshNotificationArt: false,
             );
-            unawaited(SongMetadataCache.saveTracks([updated]));
+            // Tags already in Isar from sync; readAudioMetadata primed disk art.
           },
         );
       } catch (e, st) {
@@ -586,8 +618,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _persistPlaybackDebounceTimer?.cancel();
     _albumArtWarmupRetryTimer?.cancel();
     unawaited(_persistSession());
-    _playerForRecentHistory?.removeListener(_recordRecentlyPlayedTrack);
-    _playerForPlaybackPersistence?.removeListener(
+    _playerForRecentHistory?.track.removeListener(_recordRecentlyPlayedTrack);
+    _playerForPlaybackPersistence?.track.removeListener(
+      _schedulePlaybackSessionPersist,
+    );
+    _playerForPlaybackPersistence?.playback.removeListener(
       _schedulePlaybackSessionPersist,
     );
     _songsBrowsePathKeysNotifier.dispose();
@@ -1113,7 +1148,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     final player = PlayerController.of(context);
 
     return ListenableBuilder(
-      listenable: player,
+      listenable: player.track,
       builder: (context, _) {
         final current = player.currentTrack;
 

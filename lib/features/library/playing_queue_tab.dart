@@ -51,7 +51,7 @@ class PlayingQueueTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: player,
+      listenable: player.queue,
       builder: (context, _) {
         final playlist = player.playlist;
         if (playlist.isEmpty) {

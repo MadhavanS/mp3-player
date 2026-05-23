@@ -11,6 +11,10 @@ enum LibraryTrackSortMode {
   modifiedOldest,
   titleAZ,
   titleZA,
+
+  /// All tracks from the first Settings music folder, then the second, etc.
+  /// Within each root, ordered by relative path (folder structure).
+  folderOrder,
 }
 
 extension LibraryTrackSortModeStorage on LibraryTrackSortMode {
@@ -19,6 +23,7 @@ extension LibraryTrackSortModeStorage on LibraryTrackSortMode {
         LibraryTrackSortMode.modifiedOldest => 'modified_oldest',
         LibraryTrackSortMode.titleAZ => 'title_az',
         LibraryTrackSortMode.titleZA => 'title_za',
+        LibraryTrackSortMode.folderOrder => 'folder_order',
       };
 
   String get menuLabel => switch (this) {
@@ -26,6 +31,7 @@ extension LibraryTrackSortModeStorage on LibraryTrackSortMode {
         LibraryTrackSortMode.modifiedOldest => 'Date modified (oldest first)',
         LibraryTrackSortMode.titleAZ => 'Title (A–Z)',
         LibraryTrackSortMode.titleZA => 'Title (Z–A)',
+        LibraryTrackSortMode.folderOrder => 'Folder order (library folders)',
       };
 }
 
@@ -36,6 +42,7 @@ LibraryTrackSortMode? _parseSortMode(String? raw) {
     'modified_oldest' => LibraryTrackSortMode.modifiedOldest,
     'title_az' => LibraryTrackSortMode.titleAZ,
     'title_za' => LibraryTrackSortMode.titleZA,
+    'folder_order' => LibraryTrackSortMode.folderOrder,
     _ => null,
   };
 }
@@ -51,7 +58,7 @@ class LibraryTrackSortStore {
   static Future<LibraryTrackSortMode> load() async {
     final prefs = await SharedPreferences.getInstance();
     return _parseSortMode(prefs.getString(_prefsKey)) ??
-        LibraryTrackSortMode.modifiedNewest;
+        LibraryTrackSortMode.folderOrder;
   }
 
   static Future<void> save(LibraryTrackSortMode mode) async {
@@ -61,12 +68,60 @@ class LibraryTrackSortStore {
   }
 }
 
+/// Index of the first Settings music root that contains [filePath], or [roots.length]
+/// when none match (sorted last).
+int libraryRootIndexForPath(String filePath, List<String> roots) {
+  if (roots.isEmpty) return 0;
+  final norm = p.normalize(filePath).toLowerCase();
+  for (var i = 0; i < roots.length; i++) {
+    final base = p.normalize(roots[i]).toLowerCase();
+    if (norm == base) return i;
+    final sep = p.separator;
+    final pref = base.endsWith(sep) ? base : '$base$sep';
+    if (norm.startsWith(pref)) return i;
+  }
+  return roots.length;
+}
+
+/// Lowercased path relative to the owning library root (for stable folder walk order).
+String libraryRelativePathForSort(String filePath, List<String> roots) {
+  final normFile = p.normalize(filePath);
+  for (final root in roots) {
+    final normRoot = p.normalize(root);
+    if (normFile == normRoot) return '';
+    final sep = p.separator;
+    final pref = normRoot.endsWith(sep) ? normRoot : '$normRoot$sep';
+    if (normFile.startsWith(pref)) {
+      return p.relative(normFile, from: normRoot).toLowerCase();
+    }
+  }
+  return normFile.toLowerCase();
+}
+
+int _folderOrderPathCmp(String pathA, String pathB, List<String> roots) {
+  final ra = libraryRootIndexForPath(pathA, roots);
+  final rb = libraryRootIndexForPath(pathB, roots);
+  final rootCmp = ra.compareTo(rb);
+  if (rootCmp != 0) return rootCmp;
+  final rel = libraryRelativePathForSort(pathA, roots)
+      .compareTo(libraryRelativePathForSort(pathB, roots));
+  if (rel != 0) return rel;
+  return pathA.toLowerCase().compareTo(pathB.toLowerCase());
+}
+
+void _sortPathsByFolderOrder(List<String> paths, List<String> roots) {
+  paths.sort(
+    (a, b) => _folderOrderPathCmp(a, b, roots),
+  );
+}
+
 /// Orders filtered catalog indices; catalog order is modified-newest-first from scan.
 List<int> sortFilteredTrackIndices(
   List<int> indices,
   List<TrackItem> tracks,
-  LibraryTrackSortMode mode,
-) {
+  LibraryTrackSortMode mode, {
+  List<String> libraryRoots = const [],
+}) {
   if (indices.length < 2) return List<int>.from(indices);
   final out = List<int>.from(indices);
   int titleCmp(int ia, int ib) {
@@ -92,6 +147,15 @@ List<int> sortFilteredTrackIndices(
     case LibraryTrackSortMode.titleZA:
       out.sort((a, b) => titleCmp(b, a));
       break;
+    case LibraryTrackSortMode.folderOrder:
+      out.sort((a, b) {
+        final pa = tracks[a].filePath ?? '';
+        final pb = tracks[b].filePath ?? '';
+        final pathCmp = _folderOrderPathCmp(pa, pb, libraryRoots);
+        if (pathCmp != 0) return pathCmp;
+        return a.compareTo(b);
+      });
+      break;
   }
   return out;
 }
@@ -102,8 +166,9 @@ String _basenameTitleKey(String path) =>
 /// Sort immediate `.mp3` paths for the Files explorer (may stat files on IO).
 Future<List<String>> sortMp3PathsForFilesExplorer(
   List<String> paths,
-  LibraryTrackSortMode mode,
-) async {
+  LibraryTrackSortMode mode, {
+  List<String> libraryRoots = const [],
+}) async {
   if (paths.length <= 1) return List<String>.from(paths);
   switch (mode) {
     case LibraryTrackSortMode.modifiedNewest:
@@ -125,6 +190,10 @@ Future<List<String>> sortMp3PathsForFilesExplorer(
       out.sort(
         (a, b) => _basenameTitleKey(b).compareTo(_basenameTitleKey(a)),
       );
+      return out;
+    case LibraryTrackSortMode.folderOrder:
+      final out = List<String>.from(paths);
+      _sortPathsByFolderOrder(out, libraryRoots);
       return out;
   }
 }

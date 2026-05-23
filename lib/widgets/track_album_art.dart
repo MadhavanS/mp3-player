@@ -73,37 +73,56 @@ class TrackAlbumArt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bytes = track.albumArtBytes;
-    if (bytes == null || bytes.isEmpty) {
-      return _noArtPlaceholder(context);
-    }
-
     final pixelSize = (_size * MediaQuery.devicePixelRatioOf(context))
         .round()
         .clamp(96, 512)
         .toInt();
-    final cached = cachedAlbumArtSync(track, maxDimension: pixelSize);
-    if (cached != null && cached.isNotEmpty) {
-      return _imageShell(context, cached, pixelSize);
+
+    final bytes = track.albumArtBytes;
+    if (bytes != null && bytes.isNotEmpty) {
+      final cached = cachedAlbumArtSync(track, maxDimension: pixelSize);
+      if (cached != null && cached.isNotEmpty) {
+        return _imageShell(context, cached, pixelSize);
+      }
+      return FutureBuilder<Uint8List?>(
+        future: cachedAlbumArt(track, maxDimension: pixelSize),
+        builder: (context, snapshot) =>
+            _artFromSnapshot(context, snapshot.data, pixelSize),
+      );
     }
 
-    return FutureBuilder<Uint8List?>(
-      future: cachedAlbumArt(track, maxDimension: pixelSize),
-      builder: (context, snapshot) {
-        final art = snapshot.data;
-        if (art == null || art.isEmpty) {
-          return _noArtPlaceholder(context);
-        }
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: _imageShell(
-            context,
-            art,
-            pixelSize,
-            key: ValueKey<int>(identityHashCode(art)),
-          ),
-        );
-      },
+    final path = track.filePath?.trim() ?? '';
+    if (path.isNotEmpty) {
+      final fromDisk = cachedAlbumArtForPathSync(path, maxDimension: pixelSize);
+      if (fromDisk != null && fromDisk.isNotEmpty) {
+        return _imageShell(context, fromDisk, pixelSize);
+      }
+      return FutureBuilder<Uint8List?>(
+        future: cachedAlbumArtForPath(path, maxDimension: pixelSize),
+        builder: (context, snapshot) =>
+            _artFromSnapshot(context, snapshot.data, pixelSize),
+      );
+    }
+
+    return _noArtPlaceholder(context);
+  }
+
+  Widget _artFromSnapshot(
+    BuildContext context,
+    Uint8List? art,
+    int pixelSize,
+  ) {
+    if (art == null || art.isEmpty) {
+      return _noArtPlaceholder(context);
+    }
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      child: _imageShell(
+        context,
+        art,
+        pixelSize,
+        key: ValueKey<int>(identityHashCode(art)),
+      ),
     );
   }
 

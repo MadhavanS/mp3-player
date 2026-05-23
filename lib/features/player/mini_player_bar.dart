@@ -21,18 +21,23 @@ class MiniPlayerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        if (controller.currentTrack == null) {
-          return const SizedBox.shrink();
-        }
-        return GlassMiniPlayer(
-          controller: controller,
-          onTap: onTap,
-          topCornerRadius: topSheetRadius,
-        );
-      },
+    return RepaintBoundary(
+      child: ListenableBuilder(
+        listenable: Listenable.merge([
+          controller.track,
+          controller.playback,
+        ]),
+        builder: (context, _) {
+          if (controller.currentTrack == null) {
+            return const SizedBox.shrink();
+          }
+          return GlassMiniPlayer(
+            controller: controller,
+            onTap: onTap,
+            topCornerRadius: topSheetRadius,
+          );
+        },
+      ),
     );
   }
 }

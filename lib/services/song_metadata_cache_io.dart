@@ -77,28 +77,43 @@ Future<Map<String, TrackItem>> loadTracksByPaths(List<String> paths) async {
 }
 
 Future<void> saveTracks(Iterable<TrackItem> tracks) async {
-  final rows = <SongMetadataCacheRow>[];
-  final now = DateTime.now().millisecondsSinceEpoch;
-  for (final t in tracks) {
-    final path = t.filePath?.trim();
-    if (path == null || path.isEmpty) continue;
-    final row = SongMetadataCacheRow()
-      ..id = _stablePathId(path)
-      ..path = path
-      ..title = t.title
-      ..artist = t.artist
-      ..album = t.metaLine
-      ..genres = t.genres
-      ..artColorValues = t.artColors
-          .map((c) => c.toARGB32())
-          .toList(growable: false)
-      ..fileSizeBytes = 0
-      ..updatedAtMs = now;
-    rows.add(row);
-  }
-  if (rows.isEmpty) return;
+  final items = tracks
+      .where((t) {
+        final path = t.filePath?.trim();
+        return path != null && path.isNotEmpty;
+      })
+      .toList(growable: false);
+  if (items.isEmpty) return;
+
   try {
     final db = await _openIsar();
+    final paths = items.map((t) => t.filePath!.trim()).toList(growable: false);
+    final existingRows = db.songMetadataCacheRows
+        .where()
+        .anyOf(paths, (q, path) => q.pathEqualTo(path))
+        .findAll();
+    final existingByPath = {for (final r in existingRows) r.path: r};
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rows = <SongMetadataCacheRow>[];
+    for (final t in items) {
+      final path = t.filePath!.trim();
+      final prev = existingByPath[path];
+      final row = SongMetadataCacheRow()
+        ..id = _stablePathId(path)
+        ..path = path
+        ..title = t.title
+        ..artist = t.artist
+        ..album = t.metaLine
+        ..genres = t.genres
+        ..artColorValues = t.artColors
+            .map((c) => c.toARGB32())
+            .toList(growable: false)
+        // Preserve disk-sync fingerprint so background sync does not re-read
+        // every file after art-only warmup or tag edits.
+        ..fileSizeBytes = prev?.fileSizeBytes ?? 0
+        ..updatedAtMs = prev?.updatedAtMs ?? now;
+      rows.add(row);
+    }
     await db.writeAsync((isar) {
       isar.songMetadataCacheRows.putAll(rows);
     });

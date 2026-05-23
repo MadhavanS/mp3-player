@@ -51,4 +51,12 @@ class AndroidHomeWidgetBridge {
       'duration_ms': durationMs,
     });
   }
+
+  /// Updates only the play/pause icon (e.g. when the app UI is closing).
+  static Future<void> setPlayingIndicator(bool playing) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    await _channel.invokeMethod<void>('setPlaying', <String, dynamic>{
+      'playing': playing,
+    });
+  }
 }

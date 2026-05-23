@@ -59,7 +59,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   Future<({List<String> dirs, List<String> mp3Paths})>? _childrenFuture;
   Future<int>? _headerSongsFuture;
 
-  LibraryTrackSortMode _sortMode = LibraryTrackSortMode.modifiedNewest;
+  LibraryTrackSortMode _sortMode = LibraryTrackSortMode.folderOrder;
   bool _libraryRefreshing = false;
 
   @override
@@ -87,7 +87,11 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     String dir,
   ) async {
     final listing = await listFolderChildrenSorted(dir);
-    final mp3 = await sortMp3PathsForFilesExplorer(listing.mp3Paths, _sortMode);
+    final mp3 = await sortMp3PathsForFilesExplorer(
+      listing.mp3Paths,
+      _sortMode,
+      libraryRoots: widget.musicRoots,
+    );
     return (dirs: listing.dirs, mp3Paths: mp3);
   }
 
@@ -436,12 +440,20 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
       for (final r in roots) {
         combined.addAll(await scanMp3Files(r, recursive: true));
       }
-      return sortMp3PathsForFilesExplorer(combined, _sortMode);
+      return sortMp3PathsForFilesExplorer(
+        combined,
+        _sortMode,
+        libraryRoots: widget.musicRoots,
+      );
     }
     final dir = _currentDir;
     if (dir == null) return [];
     final scanned = await scanMp3Files(dir, recursive: true);
-    return sortMp3PathsForFilesExplorer(scanned, _sortMode);
+    return sortMp3PathsForFilesExplorer(
+      scanned,
+      _sortMode,
+      libraryRoots: widget.musicRoots,
+    );
   }
 
   Future<void> _playCurrentLocation(
@@ -880,7 +892,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
                 _breadcrumb(theme, pal),
                 Expanded(
                   child: ListenableBuilder(
-                    listenable: player,
+                    listenable: player.queue,
                     builder: (context, _) {
                       if (dirsFiltered.isEmpty && mp3sFiltered.isEmpty) {
                         return Center(

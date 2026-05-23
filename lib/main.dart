@@ -5,9 +5,12 @@ import 'package:just_audio_background/just_audio_background.dart';
 
 import 'app.dart';
 import 'platform/windows_window.dart';
+import 'services/metadata_god_init_stub.dart'
+    if (dart.library.io) 'services/metadata_god_init_io.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initMetadataGodIfEnabled();
   await initWindowsWindowOnLaunch();
   if (_mediaNotificationSupported) {
     await JustAudioBackground.init(

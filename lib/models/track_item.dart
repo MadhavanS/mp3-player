@@ -112,6 +112,19 @@ class TrackItem {
     );
   }
 
+  /// Same tags/path without holding [albumArtBytes] in the library catalog.
+  TrackItem withoutAlbumArt() {
+    if (albumArtBytes == null) return this;
+    return TrackItem(
+      title: title,
+      artist: artist,
+      metaLine: metaLine,
+      genres: genres,
+      artColors: artColors,
+      filePath: filePath,
+    );
+  }
+
   /// Built-in samples when no folder is selected (UI dev / empty device).
   static final List<TrackItem> demoSamples = [
     TrackItem(

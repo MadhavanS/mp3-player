@@ -232,7 +232,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                       child: Row(
                         children: [
                           ListenableBuilder(
-                            listenable: widget.controller,
+                            listenable: widget.controller.track,
                             builder: (context, _) {
                               final t = widget.controller.currentTrack!;
                               return TrackAlbumArt(
@@ -250,7 +250,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                           const SizedBox(width: 14),
                           Expanded(
                             child: ListenableBuilder(
-                              listenable: widget.controller,
+                              listenable: widget.controller.track,
                               builder: (context, _) {
                                 final t = widget.controller.currentTrack!;
                                 return Text(
@@ -282,7 +282,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                             onPressed: () => widget.controller.skipPrevious(),
                           ),
                           ListenableBuilder(
-                            listenable: widget.controller,
+                            listenable: widget.controller.playback,
                             builder: (context, _) {
                               final playing = widget.controller.isPlaying;
                               return SizedBox(
@@ -312,7 +312,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                             },
                           ),
                           ListenableBuilder(
-                            listenable: widget.controller,
+                            listenable: widget.controller.trackAndQueueListenable,
                             builder: (context, _) {
                               final canNext = widget.controller.canSkipNext;
                               return IconButton(
@@ -402,7 +402,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                 child: Row(
                   children: [
                     ListenableBuilder(
-                      listenable: widget.controller,
+                      listenable: widget.controller.track,
                       builder: (context, _) {
                         final t = widget.controller.currentTrack!;
                         return TrackAlbumArt(
@@ -420,7 +420,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                     const SizedBox(width: 14),
                     Expanded(
                       child: ListenableBuilder(
-                        listenable: widget.controller,
+                        listenable: widget.controller.track,
                         builder: (context, _) {
                           final t = widget.controller.currentTrack!;
                           return Text(
@@ -456,7 +456,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                     ),
                     const SizedBox(width: 4),
                     ListenableBuilder(
-                      listenable: widget.controller,
+                      listenable: widget.controller.playbackListenable,
                       builder: (context, _) {
                         final playing = widget.controller.isPlaying;
                         return LiquidGlassRingIconButton(
@@ -476,7 +476,7 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                     ),
                     const SizedBox(width: 4),
                     ListenableBuilder(
-                      listenable: widget.controller,
+                      listenable: widget.controller.trackAndQueueListenable,
                       builder: (context, _) {
                         final canNext = widget.controller.canSkipNext;
                         return LiquidGlassRingIconButton(
@@ -524,48 +524,43 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
     final leah = context.appliedThemePalette == AppThemePalette.leah;
     final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
 
-    return StreamBuilder<Duration>(
-      stream: widget.controller.audioPlayer.positionStream,
-      builder: (context, posSnap) {
-        return StreamBuilder<Duration?>(
-          stream: widget.controller.audioPlayer.durationStream,
-          builder: (context, durSnap) {
-            final dur = durSnap.data ?? widget.controller.duration;
-            final pos = posSnap.data ?? widget.controller.position;
-            final total = dur?.inMilliseconds ?? 0;
-            final live = total > 0
-                ? (pos.inMilliseconds / total).clamp(0.0, 1.0)
-                : 0.0;
-            final p = (_dragFraction ?? live).clamp(0.0, 1.0);
+    return ListenableBuilder(
+      listenable: widget.controller.positionNotifier,
+      builder: (context, _) {
+        final posNotifier = widget.controller.positionNotifier;
+        final dur = posNotifier.duration ?? widget.controller.duration;
+        final pos = posNotifier.position;
+        final total = dur?.inMilliseconds ?? 0;
+        final live = total > 0
+            ? (pos.inMilliseconds / total).clamp(0.0, 1.0)
+            : 0.0;
+        final p = (_dragFraction ?? live).clamp(0.0, 1.0);
 
-            return PlayerAdaptiveSlider(
-              value: p,
-              appearance: isIvy
-                  ? PlayerSliderAppearance.ivy
-                  : PlayerSliderAppearance.miniPill,
-              activeColor: (daisy || leah) ? iconColor : accent,
-              inactiveColor: inactiveTrack,
-              thumbColor: thumbColor,
-              onChanged: total <= 0
-                  ? null
-                  : (v) {
-                      setState(() => _dragFraction = v);
-                    },
-              onChangeEnd: total <= 0
-                  ? null
-                  : (v) {
-                      widget.controller.seek(
-                        Duration(
-                          milliseconds:
-                              (v * total).round().clamp(0, total),
-                        ),
-                      );
-                      if (mounted) {
-                        setState(() => _dragFraction = null);
-                      }
-                    },
-            );
-          },
+        return PlayerAdaptiveSlider(
+          value: p,
+          appearance: isIvy
+              ? PlayerSliderAppearance.ivy
+              : PlayerSliderAppearance.miniPill,
+          activeColor: (daisy || leah) ? iconColor : accent,
+          inactiveColor: inactiveTrack,
+          thumbColor: thumbColor,
+          onChanged: total <= 0
+              ? null
+              : (v) {
+                  setState(() => _dragFraction = v);
+                },
+          onChangeEnd: total <= 0
+              ? null
+              : (v) {
+                  widget.controller.seek(
+                    Duration(
+                      milliseconds: (v * total).round().clamp(0, total),
+                    ),
+                  );
+                  if (mounted) {
+                    setState(() => _dragFraction = null);
+                  }
+                },
         );
       },
     );

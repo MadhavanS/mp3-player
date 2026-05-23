@@ -4,12 +4,18 @@ import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/track_item.dart';
+import 'album_art_cache.dart';
+import 'metadata_backend_config.dart';
+import 'metadata_god_init_io.dart';
+import 'metadata_god_reader_io.dart';
 
 final Set<String> _metadataWarnedPaths = <String>{};
 
 void _logMetadataSkipOnce(String path, Object error) {
   if (_metadataWarnedPaths.add(path)) {
-    debugPrint('readAudioMetadata: skipped unsupported metadata for "$path" ($error)');
+    debugPrint(
+      'readAudioMetadata: skipped unsupported metadata for "$path" ($error)',
+    );
   }
 }
 
@@ -46,30 +52,33 @@ TrackItem _trackFromMp3Metadata(TrackItem base, Mp3Metadata mp3) {
   );
 }
 
-/// Reads embedded ID3 (and similar) tags + cover art using pure Dart (works well on Android).
-Future<TrackItem> readAudioMetadata(TrackItem base) async {
+/// Pure-Dart reader (existing path). Kept for fallback and MP3 TPE1 accuracy.
+Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
   final path = base.filePath;
   if (path == null || path.isEmpty) return base;
 
   final file = File(path);
   if (!await file.exists()) return base;
 
+  final stopwatch = kMetadataReadTimingLogs ? (Stopwatch()..start()) : null;
+
   try {
-    // Prefer real ID3 frames for .mp3 so we match what we write. Package
-    // `readMetadata` checks APE before MP3 and maps artist as TPE2 before TPE1,
-    // which hides edits saved to TPE1 (lead performer).
     if (path.toLowerCase().endsWith('.mp3')) {
       final raf = file.openSync();
       try {
         if (MP3Parser.canUserParser(raf)) {
           final mp3 = MP3Parser(fetchImage: true).parse(raf);
+          stopwatch?.stop();
+          if (kMetadataReadTimingLogs) {
+            debugPrint(
+              'audio_metadata_reader read ${stopwatch!.elapsedMilliseconds}ms: $path',
+            );
+          }
           return _trackFromMp3Metadata(base, mp3);
         }
-        // Avoid noisy fallback exceptions for unsupported MP3 variants.
         _logMetadataSkipOnce(path, 'NoMetadataParserException');
         return base;
       } finally {
-        // [MP3Parser.parse] closes [raf] when it runs; avoid double-close.
         try {
           raf.closeSync();
         } catch (_) {}
@@ -94,6 +103,13 @@ Future<TrackItem> readAudioMetadata(TrackItem base) async {
       genreStr = meta.genres.first;
     }
 
+    stopwatch?.stop();
+    if (kMetadataReadTimingLogs) {
+      debugPrint(
+        'audio_metadata_reader read ${stopwatch!.elapsedMilliseconds}ms: $path',
+      );
+    }
+
     return base.withEmbeddedMetadata(
       title: meta.title?.trim(),
       artist: artist,
@@ -107,4 +123,26 @@ Future<TrackItem> readAudioMetadata(TrackItem base) async {
     _logMetadataSkipOnce(path, e);
     return base;
   }
+}
+
+Future<TrackItem> _finalizeMetadataRead(TrackItem result) async {
+  final path = result.filePath?.trim();
+  final art = result.albumArtBytes;
+  if (path != null &&
+      path.isNotEmpty &&
+      art != null &&
+      art.isNotEmpty) {
+    await primeAlbumArtDiskCache(path, art);
+  }
+  return result;
+}
+
+/// Reads embedded tags + cover. On this branch tries [metadata_god] first when
+/// [kUseMetadataGod] is true, then falls back to [audio_metadata_reader].
+Future<TrackItem> readAudioMetadata(TrackItem base) async {
+  if (kUseMetadataGod && metadataGodAvailable) {
+    final fromGod = await tryReadAudioMetadataWithGod(base);
+    if (fromGod != null) return _finalizeMetadataRead(fromGod);
+  }
+  return _finalizeMetadataRead(await _readAudioMetadataWithDartReader(base));
 }

@@ -17,3 +17,27 @@ void prewarmAlbumArtCache(
   int maxDimension = 512,
 }) {}
 
+Uint8List? cachedAlbumArtForPathSync(
+  String filePath, {
+  int maxDimension = 512,
+}) =>
+    null;
+
+Future<Uint8List?> cachedAlbumArtForPath(
+  String filePath, {
+  int maxDimension = 512,
+}) =>
+    Future<Uint8List?>.value(null);
+
+Future<bool> hasAlbumArtDiskCache(
+  String filePath, {
+  int maxDimension = 512,
+}) async =>
+    false;
+
+Future<void> primeAlbumArtDiskCache(
+  String filePath,
+  Uint8List raw, {
+  int maxDimension = 512,
+}) async {}
+

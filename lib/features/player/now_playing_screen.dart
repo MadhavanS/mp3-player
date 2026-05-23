@@ -46,6 +46,32 @@ String _formatDuration(Duration d) {
   return '$m:${s.toString().padLeft(2, '0')}';
 }
 
+/// Throttled seek UI (~500ms) via [PositionNotifier], not raw [positionStream].
+Widget _nowPlayingSeekListenable({
+  required PlayerController player,
+  required Widget Function(
+    BuildContext context,
+    Duration position,
+    Duration? duration,
+    double sliderValue,
+  )
+  builder,
+}) {
+  return ListenableBuilder(
+    listenable: player.positionNotifier,
+    builder: (context, _) {
+      final duration = player.positionNotifier.duration ?? player.duration;
+      final position = player.positionNotifier.position;
+      final totalMs = duration?.inMilliseconds ?? 0;
+      final posMs = position.inMilliseconds;
+      final sliderValue = totalMs > 0
+          ? (posMs / totalMs).clamp(0.0, 1.0)
+          : 0.0;
+      return builder(context, position, duration, sliderValue);
+    },
+  );
+}
+
 class NowPlayingScreen extends StatefulWidget {
   const NowPlayingScreen({super.key, required this.onCollapse});
 
@@ -358,7 +384,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     PlayerController player,
   ) {
     return ListenableBuilder(
-      listenable: player,
+      listenable: player.track,
       builder: (context, _) {
         final cur = player.currentTrack;
         if (cur == null) return const SizedBox.shrink();
@@ -831,7 +857,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         ),
         const SizedBox(width: 12),
         ListenableBuilder(
-          listenable: player,
+          listenable: player.playbackListenable,
           builder: (context, _) => IconButton(
             tooltip: player.isPlaying ? 'Pause' : 'Play',
             style: flat,
@@ -845,7 +871,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         ),
         const SizedBox(width: 10),
         ListenableBuilder(
-          listenable: player,
+          listenable: player.queueListenable,
           builder: (context, _) => IconButton(
             tooltip: 'Next track',
             style: flat,
@@ -945,7 +971,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               highlighted: false,
             ),
             ListenableBuilder(
-              listenable: player,
+              listenable: player.playbackListenable,
               builder: (context, _) => LiquidGlassCircleButton(
                 icon: player.isPlaying ? Icons.pause : Icons.play_arrow,
                 onPressed: () => player.togglePlayPause(),
@@ -957,7 +983,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               ),
             ),
             ListenableBuilder(
-              listenable: player,
+              listenable: player.queueListenable,
               builder: (context, _) => LiquidGlassCircleButton(
                 icon: Icons.skip_next,
                 onPressed: player.canSkipNext ? () => player.skipNext() : null,
@@ -1012,7 +1038,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             silverInkRings: false,
           ),
           ListenableBuilder(
-            listenable: player,
+            listenable: player.playbackListenable,
             builder: (context, _) => _softRoundControl(
               icon: player.isPlaying
                   ? Icons.pause_rounded
@@ -1026,7 +1052,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             ),
           ),
           ListenableBuilder(
-            listenable: player,
+            listenable: player.queueListenable,
             builder: (context, _) => _softRoundControl(
               icon: Icons.skip_next_rounded,
               onPressed: player.canSkipNext ? () => player.skipNext() : null,
@@ -1204,69 +1230,57 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         const SizedBox(height: 14),
         SizedBox(
           width: artWidth,
-          child: StreamBuilder<Duration>(
-            stream: player.audioPlayer.positionStream,
-            builder: (context, posSnap) {
-              return StreamBuilder<Duration?>(
-                stream: player.audioPlayer.durationStream,
-                builder: (context, durSnap) {
-                  final dur = durSnap.data ?? player.duration;
-                  final pos = posSnap.data ?? player.position;
-                  final totalMs = dur?.inMilliseconds ?? 0;
-                  final posMs = pos.inMilliseconds;
-                  final sliderValue =
-                      _dragPositionFraction ??
-                      (totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0);
-                  final seekColumn = Column(
+          child: _nowPlayingSeekListenable(
+            player: player,
+            builder: (context, pos, dur, baseSliderValue) {
+              final totalMs = dur?.inMilliseconds ?? 0;
+              final sliderValue =
+                  _dragPositionFraction ?? baseSliderValue;
+              return Column(
+                children: [
+                  PlayerAdaptiveSlider(
+                    value: sliderValue.clamp(0.0, 1.0),
+                    appearance: _npSliderAppearance(context),
+                    activeColor: accent,
+                    inactiveColor: ivy
+                        ? _kIvyMuted.withValues(alpha: 0.45)
+                        : null,
+                    onChanged: totalMs > 0
+                        ? (v) => setState(() => _dragPositionFraction = v)
+                        : null,
+                    onChangeEnd: totalMs > 0
+                        ? (v) {
+                            player.seek(
+                              Duration(milliseconds: (v * totalMs).round()),
+                            );
+                            setState(() => _dragPositionFraction = null);
+                          }
+                        : null,
+                  ),
+                  Row(
                     children: [
-                      PlayerAdaptiveSlider(
-                        value: sliderValue.clamp(0.0, 1.0),
-                        appearance: _npSliderAppearance(context),
-                        activeColor: accent,
-                        inactiveColor: ivy
-                            ? _kIvyMuted.withValues(alpha: 0.45)
-                            : null,
-                        onChanged: totalMs > 0
-                            ? (v) => setState(() => _dragPositionFraction = v)
-                            : null,
-                        onChangeEnd: totalMs > 0
-                            ? (v) {
-                                player.seek(
-                                  Duration(
-                                    milliseconds: (v * totalMs).round(),
-                                  ),
-                                );
-                                setState(() => _dragPositionFraction = null);
-                              }
-                            : null,
+                      Text(
+                        _formatDuration(pos),
+                        style: _fullArtTimeLabelStyle(
+                          context,
+                          theme,
+                          pal,
+                          accent,
+                        ),
                       ),
-                      Row(
-                        children: [
-                          Text(
-                            _formatDuration(pos),
-                            style: _fullArtTimeLabelStyle(
-                              context,
-                              theme,
-                              pal,
-                              accent,
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            dur != null ? _formatDuration(dur) : '--:--',
-                            style: _fullArtTimeLabelStyle(
-                              context,
-                              theme,
-                              pal,
-                              accent,
-                            ),
-                          ),
-                        ],
+                      const Spacer(),
+                      Text(
+                        dur != null ? _formatDuration(dur) : '--:--',
+                        style: _fullArtTimeLabelStyle(
+                          context,
+                          theme,
+                          pal,
+                          accent,
+                        ),
                       ),
                     ],
-                  );
-                  return seekColumn;
-                },
+                  ),
+                ],
               );
             },
           ),
@@ -1332,62 +1346,51 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         const SizedBox(height: 14),
         SizedBox(
           width: artWidth,
-          child: StreamBuilder<Duration>(
-            stream: player.audioPlayer.positionStream,
-            builder: (context, posSnap) {
-              return StreamBuilder<Duration?>(
-                stream: player.audioPlayer.durationStream,
-                builder: (context, durSnap) {
-                  final dur = durSnap.data ?? player.duration;
-                  final pos = posSnap.data ?? player.position;
-                  final totalMs = dur?.inMilliseconds ?? 0;
-                  final posMs = pos.inMilliseconds;
-                  final sliderValue =
-                      _dragPositionFraction ??
-                      (totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0);
-                  return Column(
+          child: _nowPlayingSeekListenable(
+            player: player,
+            builder: (context, pos, dur, baseSliderValue) {
+              final totalMs = dur?.inMilliseconds ?? 0;
+              final sliderValue =
+                  _dragPositionFraction ?? baseSliderValue;
+              return Column(
+                children: [
+                  PlayerAdaptiveSlider(
+                    value: sliderValue.clamp(0.0, 1.0),
+                    appearance: PlayerSliderAppearance.daisy,
+                    activeColor: accent,
+                    inactiveColor: accent.withValues(alpha: 0.35),
+                    onChanged: totalMs > 0
+                        ? (v) => setState(() => _dragPositionFraction = v)
+                        : null,
+                    onChangeEnd: totalMs > 0
+                        ? (v) {
+                            player.seek(
+                              Duration(milliseconds: (v * totalMs).round()),
+                            );
+                            setState(() => _dragPositionFraction = null);
+                          }
+                        : null,
+                  ),
+                  Row(
                     children: [
-                      PlayerAdaptiveSlider(
-                        value: sliderValue.clamp(0.0, 1.0),
-                        appearance: PlayerSliderAppearance.daisy,
-                        activeColor: accent,
-                        inactiveColor: accent.withValues(alpha: 0.35),
-                        onChanged: totalMs > 0
-                            ? (v) => setState(() => _dragPositionFraction = v)
-                            : null,
-                        onChangeEnd: totalMs > 0
-                            ? (v) {
-                                player.seek(
-                                  Duration(
-                                    milliseconds: (v * totalMs).round(),
-                                  ),
-                                );
-                                setState(() => _dragPositionFraction = null);
-                              }
-                            : null,
+                      Text(
+                        _formatDuration(pos),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                      Row(
-                        children: [
-                          Text(
-                            _formatDuration(pos),
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: accent,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            dur != null ? _formatDuration(dur) : '--:--',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: accent,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
+                      const Spacer(),
+                      Text(
+                        dur != null ? _formatDuration(dur) : '--:--',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: accent,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ],
-                  );
-                },
+                  ),
+                ],
               );
             },
           ),
@@ -1428,7 +1431,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             icon: Icon(Icons.skip_previous_rounded, color: ink.active),
           ),
           ListenableBuilder(
-            listenable: player,
+            listenable: player.playbackListenable,
             builder: (context, _) => IconButton(
               tooltip: player.isPlaying ? 'Pause' : 'Play',
               iconSize: 44,
@@ -1447,7 +1450,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             ),
           ),
           ListenableBuilder(
-            listenable: player,
+            listenable: player.queueListenable,
             builder: (context, _) => IconButton(
               tooltip: player.canSkipNext ? 'Next track' : 'End of playlist',
               iconSize: 34,
@@ -1564,7 +1567,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     final player = PlayerController.of(context);
 
     return ListenableBuilder(
-      listenable: player,
+      listenable: player.track,
       builder: (context, _) {
         final track = player.currentTrack;
         if (track == null) {
@@ -1610,7 +1613,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                 ),
                                 sliver: SliverToBoxAdapter(
                                   child: ListenableBuilder(
-                                    listenable: player,
+                                    listenable: player.track,
                                     builder: (context, _) {
                                       final t = player.currentTrack;
                                       if (t == null) {
@@ -1652,89 +1655,67 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                             ),
                                           ),
                                           const SizedBox(height: 16),
-                                          StreamBuilder<Duration>(
-                                            stream: player
-                                                .audioPlayer
-                                                .positionStream,
-                                            builder: (context, posSnap) {
-                                              return StreamBuilder<Duration?>(
-                                                stream: player
-                                                    .audioPlayer
-                                                    .durationStream,
-                                                builder: (context, durSnap) {
-                                                  final dur =
-                                                      durSnap.data ??
-                                                      player.duration;
-                                                  final pos =
-                                                      posSnap.data ??
-                                                      player.position;
-                                                  final totalMs =
-                                                      dur?.inMilliseconds ?? 0;
-                                                  final posMs =
-                                                      pos.inMilliseconds;
-                                                  final sliderValue =
-                                                      _dragPositionFraction ??
-                                                      (totalMs > 0
-                                                          ? (posMs / totalMs)
-                                                                .clamp(0.0, 1.0)
-                                                          : 0.0);
-
-                                                  return Row(
-                                                    children: [
-                                                      Text(
-                                                        _formatDuration(pos),
-                                                        style: theme
-                                                            .textTheme
-                                                            .labelSmall,
+                                          _nowPlayingSeekListenable(
+                                            player: player,
+                                            builder: (context, pos, dur, baseSliderValue) {
+                                              final totalMs =
+                                                  dur?.inMilliseconds ?? 0;
+                                              final sliderValue =
+                                                  _dragPositionFraction ??
+                                                  baseSliderValue;
+                                              return Row(
+                                                children: [
+                                                  Text(
+                                                    _formatDuration(pos),
+                                                    style: theme
+                                                        .textTheme
+                                                        .labelSmall,
+                                                  ),
+                                                  Expanded(
+                                                    child: PlayerAdaptiveSlider(
+                                                      value: sliderValue.clamp(
+                                                        0.0,
+                                                        1.0,
                                                       ),
-                                                      Expanded(
-                                                        child: PlayerAdaptiveSlider(
-                                                          value: sliderValue
-                                                              .clamp(0.0, 1.0),
-                                                          appearance:
-                                                              PlayerSliderAppearance
-                                                                  .softBlur,
-                                                          activeColor: context
-                                                              .controlAccent,
-                                                          onChanged: totalMs > 0
-                                                              ? (v) => setState(
-                                                                  () =>
-                                                                      _dragPositionFraction =
-                                                                          v,
-                                                                )
-                                                              : null,
-                                                          onChangeEnd:
-                                                              totalMs > 0
-                                                              ? (v) {
-                                                                  player.seek(
-                                                                    Duration(
-                                                                      milliseconds:
-                                                                          (v * totalMs)
-                                                                              .round(),
-                                                                    ),
-                                                                  );
-                                                                  setState(
-                                                                    () =>
-                                                                        _dragPositionFraction =
-                                                                            null,
-                                                                  );
-                                                                }
-                                                              : null,
-                                                        ),
-                                                      ),
-                                                      Text(
-                                                        dur != null
-                                                            ? _formatDuration(
-                                                                dur,
-                                                              )
-                                                            : '--:--',
-                                                        style: theme
-                                                            .textTheme
-                                                            .labelSmall,
-                                                      ),
-                                                    ],
-                                                  );
-                                                },
+                                                      appearance:
+                                                          PlayerSliderAppearance
+                                                              .softBlur,
+                                                      activeColor: context
+                                                          .controlAccent,
+                                                      onChanged: totalMs > 0
+                                                          ? (v) => setState(
+                                                              () =>
+                                                                  _dragPositionFraction =
+                                                                      v,
+                                                            )
+                                                          : null,
+                                                      onChangeEnd: totalMs > 0
+                                                          ? (v) {
+                                                              player.seek(
+                                                                Duration(
+                                                                  milliseconds:
+                                                                      (v * totalMs)
+                                                                          .round(),
+                                                                ),
+                                                              );
+                                                              setState(
+                                                                () =>
+                                                                    _dragPositionFraction =
+                                                                        null,
+                                                              );
+                                                            }
+                                                          : null,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    dur != null
+                                                        ? _formatDuration(dur)
+                                                        : '--:--',
+                                                    style: theme
+                                                        .textTheme
+                                                        .labelSmall,
+                                                  ),
+                                                ],
                                               );
                                             },
                                           ),
@@ -1774,7 +1755,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                 ),
                                                 const SizedBox(width: 16),
                                                 ListenableBuilder(
-                                                  listenable: player,
+                                                  listenable:
+                                                      player.playbackListenable,
                                                   builder: (context, _) {
                                                     final playing =
                                                         player.isPlaying;
@@ -1807,7 +1789,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                 ),
                                                 const SizedBox(width: 16),
                                                 ListenableBuilder(
-                                                  listenable: player,
+                                                  listenable:
+                                                      player.queueListenable,
                                                   builder: (context, _) {
                                                     final canNext =
                                                         player.canSkipNext;
@@ -1921,7 +1904,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                 ),
                                                 const SizedBox(width: 20),
                                                 ListenableBuilder(
-                                                  listenable: player,
+                                                  listenable:
+                                                      player.playbackListenable,
                                                   builder: (context, _) {
                                                     final playing =
                                                         player.isPlaying;
@@ -1955,7 +1939,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                                 ),
                                                 const SizedBox(width: 20),
                                                 ListenableBuilder(
-                                                  listenable: player,
+                                                  listenable:
+                                                      player.queueListenable,
                                                   builder: (context, _) {
                                                     final canNext =
                                                         player.canSkipNext;
@@ -1994,7 +1979,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                 SliverFillRemaining(
                                   hasScrollBody: false,
                                   child: ListenableBuilder(
-                                    listenable: player,
+                                    listenable: player.track,
                                     builder: (context, _) {
                                       if (player.currentTrack == null) {
                                         return const SizedBox.shrink();
@@ -2087,7 +2072,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                 SliverFillRemaining(
                                   hasScrollBody: false,
                                   child: ListenableBuilder(
-                                    listenable: player,
+                                    listenable: player.queueListenable,
                                     builder: (context, _) {
                                       return _UpNextPanel(
                                         next: player.upcomingTrack,

@@ -24,4 +24,18 @@ class Mp3PlayerAudioServiceActivity : AudioServiceActivity() {
         super.configureFlutterEngine(flutterEngine)
         Mp3PlayerWidgetMethodChannel.attach(flutterEngine, applicationContext)
     }
+
+    override fun onStop() {
+        if (isFinishing) {
+            Mp3PlayerWidgetSync.setPlayingIndicator(applicationContext, playing = false)
+        }
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        if (!isChangingConfigurations) {
+            Mp3PlayerWidgetSync.setPlayingIndicator(applicationContext, playing = false)
+        }
+        super.onDestroy()
+    }
 }

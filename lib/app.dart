@@ -49,6 +49,9 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
   Timer? _androidWidgetProgressTimer;
   StreamSubscription<PlayerState>? _androidWidgetPlayerStateSub;
 
+  /// When true, widget shows play until [AppLifecycleState.resumed] re-syncs.
+  bool _androidWidgetForcePlayIcon = false;
+
   bool get _syncAndroidHomeWidget =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
@@ -59,7 +62,8 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     HardwareKeyboard.instance.addHandler(_onGlobalHardwareKey);
-    _player.addListener(_onPlayerControllerChanged);
+    _player.track.addListener(_onPlayerControllerChanged);
+    _player.playback.addListener(_onPlayerControllerChanged);
     _attachAndroidWidgetProgressTicker();
     unawaited(ensureMediaNotificationPermission());
     _loadTheme();
@@ -68,8 +72,19 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      _androidWidgetForcePlayIcon = false;
       _scheduleAndroidHomeWidgetSync();
+    } else if (state == AppLifecycleState.detached) {
+      _markAndroidHomeWidgetPausedAppearance();
     }
+  }
+
+  void _markAndroidHomeWidgetPausedAppearance() {
+    if (!_syncAndroidHomeWidget) return;
+    _androidWidgetForcePlayIcon = true;
+    _androidWidgetProgressTimer?.cancel();
+    _androidWidgetSyncDebounce?.cancel();
+    unawaited(AndroidHomeWidgetBridge.setPlayingIndicator(false));
   }
 
   bool _onGlobalHardwareKey(KeyEvent event) {
@@ -99,7 +114,9 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
         _androidWidgetProgressTimer = Timer.periodic(
           const Duration(seconds: 1),
           (_) async {
-            if (!mounted || !_player.isPlaying) {
+            if (!mounted ||
+                _androidWidgetForcePlayIcon ||
+                !_player.isPlaying) {
               _androidWidgetProgressTimer?.cancel();
               return;
             }
@@ -136,7 +153,9 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
   }
 
   Future<void> _pushAndroidHomeWidgetState() async {
-    if (!_syncAndroidHomeWidget || !mounted) return;
+    if (!_syncAndroidHomeWidget || !mounted || _androidWidgetForcePlayIcon) {
+      return;
+    }
     final track = _player.currentTrack;
     final palette = _themeSetting.paletteAt(_themeClock);
     final palForWidget = _materialPaletteFor(palette);
@@ -309,12 +328,14 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    _markAndroidHomeWidgetPausedAppearance();
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onGlobalHardwareKey);
     _androidWidgetSyncDebounce?.cancel();
     _androidWidgetProgressTimer?.cancel();
     _androidWidgetPlayerStateSub?.cancel();
-    _player.removeListener(_onPlayerControllerChanged);
+    _player.track.removeListener(_onPlayerControllerChanged);
+    _player.playback.removeListener(_onPlayerControllerChanged);
     _themeTimer?.cancel();
     _player.dispose();
     SleepTimerController.instance.dispose();

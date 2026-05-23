@@ -22,6 +22,16 @@ object Mp3PlayerWidgetMethodChannel {
                         Mp3PlayerWidgetSync.handlePlaybackProgress(appContext, args)
                         result.success(null)
                     }
+                    "setPlaying" -> {
+                        val args = call.arguments as? Map<*, *> ?: emptyMap<String, Any>()
+                        val playing = when (val v = args["playing"]) {
+                            is Boolean -> v
+                            is Number -> v.toInt() != 0
+                            else -> false
+                        }
+                        Mp3PlayerWidgetSync.setPlayingIndicator(appContext, playing)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }

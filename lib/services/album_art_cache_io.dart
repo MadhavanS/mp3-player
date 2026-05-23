@@ -57,6 +57,95 @@ void evictCachedAlbumArt(TrackItem track) {
   _memory.removeWhere((key, _) => key.startsWith(prefix));
 }
 
+String _pathDiskKey(String filePath, int maxDimension) {
+  final pathKey = canonicalMusicLibraryPathKey(filePath.trim());
+  if (pathKey.isEmpty) return '';
+  return 'path_${pathKey.hashCode.abs()}_$maxDimension';
+}
+
+Uint8List? cachedAlbumArtForPathSync(
+  String filePath, {
+  int maxDimension = 512,
+}) {
+  final key = _pathDiskKey(filePath, maxDimension.clamp(96, 512).toInt());
+  if (key.isEmpty) return null;
+  return _memory[key];
+}
+
+Future<Uint8List?> cachedAlbumArtForPath(
+  String filePath, {
+  int maxDimension = 512,
+}) async {
+  final normalizedMax = maxDimension.clamp(96, 512).toInt();
+  final key = _pathDiskKey(filePath, normalizedMax);
+  if (key.isEmpty) return null;
+
+  final cached = _memory[key];
+  if (cached != null) {
+    _touchMemory(key, cached);
+    return cached;
+  }
+
+  final existing = _inFlight[key];
+  if (existing != null) return existing;
+
+  final future = _loadPathDiskCache(filePath, normalizedMax, key);
+  _inFlight[key] = future;
+  try {
+    return await future;
+  } finally {
+    _inFlight.remove(key);
+  }
+}
+
+Future<bool> hasAlbumArtDiskCache(
+  String filePath, {
+  int maxDimension = 512,
+}) async {
+  final key = _pathDiskKey(filePath, maxDimension.clamp(96, 512).toInt());
+  if (key.isEmpty) return false;
+  if (_memory.containsKey(key)) return true;
+  final file = await _cacheFile(key);
+  return file.existsSync() && file.lengthSync() > 0;
+}
+
+Future<void> primeAlbumArtDiskCache(
+  String filePath,
+  Uint8List raw, {
+  int maxDimension = 512,
+}) async {
+  if (filePath.trim().isEmpty || raw.isEmpty) return;
+  final normalizedMax = maxDimension.clamp(96, 512).toInt();
+  final key = _pathDiskKey(filePath, normalizedMax);
+  if (key.isEmpty) return;
+
+  final resized = await _resizeToPng(raw, normalizedMax);
+  final bytes = (resized == null || resized.isEmpty) ? raw : resized;
+  try {
+    final file = await _cacheFile(key);
+    await file.writeAsBytes(bytes, flush: false);
+  } catch (e, st) {
+    debugPrint('primeAlbumArtDiskCache write failed: $e\n$st');
+  }
+  _putMemory(key, bytes);
+}
+
+Future<Uint8List?> _loadPathDiskCache(
+  String filePath,
+  int maxDimension,
+  String key,
+) async {
+  final file = await _cacheFile(key);
+  try {
+    if (await file.exists() && await file.length() > 0) {
+      final bytes = await file.readAsBytes();
+      _putMemory(key, bytes);
+      return bytes;
+    }
+  } catch (_) {}
+  return null;
+}
+
 void prewarmAlbumArtCache(
   Iterable<TrackItem> tracks, {
   int maxCount = 50,

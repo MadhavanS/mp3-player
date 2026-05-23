@@ -8,7 +8,9 @@ import 'package:path/path.dart' as p;
 import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
+import '../../services/album_art_cache.dart';
 import '../../services/favorite_songs_store.dart';
+import '../../services/track_metadata.dart';
 import '../../services/library_tabs_store.dart';
 import '../../services/library_track_sort.dart';
 import '../../services/music_library_path_key.dart';
@@ -168,6 +170,9 @@ class LibraryScreenState extends State<LibraryScreen>
   );
 
   final ScrollController _songsScrollController = ScrollController();
+  Timer? _songsArtEnrichDebounce;
+  final Set<String> _songsArtEnrichInFlight = <String>{};
+  static const double _kSongsRowStride = 73;
   final ScrollController _recentAddedScrollController = ScrollController();
   final ScrollController _playlistScrollController = ScrollController();
   final ScrollController _favoritesScrollController = ScrollController();
@@ -220,7 +225,7 @@ class LibraryScreenState extends State<LibraryScreen>
     return _cachedRecentlyPlayedPathsFuture!;
   }
 
-  LibraryTrackSortMode _songSortMode = LibraryTrackSortMode.modifiedNewest;
+  LibraryTrackSortMode _songSortMode = LibraryTrackSortMode.folderOrder;
 
   bool _songsMultiSelectMode = false;
   final Set<String> _songsSelectedPathKeys = {};
@@ -472,6 +477,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
   @override
   void dispose() {
+    _songsArtEnrichDebounce?.cancel();
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _searchController.dispose();
@@ -501,7 +507,12 @@ class LibraryScreenState extends State<LibraryScreen>
       tracks,
       browsePathKeys,
     );
-    return sortFilteredTrackIndices(scoped, tracks, _songSortMode);
+    return sortFilteredTrackIndices(
+      scoped,
+      tracks,
+      _songSortMode,
+      libraryRoots: widget.folderPaths,
+    );
   }
 
   bool _userPlaylistContainsCurrentPath(UserPlaylistEntry pl, String pathKey) {
@@ -530,6 +541,63 @@ class LibraryScreenState extends State<LibraryScreen>
       }
     }
     return (null, songsTabIndices.length);
+  }
+
+  void _scheduleSongsVisibleArtEnrichment(
+    List<TrackItem> tracks,
+    List<int> filteredIndices,
+    PlayerController player,
+  ) {
+    _songsArtEnrichDebounce?.cancel();
+    _songsArtEnrichDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      unawaited(
+        _enrichVisibleSongsArt(tracks, filteredIndices, player),
+      );
+    });
+  }
+
+  Future<void> _enrichVisibleSongsArt(
+    List<TrackItem> tracks,
+    List<int> filteredIndices,
+    PlayerController player,
+  ) async {
+    if (!_songsScrollController.hasClients || filteredIndices.isEmpty) {
+      return;
+    }
+    final position = _songsScrollController.position;
+    final first = (position.pixels / _kSongsRowStride)
+        .floor()
+        .clamp(0, filteredIndices.length - 1);
+    final visible =
+        (position.viewportDimension / _kSongsRowStride).ceil() + 4;
+    final end = min(first + visible, filteredIndices.length);
+
+    for (var i = first; i < end; i++) {
+      final track = tracks[filteredIndices[i]];
+      final path = track.filePath?.trim();
+      if (path == null || path.isEmpty) continue;
+      final art = track.albumArtBytes;
+      if (art != null && art.isNotEmpty) continue;
+      if (await hasAlbumArtDiskCache(path)) continue;
+      if (!_songsArtEnrichInFlight.add(path)) continue;
+      try {
+        final updated = await readAudioMetadata(track);
+        final newArt = updated.albumArtBytes;
+        if (newArt != null && newArt.isNotEmpty) {
+          player.updateTrackByPath(
+            path,
+            updated,
+            notify: CatalogNotifyMode.throttled,
+            refreshNotificationArt: false,
+          );
+        }
+      } catch (e, st) {
+        debugPrint('_enrichVisibleSongsArt($path): $e\n$st');
+      } finally {
+        _songsArtEnrichInFlight.remove(path);
+      }
+    }
   }
 
   void _scheduleScrollAnchorIntoView(GlobalKey anchorKey) {
@@ -1497,7 +1565,7 @@ class LibraryScreenState extends State<LibraryScreen>
     final player = PlayerController.of(context);
 
     return ListenableBuilder(
-      listenable: player,
+      listenable: player.queue,
       builder: (context, _) {
         return ValueListenableBuilder<Set<String>?>(
           valueListenable: widget.songsBrowsePathKeys,
@@ -2564,19 +2632,18 @@ class LibraryScreenState extends State<LibraryScreen>
         final catalogIndex = filteredIndices[i];
         final track = tracks[catalogIndex];
         final path = track.filePath;
-        final nowPlaying = _isCurrentTrackPath(player, path);
         final multiSelected = _isSongPathSelected(path);
         final plIndex = path != null && path.isNotEmpty
             ? _playlistIndexForPath(player, path)
             : -1;
         return _TrackTile(
           track: track,
-          selected: inSelect ? multiSelected : nowPlaying,
-          showPlayingIcon: !inSelect && nowPlaying,
-          selectionMode: inSelect,
-          rowKey: nowPlaying && _isActiveTab(LibraryTabId.songs)
+          selected: inSelect ? multiSelected : false,
+          highlightWhenCurrent: !inSelect,
+          scrollAnchorWhenCurrent: _isActiveTab(LibraryTabId.songs)
               ? _scrollAnchorSongs
               : null,
+          selectionMode: inSelect,
           onTap: () {
             if (inSelect) {
               _toggleSongsSelection(path);
@@ -2625,12 +2692,30 @@ class LibraryScreenState extends State<LibraryScreen>
       },
     );
 
-    if (!inSelect) return list;
+    var scrollList = NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        if (n.metrics.axis == Axis.vertical) {
+          _scheduleSongsVisibleArtEnrichment(
+            tracks,
+            filteredIndices,
+            player,
+          );
+        }
+        return false;
+      },
+      child: list,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _scheduleSongsVisibleArtEnrichment(tracks, filteredIndices, player);
+    });
+
+    if (!inSelect) return scrollList;
 
     return Stack(
       alignment: Alignment.bottomCenter,
       children: [
-        list,
+        scrollList,
         _SongsMultiSelectActionBar(
           enabled: _songsSelectedPathKeys.isNotEmpty,
           onPlay: () => unawaited(
@@ -2717,9 +2802,9 @@ class _TrackTile extends StatelessWidget {
   const _TrackTile({
     required this.track,
     required this.selected,
-    this.showPlayingIcon = false,
+    this.highlightWhenCurrent = false,
+    this.scrollAnchorWhenCurrent,
     this.selectionMode = false,
-    this.rowKey,
     required this.onTap,
     this.onLongPress,
     this.onOverflowAction,
@@ -2728,9 +2813,72 @@ class _TrackTile extends StatelessWidget {
   final TrackItem track;
   final bool selected;
 
-  /// When true (Songs tab), shows a play icon next to the title for the now-playing row.
+  /// Row highlight + play icon follow [PlayerController.track] (skip), not [queue].
+  final bool highlightWhenCurrent;
+  final Key? scrollAnchorWhenCurrent;
+  final bool selectionMode;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final void Function(TrackOverflowAction action)? onOverflowAction;
+
+  @override
+  Widget build(BuildContext context) {
+    if (highlightWhenCurrent) {
+      return ListenableBuilder(
+        listenable: PlayerController.of(context).track,
+        builder: (context, _) {
+          final player = PlayerController.of(context);
+          final isCurrent = LibraryScreenState._isCurrentTrackPath(
+            player,
+            track.filePath,
+          );
+          return _TrackTileBody(
+            track: track,
+            selected: isCurrent,
+            showPlayingIcon: isCurrent,
+            selectionMode: selectionMode,
+            multiSelectSelected: selected,
+            rowKey: isCurrent ? scrollAnchorWhenCurrent : null,
+            onTap: onTap,
+            onLongPress: onLongPress,
+            onOverflowAction: onOverflowAction,
+          );
+        },
+      );
+    }
+
+    return _TrackTileBody(
+      track: track,
+      selected: selected,
+      showPlayingIcon: false,
+      selectionMode: selectionMode,
+      multiSelectSelected: selected,
+      rowKey: null,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      onOverflowAction: onOverflowAction,
+    );
+  }
+}
+
+class _TrackTileBody extends StatelessWidget {
+  const _TrackTileBody({
+    required this.track,
+    required this.selected,
+    required this.showPlayingIcon,
+    required this.selectionMode,
+    required this.multiSelectSelected,
+    this.rowKey,
+    required this.onTap,
+    this.onLongPress,
+    this.onOverflowAction,
+  });
+
+  final TrackItem track;
+  final bool selected;
   final bool showPlayingIcon;
   final bool selectionMode;
+  final bool multiSelectSelected;
   final Key? rowKey;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
@@ -2750,10 +2898,10 @@ class _TrackTile extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 4),
             child: Icon(
-              selected
+              multiSelectSelected
                   ? Icons.check_circle_rounded
                   : Icons.radio_button_unchecked_rounded,
-              color: selected
+              color: multiSelectSelected
                   ? accent
                   : pal.textMuted.withValues(alpha: 0.85),
               size: 26,
