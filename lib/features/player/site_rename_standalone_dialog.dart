@@ -164,7 +164,7 @@ Future<void> _applySiteRenameStandalone(
   var diskPath = originalPath;
 
   try {
-    final isCurrent = player.isCurrentTrackFilePath(originalPath);
+    var isCurrent = player.isCurrentTrackFilePath(originalPath);
     if (isCurrent) {
       await player.stopForExternalFileEdit();
       stoppedForEdit = true;
@@ -176,8 +176,19 @@ Future<void> _applySiteRenameStandalone(
         originalPath,
         suggestion.newBasenameWithoutExt,
       );
+      player.registerLibraryPathRename(originalPath, newPath);
     }
     diskPath = newPath;
+    if (!isCurrent && newPath != originalPath) {
+      isCurrent = await player.shouldRewirePlaybackForRenamedFile(
+        originalPath,
+        newPath,
+      );
+      if (isCurrent && !stoppedForEdit) {
+        await player.stopForExternalFileEdit();
+        stoppedForEdit = true;
+      }
+    }
 
     await writeEmbeddedAudioTags(
       filePath: newPath,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show File;
 
 // audio_session exposes output device types as experimental, but this is the
 // supported way to pause on Bluetooth output removal in the current package.
@@ -369,6 +370,12 @@ class PlayerController extends ChangeNotifier {
   DateTime? _postLoadConcatGuardUntil;
   int? _postLoadExpectedConcatIndex;
   bool _sourceNeedsReload = false;
+
+  /// After an on-disk rename, maps pre-rename [canonicalMusicLibraryPathKey] → new absolute path.
+  final Map<String, String> _libraryPathMigrations = {};
+
+  /// While set, [_loadCurrentImpl] uses this row for the logical track (post-rename reload).
+  TrackItem? _loadCurrentPathOverride;
 
   /// Saved queue position when a large library restore skips native load on launch.
   Duration? _pendingInitialPosition;
@@ -851,6 +858,9 @@ class PlayerController extends ChangeNotifier {
       await _playSafely(context: 'repeat-one play');
       return;
     }
+    if (_sourceNeedsReload) {
+      await _rebuildAudioSourceForQueueMutation();
+    }
     await skipNext();
   }
 
@@ -895,6 +905,17 @@ class PlayerController extends ChangeNotifier {
   void _onConcatIndexChanged(int? concatIdx) {
     if (concatIdx == null) return;
     if (_manualQueueAdvance) return;
+    // Queue was edited (play next, reorder) but native children are stale until reload.
+    if (_sourceNeedsReload) {
+      final order = _activeSourceOrder.isNotEmpty
+          ? _activeSourceOrder
+          : _effectiveQueueOrder();
+      final logical = _logicalPlaylistIndex();
+      final expectedConcatIdx = order.indexOf(logical);
+      if (expectedConcatIdx < 0 || concatIdx != expectedConcatIdx) {
+        return;
+      }
+    }
     if (_postLoadConcatGuardUntil != null &&
         !DateTime.now().isBefore(_postLoadConcatGuardUntil!)) {
       _postLoadConcatGuardUntil = null;
@@ -1055,6 +1076,84 @@ class PlayerController extends ChangeNotifier {
   /// Updates library rows and in-queue metadata after a rescan without reloading
   /// [AudioPlayer]'s source — use for manual refresh while music is playing.
   ///
+  /// Canonical path key for matching library scan rows after an on-disk rename.
+  String libraryPathKeyForScanMatch(String rawPath) {
+    final k = canonicalMusicLibraryPathKey(rawPath);
+    if (k.isEmpty) return k;
+    return _resolveMigratedLibraryPathKey(k);
+  }
+
+  /// Call as soon as the file is renamed on disk so concurrent loads can resolve the new path.
+  void registerLibraryPathRename(String oldPath, String newPath) {
+    _registerLibraryPathMigration(oldPath, newPath);
+    _syncPlaylistPathsFromMigrations();
+    notifyListeners();
+  }
+
+  void _registerLibraryPathMigration(String oldPath, String newPath) {
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    final newKey = canonicalMusicLibraryPathKey(newPath);
+    if (oldKey.isEmpty || newKey.isEmpty || oldKey == newKey) return;
+    _libraryPathMigrations[oldKey] = kIsWeb
+        ? newPath.trim()
+        : _normalizeLocalFilePath(newPath);
+  }
+
+  String _normalizeLocalFilePath(String path) {
+    try {
+      return File(path.trim()).absolute.path;
+    } catch (_) {
+      return path.trim();
+    }
+  }
+
+  /// Resolved absolute path after any registered rename chain, or [rawPath] unchanged.
+  String _resolveMigratedFilePath(String rawPath) {
+    var key = canonicalMusicLibraryPathKey(rawPath);
+    if (key.isEmpty) return rawPath.trim();
+    final seen = <String>{};
+    var resolved = rawPath.trim();
+    while (_libraryPathMigrations.containsKey(key)) {
+      if (!seen.add(key)) break;
+      resolved = _libraryPathMigrations[key]!;
+      key = canonicalMusicLibraryPathKey(resolved);
+    }
+    return resolved;
+  }
+
+  String _resolveMigratedLibraryPathKey(String pathKey) {
+    return canonicalMusicLibraryPathKey(_resolveMigratedFilePath(pathKey));
+  }
+
+  void _syncPlaylistPathsFromMigrations() {
+    if (_libraryPathMigrations.isEmpty) return;
+    var changed = false;
+    for (var i = 0; i < _playlist.length; i++) {
+      final fp = _playlist[i].filePath?.trim();
+      if (fp == null || fp.isEmpty) continue;
+      final migrated = _resolveMigratedFilePath(fp);
+      if (migrated == fp) continue;
+      _playlist[i] = TrackItem.mergePreservedAlbumArt(
+        TrackItem.fromFilePath(migrated),
+        _playlist[i],
+      );
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
+  TrackItem? _catalogTrackForPathKey(
+    String pathKey,
+    Map<String, TrackItem> byKey,
+  ) {
+    if (pathKey.isEmpty) return null;
+    final direct = byKey[pathKey];
+    if (direct != null) return direct;
+    final migrated = _resolveMigratedLibraryPathKey(pathKey);
+    if (migrated != pathKey) return byKey[migrated];
+    return null;
+  }
+
   /// Returns `true` when playback was left untouched (Songs-origin queue). Returns
   /// `false` when the caller should use [tryResyncQueueWithLibraryScan] instead.
   bool refreshLibraryDuringPlayback(List<TrackItem> catalogTracks) {
@@ -1078,10 +1177,14 @@ class PlayerController extends ChangeNotifier {
       final fp = _playlist[i].filePath?.trim();
       if (fp == null || fp.isEmpty) continue;
       final k = canonicalMusicLibraryPathKey(fp);
-      final fresh = byKey[k];
+      final fresh = _catalogTrackForPathKey(k, byKey);
       if (fresh != null && fresh != _playlist[i]) {
         _playlist[i] = TrackItem.mergePreservedAlbumArt(fresh, _playlist[i]);
         changed = true;
+        final newKey = canonicalMusicLibraryPathKey(fresh.filePath ?? '');
+        if (newKey.isNotEmpty && newKey != k) {
+          _libraryPathMigrations.remove(k);
+        }
       }
     }
     if (changed) notifyListeners();
@@ -1117,7 +1220,9 @@ class PlayerController extends ChangeNotifier {
 
     var newIndex = 0;
     if (pathPreserve != null && pathPreserve.isNotEmpty) {
-      final preserveKey = canonicalMusicLibraryPathKey(pathPreserve);
+      final preserveKey = _resolveMigratedLibraryPathKey(
+        canonicalMusicLibraryPathKey(pathPreserve),
+      );
       if (preserveKey.isNotEmpty) {
         final ix = _playlist.indexWhere(
           (t) =>
@@ -1246,6 +1351,39 @@ class PlayerController extends ChangeNotifier {
     return true;
   }
 
+  /// Playlist index to insert [track] so it plays immediately after the current song.
+  int _insertPlaylistIndexAfterCurrent() {
+    final logical = _logicalPlaylistIndex();
+    final scope = _playbackPathKeysScope;
+    if (scope != null && scope.isNotEmpty) {
+      final ordered = _playbackScopedIndices();
+      if (ordered.isEmpty) {
+        return (logical + 1).clamp(0, _playlist.length);
+      }
+      final p = ordered.indexOf(logical);
+      if (p < 0) {
+        return (logical + 1).clamp(0, _playlist.length);
+      }
+      if (p < ordered.length - 1) {
+        return ordered[p + 1];
+      }
+      return _playlist.length;
+    }
+    return (logical + 1).clamp(0, _playlist.length);
+  }
+
+  /// Rebuilds [ConcatenatingAudioSource] after queue edits while keeping the current song.
+  Future<void> _rebuildAudioSourceForQueueMutation() async {
+    if (_playlist.isEmpty) return;
+    final pos = _player.position;
+    final loadId = ++_loadRequestGeneration;
+    await _loadCurrent(
+      loadToken: loadId,
+      initialPosition: pos,
+      stopBeforeLoad: false,
+    );
+  }
+
   /// Inserts [track] so it plays immediately after the current song.
   ///
   /// Returns `false` only when [track] is already the current queue item.
@@ -1268,8 +1406,10 @@ class PlayerController extends ChangeNotifier {
       }
     }
 
+    final curPl = _logicalPlaylistIndex();
+
     if (!_shuffle) {
-      if (existingIx == _index) {
+      if (existingIx == curPl) {
         return false;
       }
       if (existingIx != null) {
@@ -1278,42 +1418,21 @@ class PlayerController extends ChangeNotifier {
           _index--;
         }
       }
-      final insertAt = (_index + 1).clamp(0, _playlist.length);
-      _playlist.insert(insertAt, track);
-      _sourceNeedsReload = true;
+      var insertAt = _insertPlaylistIndexAfterCurrent();
+      if (existingIx != null && existingIx < insertAt) {
+        insertAt--;
+      }
+      _playlist.insert(insertAt.clamp(0, _playlist.length), track);
+      await _rebuildAudioSourceForQueueMutation();
       notifyListeners();
       return true;
     }
 
-    final curPl = _logicalPlaylistIndex();
     if (existingIx != null && existingIx == curPl) {
       return false;
     }
     if (existingIx != null) {
       _removePlaylistIndexWhileShuffling(existingIx);
-    }
-    if (!_shuffle) {
-      int? ex;
-      for (var i = 0; i < _playlist.length; i++) {
-        if (_sameQueuedIdentity(_playlist[i], track)) {
-          ex = i;
-          break;
-        }
-      }
-      if (ex == _index) {
-        return false;
-      }
-      if (ex != null) {
-        _playlist.removeAt(ex);
-        if (ex < _index) {
-          _index--;
-        }
-      }
-      final insertAt = (_index + 1).clamp(0, _playlist.length);
-      _playlist.insert(insertAt, track);
-      _sourceNeedsReload = true;
-      notifyListeners();
-      return true;
     }
 
     _playlist.add(track);
@@ -1321,7 +1440,7 @@ class PlayerController extends ChangeNotifier {
     final insertPos = (_shufflePos + 1).clamp(0, _shuffleOrder.length);
     _shuffleOrder.insert(insertPos, newIx);
 
-    _sourceNeedsReload = true;
+    await _rebuildAudioSourceForQueueMutation();
     notifyListeners();
     return true;
   }
@@ -1530,6 +1649,13 @@ class PlayerController extends ChangeNotifier {
   /// Callers that invoke [stopForExternalFileEdit] before this must pass
   /// [resumePlaying] / [resumePosition] — after a stop, [isPlaying] and
   /// [position] are no longer the pre-edit values.
+  bool _playlistEntryMatchesReplaceKey(String? filePath, String oldKey) {
+    if (filePath == null || filePath.trim().isEmpty || oldKey.isEmpty) {
+      return false;
+    }
+    return canonicalMusicLibraryPathKey(filePath) == oldKey;
+  }
+
   Future<void> replaceTrackPath(
     String oldPath,
     TrackItem updated, {
@@ -1537,71 +1663,99 @@ class PlayerController extends ChangeNotifier {
     bool? resumePlaying,
   }) async {
     final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    final newPath = updated.filePath?.trim() ?? '';
+    final newKey =
+        newPath.isNotEmpty ? canonicalMusicLibraryPathKey(newPath) : '';
     if (oldKey.isEmpty) return;
+    if (newKey.isNotEmpty && newKey != oldKey) {
+      _registerLibraryPathMigration(oldPath, newPath);
+    }
 
-    final currentPathBeforeReplace = currentTrack?.filePath;
-    final isCurrentTrackPathBeingReplaced =
-        currentPathBeforeReplace != null &&
-        canonicalMusicLibraryPathKey(currentPathBeforeReplace) == oldKey;
+    final isCurrentTrackPathBeingReplaced = isCurrentTrackFilePath(oldPath);
     final resumePlayingAfterReload = resumePlaying ?? false;
     final resumePositionAfterReload = resumePosition ?? Duration.zero;
 
     var changed = false;
     for (var i = 0; i < _playlist.length; i++) {
       final fp = _playlist[i].filePath;
-      if (fp != null && canonicalMusicLibraryPathKey(fp) == oldKey) {
+      if (_playlistEntryMatchesReplaceKey(fp, oldKey)) {
         _playlist[i] = updated;
         changed = true;
       }
     }
     for (var c = 0; c < _libraryCatalog.length; c++) {
       final fp = _libraryCatalog[c].filePath;
-      if (fp != null && canonicalMusicLibraryPathKey(fp) == oldKey) {
+      if (_playlistEntryMatchesReplaceKey(fp, oldKey)) {
         _libraryCatalog[c] = updated;
+        changed = true;
+      }
+    }
+    if (newKey.isNotEmpty) {
+      var catalogHasNew = false;
+      for (final t in _libraryCatalog) {
+        if (canonicalMusicLibraryPathKey(t.filePath ?? '') == newKey) {
+          catalogHasNew = true;
+          break;
+        }
+      }
+      if (!catalogHasNew) {
+        _libraryCatalog.add(updated);
         changed = true;
       }
     }
     if (isCurrentTrackPathBeingReplaced) {
       final idx = currentIndex;
       if (idx >= 0 && idx < _playlist.length) {
-        final curKey = canonicalMusicLibraryPathKey(
-          _playlist[idx].filePath ?? '',
-        );
-        if (curKey == oldKey) {
-          _playlist[idx] = updated;
-          changed = true;
-        }
+        _playlist[idx] = updated;
+        changed = true;
       }
     }
-    if (!changed) return;
+    _syncPlaylistPathsFromMigrations();
+
+    final shouldReloadPlayer = isCurrentTrackPathBeingReplaced ||
+        await shouldRewirePlaybackForRenamedFile(oldPath, newPath);
+
+    if (!changed && !shouldReloadPlayer) return;
 
     _sourceNeedsReload = true;
     notifyListeners();
 
-    if (!isCurrentTrackPathBeingReplaced) return;
+    if (!shouldReloadPlayer) return;
 
     // Drop in-flight loads that still target the pre-rename file URI.
     final loadId = ++_loadRequestGeneration;
-    await _loadCurrent(
-      loadToken: loadId,
-      initialPosition: resumePositionAfterReload,
-      stopBeforeLoad: false,
-    );
-    if (resumePlayingAfterReload) {
-      _playbackPausedByUser = false;
-      await _resumePlaybackAfterLoad(
-        context: 'replaceTrackPath.resumePlay',
+    _loadCurrentPathOverride = updated;
+    try {
+      await _loadCurrent(
+        loadToken: loadId,
+        initialPosition: resumePositionAfterReload,
+        stopBeforeLoad: false,
       );
+      if (resumePlayingAfterReload) {
+        _playbackPausedByUser = false;
+        await _resumePlaybackAfterLoad(
+          context: 'replaceTrackPath.resumePlay',
+        );
+      }
+    } finally {
+      _loadCurrentPathOverride = null;
     }
   }
 
   bool _prunePlaylistPathsNotInCatalog() {
     if (_libraryCatalog.isEmpty || _playlist.isEmpty) return false;
+    if (_libraryPathMigrations.isNotEmpty || _loadCurrentPathOverride != null) {
+      return false;
+    }
     final validKeys = <String>{};
     for (final t in _libraryCatalog) {
       final fp = t.filePath?.trim();
       if (fp == null || fp.isEmpty) continue;
       final k = canonicalMusicLibraryPathKey(fp);
+      if (k.isNotEmpty) validKeys.add(k);
+    }
+    for (final migrated in _libraryPathMigrations.values) {
+      final k = canonicalMusicLibraryPathKey(migrated);
       if (k.isNotEmpty) validKeys.add(k);
     }
     if (validKeys.isEmpty) return false;
@@ -1967,7 +2121,8 @@ class PlayerController extends ChangeNotifier {
   }) async {
     final fp = track.filePath?.trim();
     if (fp != null && fp.isNotEmpty) {
-      return (uri: Uri.file(fp), headers: null);
+      final resolved = _resolveMigratedFilePath(fp);
+      return (uri: Uri.file(resolved), headers: null);
     }
     final yt = track.youtubeVideoId?.trim();
     if (yt == null || yt.isEmpty) return null;
@@ -2007,7 +2162,7 @@ class PlayerController extends ChangeNotifier {
     bool retryAfterMissingPath = true,
     bool retryAfterYoutubeSourceError = true,
   }) async {
-    final preview = currentTrack;
+    var preview = currentTrack;
     if (preview == null || !preview.isPlayable) {
       _stopYoutubeStreamStats();
       _suppressTrackCompletedAdvance = false;
@@ -2021,6 +2176,8 @@ class PlayerController extends ChangeNotifier {
       return;
     }
 
+    _syncPlaylistPathsFromMigrations();
+    preview = _loadCurrentPathOverride ?? currentTrack ?? preview;
     final loadTargetPathKey = _playbackKeyForTrack(preview);
 
     _postLoadConcatGuardUntil = null;
@@ -2083,7 +2240,10 @@ class PlayerController extends ChangeNotifier {
       for (final pi in sourceOrder) {
         if (_isStaleLoad(loadId)) return;
         if (pi < 0 || pi >= _playlist.length) continue;
-        final t = _playlist[pi];
+        var t = _playlist[pi];
+        if (pi == logical && _loadCurrentPathOverride != null) {
+          t = _loadCurrentPathOverride!;
+        }
         if (!t.isPlayable) continue;
 
         final source = await _playbackSourceForTrack(
@@ -2298,8 +2458,28 @@ class PlayerController extends ChangeNotifier {
     if (cur == null || cur.trim().isEmpty || path.trim().isEmpty) {
       return false;
     }
-    return canonicalMusicLibraryPathKey(cur) ==
-        canonicalMusicLibraryPathKey(path);
+    final pathKey = canonicalMusicLibraryPathKey(path);
+    final curKey = canonicalMusicLibraryPathKey(cur);
+    if (pathKey == curKey) return true;
+    return _resolveMigratedLibraryPathKey(cur) == pathKey ||
+        _resolveMigratedLibraryPathKey(path) == curKey;
+  }
+
+  /// True when the playing row still points at a file that was renamed on disk.
+  Future<bool> shouldRewirePlaybackForRenamedFile(
+    String oldPath,
+    String newPath,
+  ) async {
+    if (isCurrentTrackFilePath(oldPath)) return true;
+    if (kIsWeb || newPath.trim().isEmpty) return false;
+    final cur = currentTrack?.filePath?.trim();
+    if (cur == null || cur.isEmpty) return false;
+    try {
+      if (await File(cur).exists()) return false;
+      return await File(_normalizeLocalFilePath(newPath)).exists();
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Reload the current file from disk (e.g. after embedded tags were rewritten).
@@ -2315,7 +2495,12 @@ class PlayerController extends ChangeNotifier {
     bool stopBeforeLoad = true,
   }) async {
     final pos = initialPosition ?? _player.position;
-    await _loadCurrent(initialPosition: pos, stopBeforeLoad: stopBeforeLoad);
+    final loadId = ++_loadRequestGeneration;
+    await _loadCurrent(
+      loadToken: loadId,
+      initialPosition: pos,
+      stopBeforeLoad: stopBeforeLoad,
+    );
     if (resumePlaying) {
       _playbackPausedByUser = false;
       await _resumePlaybackAfterLoad(
