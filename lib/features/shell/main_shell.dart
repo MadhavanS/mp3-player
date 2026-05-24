@@ -9,7 +9,7 @@ import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/album_art_cache.dart';
-import '../../services/file_path_mtime_sort.dart';
+import '../../services/folder_count_cache.dart';
 import '../../services/first_run_library_hint_store.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/storage_access.dart';
@@ -390,19 +390,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _scheduleAlbumArtWarmup(player);
   }
 
-  Future<List<ScannedMp3File>> _collectMp3FileStats(List<String> roots) async {
-    final seen = <String>{};
-    final out = <ScannedMp3File>[];
-    for (final root in roots) {
-      final files = await scanMp3FilesWithStats(root, recursive: true);
-      for (final f in files) {
-        if (seen.add(f.path)) out.add(f);
-      }
-    }
-    out.sort((a, b) => b.lastModifiedMs.compareTo(a.lastModifiedMs));
-    return out;
-  }
-
   Future<void> _syncLibraryFromDiskInBackground(
     PlayerController player,
     List<String> roots,
@@ -410,7 +397,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     if (kIsWeb) return;
     try {
       final cachedByPath = await SongMetadataCache.loadSnapshotsForRoots(roots);
-      final scanned = await _collectMp3FileStats(roots);
+      final scanned = await collectMp3FilesMerged(roots);
       if (!mounted) return;
 
       final existingPaths = scanned.map((f) => f.path).toSet();
@@ -502,6 +489,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
           .toList(growable: false);
       player.setLibraryCatalog(finalTracks);
+      FolderCountCache.instance.clear();
       unawaited(
         player.prefillArtAvailabilityFromDiskCache(
           finalTracks.map((t) => t.filePath).whereType<String>(),
@@ -650,20 +638,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     unawaited(RecentlyPlayedStore.recordPlay(path));
   }
 
-  /// Merges unique MP3 paths from all roots, then sorts by file last-modified (newest first).
-  Future<List<String>> _collectMp3Paths(List<String> roots) async {
-    final seen = <String>{};
-    final out = <String>[];
-    for (final root in roots) {
-      final files = await scanMp3Files(root, recursive: true);
-      for (final f in files) {
-        if (seen.add(f)) out.add(f);
-      }
-    }
-    await sortPathsByModifiedNewestFirst(out);
-    return out;
-  }
-
   Future<void> _scanFoldersAndSetPlaylist(
     List<String> paths, {
     required bool playAfter,
@@ -672,6 +646,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     bool tryPersistedPlayback = false,
     bool keepCurrentQueue = false,
     bool showProgressOverlay = true,
+    bool backgroundSyncPending = false,
   }) async {
     final player = PlayerController.of(context);
     final pathToPreserve = preservePlaybackAfterRescan
@@ -703,7 +678,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
     List<String> files;
     try {
-      files = await _collectMp3Paths(paths);
+      final scanned = await collectMp3FilesMerged(paths);
+      files = scanned.map((f) => f.path).toList(growable: false);
       if (!mounted) return;
       if (showProgressOverlay && files.isNotEmpty) {
         setState(() => _scanDetectedMp3Count = files.length);
@@ -732,9 +708,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       final tracks = files
           .map((path) => cachedByPath[path] ?? TrackItem.fromFilePath(path))
           .toList(growable: false);
+      final scannedByPath = {for (final f in scanned) f.path: f};
+      final snapshotsByPath = await SongMetadataCache.loadSnapshotsForRoots(paths);
       unawaited(SongMetadataCache.deleteMissingPaths(files.toSet()));
       unawaited(SongMetadataCache.saveTracks(tracks));
       player.setLibraryCatalog(tracks);
+      FolderCountCache.instance.clear();
       unawaited(
         player.prefillArtAvailabilityFromDiskCache(
           tracks.map((t) => t.filePath).whereType<String>(),
@@ -742,26 +721,34 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       );
       _scheduleAlbumArtWarmup(player);
 
+      void startForegroundEnrich() {
+        if (kIsWeb || !mounted) return;
+        enrichPlaylistTracks(
+          tracks: tracks,
+          onTrackUpdated: (path, updated) {
+            player.updateTrackByPath(
+              path,
+              updated,
+              notify: CatalogNotifyMode.throttled,
+              refreshNotificationArt: false,
+            );
+            unawaited(SongMetadataCache.saveTracks([updated]));
+          },
+          scannedByPath: scannedByPath,
+          snapshotsByPath: snapshotsByPath,
+          backgroundSyncPending: backgroundSyncPending,
+          isPlaying: player.isPlaying || player.audioPlayer.playing,
+          libraryLength: tracks.length,
+        ).catchError((Object e, StackTrace st) {
+          debugPrint('enrichPlaylistTracks: $e\n$st');
+        });
+      }
+
       if (preservePlaybackAfterRescan) {
         if (keepCurrentQueue && player.playlist.isNotEmpty) {
           final keptPlayback = player.refreshLibraryDuringPlayback(tracks);
           if (keptPlayback) {
-            if (!kIsWeb && mounted) {
-              enrichPlaylistTracks(
-                tracks: tracks,
-                onTrackUpdated: (path, updated) {
-                  player.updateTrackByPath(
-                    path,
-                    updated,
-                    notify: CatalogNotifyMode.throttled,
-                    refreshNotificationArt: false,
-                  );
-                  unawaited(SongMetadataCache.saveTracks([updated]));
-                },
-              ).catchError((Object e, StackTrace st) {
-                debugPrint('enrichPlaylistTracks: $e\n$st');
-              });
-            }
+            startForegroundEnrich();
             return;
           }
           await player.tryResyncQueueWithLibraryScan(
@@ -769,22 +756,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             resumePosition: playbackPosition,
             resumePlaying: wasPlaying,
           );
-          if (!kIsWeb && mounted) {
-            enrichPlaylistTracks(
-              tracks: tracks,
-              onTrackUpdated: (path, updated) {
-                player.updateTrackByPath(
-                  path,
-                  updated,
-                  notify: CatalogNotifyMode.throttled,
-                  refreshNotificationArt: false,
-                );
-                unawaited(SongMetadataCache.saveTracks([updated]));
-              },
-            ).catchError((Object e, StackTrace st) {
-              debugPrint('enrichPlaylistTracks: $e\n$st');
-            });
-          }
+          startForegroundEnrich();
           return;
         }
         var resolvedStart = startIndex.clamp(0, tracks.length - 1);
@@ -804,22 +776,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             !playAfter &&
             !wasPlaying;
         if (deferHeavyPlayerQueue && player.playlist.isEmpty) {
-          if (!kIsWeb && mounted) {
-            enrichPlaylistTracks(
-              tracks: tracks,
-              onTrackUpdated: (path, updated) {
-                player.updateTrackByPath(
-                  path,
-                  updated,
-                  notify: CatalogNotifyMode.throttled,
-                  refreshNotificationArt: false,
-                );
-                unawaited(SongMetadataCache.saveTracks([updated]));
-              },
-            ).catchError((Object e, StackTrace st) {
-              debugPrint('enrichPlaylistTracks: $e\n$st');
-            });
-          }
+          startForegroundEnrich();
           return;
         }
         await player.setPlaylist(
@@ -843,22 +800,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             await player.pause();
           }
         }
-        if (!kIsWeb && mounted) {
-          enrichPlaylistTracks(
-            tracks: tracks,
-            onTrackUpdated: (path, updated) {
-              player.updateTrackByPath(
-                path,
-                updated,
-                notify: CatalogNotifyMode.throttled,
-                refreshNotificationArt: false,
-              );
-              unawaited(SongMetadataCache.saveTracks([updated]));
-            },
-          ).catchError((Object e, StackTrace st) {
-            debugPrint('enrichPlaylistTracks: $e\n$st');
-          });
-        }
+        startForegroundEnrich();
         return;
       }
 
@@ -871,22 +813,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         if (!mounted) return;
         if (restored) {
           if (playAfter) await player.play();
-          if (!kIsWeb && mounted) {
-            enrichPlaylistTracks(
-              tracks: tracks,
-              onTrackUpdated: (path, updated) {
-                player.updateTrackByPath(
-                  path,
-                  updated,
-                  notify: CatalogNotifyMode.throttled,
-                  refreshNotificationArt: false,
-                );
-                unawaited(SongMetadataCache.saveTracks([updated]));
-              },
-            ).catchError((Object e, StackTrace st) {
-              debugPrint('enrichPlaylistTracks: $e\n$st');
-            });
-          }
+          startForegroundEnrich();
           return;
         }
       }
@@ -897,22 +824,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           !playAfter &&
           !wasPlaying;
       if (deferHeavyPlayerQueue && player.playlist.isEmpty) {
-        if (!kIsWeb && mounted) {
-          enrichPlaylistTracks(
-            tracks: tracks,
-            onTrackUpdated: (path, updated) {
-              player.updateTrackByPath(
-                path,
-                updated,
-                notify: CatalogNotifyMode.throttled,
-                refreshNotificationArt: false,
-              );
-              unawaited(SongMetadataCache.saveTracks([updated]));
-            },
-          ).catchError((Object e, StackTrace st) {
-            debugPrint('enrichPlaylistTracks: $e\n$st');
-          });
-        }
+        startForegroundEnrich();
         return;
       }
       await player.setPlaylist(
@@ -925,22 +837,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         await player.play();
       }
 
-      if (!kIsWeb && mounted) {
-        enrichPlaylistTracks(
-          tracks: tracks,
-          onTrackUpdated: (path, updated) {
-            player.updateTrackByPath(
-              path,
-              updated,
-              notify: CatalogNotifyMode.throttled,
-              refreshNotificationArt: false,
-            );
-            unawaited(SongMetadataCache.saveTracks([updated]));
-          },
-        ).catchError((Object e, StackTrace st) {
-          debugPrint('enrichPlaylistTracks: $e\n$st');
-        });
-      }
+      startForegroundEnrich();
     } finally {
       if (showProgressOverlay && mounted) {
         setState(() {
@@ -952,6 +849,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _onFoldersChanged(List<String> paths) async {
+    FolderCountCache.instance.clear();
     await SavedMusicFolders.save(paths);
     if (!mounted) return;
     setState(() => _folderPaths = List<String>.from(paths));
@@ -960,6 +858,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       playAfter: false,
       preservePlaybackAfterRescan: true,
       keepCurrentQueue: true,
+      backgroundSyncPending: true,
     );
     if (!mounted) return;
     ActionPillToast.showUsingRootNavigator(
@@ -967,6 +866,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       icon: Icons.done_all_rounded,
       uppercaseLabel: true,
     );
+    _scheduleBackgroundSync(delay: Duration.zero);
     _scheduleIdleRescan();
   }
 
@@ -980,6 +880,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       return;
     }
     setState(() => _refreshInProgress = true);
+    FolderCountCache.instance.clear();
     try {
       final player = PlayerController.of(context);
       // Refresh should reflect full library changes immediately (not a stale Files scope).
@@ -992,6 +893,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         preservePlaybackAfterRescan: true,
         keepCurrentQueue: true,
         showProgressOverlay: false,
+        backgroundSyncPending: true,
       );
       if (!mounted) return;
       await _runBackgroundSyncGuarded(player, List<String>.from(_folderPaths));

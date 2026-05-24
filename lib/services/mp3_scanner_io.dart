@@ -57,3 +57,17 @@ Future<List<ScannedMp3File>> scanMp3FilesWithStats(
   out.sort((a, b) => b.lastModifiedMs.compareTo(a.lastModifiedMs));
   return out;
 }
+
+/// Merges [roots] with one stat pass per file; dedupes by path; newest mtime first.
+Future<List<ScannedMp3File>> collectMp3FilesMerged(List<String> roots) async {
+  final seen = <String>{};
+  final result = <ScannedMp3File>[];
+  for (final root in roots) {
+    final files = await scanMp3FilesWithStats(root, recursive: true);
+    for (final f in files) {
+      if (seen.add(f.path)) result.add(f);
+    }
+  }
+  result.sort((a, b) => b.lastModifiedMs.compareTo(a.lastModifiedMs));
+  return result;
+}

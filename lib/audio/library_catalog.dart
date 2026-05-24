@@ -20,6 +20,9 @@ class LibraryCatalog {
 
   int get length => _paths.length;
 
+  /// Ordered file paths in the current catalog (read-only).
+  Iterable<String> get paths => _paths;
+
   /// Canonical path keys for every catalog row (playlist validation, etc.).
   Set<String> get canonicalPathKeys {
     final out = <String>{};

@@ -12,3 +12,7 @@ Future<List<ScannedMp3File>> scanMp3FilesWithStats(
   String rootDir, {
   bool recursive = true,
 }) => impl.scanMp3FilesWithStats(rootDir, recursive: recursive);
+
+/// All [roots] in one pass per file (mtime + size); deduped; newest first.
+Future<List<ScannedMp3File>> collectMp3FilesMerged(List<String> roots) =>
+    impl.collectMp3FilesMerged(roots);

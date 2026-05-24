@@ -13,3 +13,6 @@ Future<List<ScannedMp3File>> scanMp3FilesWithStats(
 }) async {
   return const <ScannedMp3File>[];
 }
+
+Future<List<ScannedMp3File>> collectMp3FilesMerged(List<String> roots) async =>
+    const <ScannedMp3File>[];

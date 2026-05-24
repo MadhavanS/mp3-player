@@ -9,6 +9,7 @@ import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/folder_browser.dart';
+import '../../services/folder_count_cache.dart';
 import '../../services/library_track_sort.dart';
 import '../../services/mp3_scanner.dart';
 import '../../services/music_library_path_key.dart';
@@ -105,6 +106,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   void didUpdateWidget(LibraryFilesExplorer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!listEquals(widget.musicRoots, oldWidget.musicRoots)) {
+      FolderCountCache.instance.clear();
       resetToRoots();
     }
   }
@@ -121,11 +123,25 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
 
   String? get _currentDir => _browseStack.isEmpty ? null : _browseStack.last;
 
+  Iterable<String> _catalogPaths(PlayerController player) =>
+      player.libraryCatalog
+          .map((t) => t.filePath)
+          .whereType<String>()
+          .where((p0) => p0.isNotEmpty);
+
+  Future<int> _songCountUnderFolder(String folderPath) {
+    final player = PlayerController.of(context);
+    return FolderCountCache.instance.resolveSongCount(
+      folderPath,
+      _catalogPaths(player),
+    );
+  }
+
   void _reloadCurrentFutures() {
     final d = _currentDir;
     if (d != null) {
       _childrenFuture = _fetchSortedListing(d);
-      _headerSongsFuture = totalMp3CountUnderFolder(d);
+      _headerSongsFuture = _songCountUnderFolder(d);
     } else {
       _childrenFuture = null;
       _headerSongsFuture = null;
@@ -399,7 +415,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   Future<String> _folderRowSubtitle(String folderPath) async {
     final listing = await listFolderChildrenSorted(folderPath);
     final subFolders = listing.dirs.length;
-    final songsTotal = await totalMp3CountUnderFolder(folderPath);
+    final songsTotal = await _songCountUnderFolder(folderPath);
     if (subFolders == 0) {
       return '$songsTotal Songs';
     }
@@ -409,7 +425,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
   Future<int> _totalSongsAcrossRoots(List<String> roots) async {
     var sum = 0;
     for (final r in roots) {
-      sum += await totalMp3CountUnderFolder(r);
+      sum += await _songCountUnderFolder(r);
     }
     return sum;
   }
@@ -823,7 +839,7 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
 
     final dir = _currentDir!;
     _childrenFuture ??= _fetchSortedListing(dir);
-    _headerSongsFuture ??= totalMp3CountUnderFolder(dir);
+    _headerSongsFuture ??= _songCountUnderFolder(dir);
 
     return FutureBuilder<({List<String> dirs, List<String> mp3Paths})>(
       future: _childrenFuture,

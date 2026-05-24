@@ -381,6 +381,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return raw;
   }
 
+  Future<void> _showContentUriFolderDialog() async {
+    final retry = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Folder not accessible'),
+        content: const Text(
+          'Please pick a folder from internal storage.\n\n'
+          '• Tap ☰ in the picker\n'
+          '• Choose "Internal storage" or your SD card\n'
+          '• Avoid "Recent", "Downloads", or cloud folders',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Try Again'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (retry == true && mounted) {
+      await _addFolder();
+    }
+  }
+
   Future<void> _addFolder() async {
     final allowed = await ensureCanReadMusicFiles(context);
     if (!allowed || !mounted) return;
@@ -388,15 +416,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final picked = await pickMusicDirectory();
     if (!mounted || picked == null) return;
 
-    final normalized = _normalizePickPath(picked);
+    final trimmed = picked.trim();
+    if (trimmed.startsWith('content:')) {
+      if (!mounted) return;
+      await _showContentUriFolderDialog();
+      return;
+    }
+
+    final normalized = _normalizePickPath(trimmed);
     if (normalized == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'This folder cannot be read as a file path yet. Try another folder or a device where the picker returns a path.',
-          ),
-        ),
-      );
+      if (!mounted) return;
+      await _showContentUriFolderDialog();
       return;
     }
 
