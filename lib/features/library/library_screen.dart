@@ -599,7 +599,10 @@ class LibraryScreenState extends State<LibraryScreen>
       if (path == null || path.isEmpty) continue;
       final art = track.albumArtBytes;
       if (art != null && art.isNotEmpty) continue;
-      if (await hasAlbumArtDiskCache(path)) continue;
+      if (await hasAlbumArtDiskCacheAnyDimension(path)) {
+        player.markAlbumArtAvailable(path);
+        continue;
+      }
       if (!_songsArtEnrichInFlight.add(path)) continue;
       try {
         final updated = await readAudioMetadata(track);

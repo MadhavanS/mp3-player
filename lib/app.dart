@@ -7,7 +7,9 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart' show PlayerState;
 
+import 'audio/album_art_resolver.dart';
 import 'audio/notification_art_uri.dart';
+import 'services/music_library_path_key.dart';
 import 'audio/player_controller.dart';
 import 'audio/sleep_timer_controller.dart';
 import 'features/shell/main_shell.dart';
@@ -48,6 +50,7 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
   Timer? _androidWidgetSyncDebounce;
   Timer? _androidWidgetProgressTimer;
   StreamSubscription<PlayerState>? _androidWidgetPlayerStateSub;
+  VoidCallback? _artAvailabilityWidgetListener;
 
   /// When true, widget shows play until [AppLifecycleState.resumed] re-syncs.
   bool _androidWidgetForcePlayIcon = false;
@@ -57,6 +60,15 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
 
   void _onPlayerControllerChanged() => _scheduleAndroidHomeWidgetSync();
 
+  void _onArtAvailabilityForWidget() {
+    final track = _player.currentTrack;
+    if (track == null) return;
+    final pathKey = canonicalMusicLibraryPathKey(track.filePath?.trim() ?? '');
+    if (pathKey.isEmpty) return;
+    if (!_player.artAvailability.hasArt(pathKey)) return;
+    _scheduleAndroidHomeWidgetSync();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +76,8 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
     HardwareKeyboard.instance.addHandler(_onGlobalHardwareKey);
     _player.track.addListener(_onPlayerControllerChanged);
     _player.playback.addListener(_onPlayerControllerChanged);
+    _artAvailabilityWidgetListener = _onArtAvailabilityForWidget;
+    _player.artAvailability.addListener(_artAvailabilityWidgetListener!);
     _attachAndroidWidgetProgressTicker();
     unawaited(ensureMediaNotificationPermission());
     _loadTheme();
@@ -161,21 +175,27 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
     final palForWidget = _materialPaletteFor(palette);
     final isDark = palForWidget.scaffoldBackground.computeLuminance() < 0.5;
 
-    // Widget: only pass a file path for embedded cover art. Theme placeholders are
-    // drawn on-device in [WidgetArtPlaceholderBitmap] (fast). Notification still
-    // rasterizes placeholders via [uriForNotificationAlbumArt].
+    // Real cover: embedded bytes, hot LRU, or path disk cache (any dimension).
     var artPath = '';
     if (track != null) {
-      final bytes = track.albumArtBytes;
-      if (bytes != null && bytes.isNotEmpty) {
-        try {
-          final uri = await uriForNotificationAlbumArt(track);
+      try {
+        final bytes = await resolveAlbumArtBytes(
+          track,
+          player: _player,
+          targetDimension: 512,
+        );
+        if (bytes != null && bytes.isNotEmpty) {
+          final withArt = track.withEmbeddedMetadata(
+            albumArtBytes: bytes,
+            replaceAlbumArtFromFile: true,
+          );
+          final uri = await uriForNotificationAlbumArt(withArt);
           if (uri != null && uri.isScheme('file')) {
             artPath = uri.toFilePath();
           }
-        } catch (e, st) {
-          debugPrint('_pushAndroidHomeWidgetState art: $e\n$st');
         }
+      } catch (e, st) {
+        debugPrint('_pushAndroidHomeWidgetState art: $e\n$st');
       }
     }
 
@@ -336,6 +356,10 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
     _androidWidgetPlayerStateSub?.cancel();
     _player.track.removeListener(_onPlayerControllerChanged);
     _player.playback.removeListener(_onPlayerControllerChanged);
+    final artListener = _artAvailabilityWidgetListener;
+    if (artListener != null) {
+      _player.artAvailability.removeListener(artListener);
+    }
     _themeTimer?.cancel();
     _player.dispose();
     SleepTimerController.instance.dispose();

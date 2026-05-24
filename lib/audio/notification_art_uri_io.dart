@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/track_item.dart';
+import '../services/album_art_cache.dart';
 import '../services/music_library_path_key.dart';
 import '../services/notification_art_theme_bridge.dart';
 import '../theme/track_art_placeholder.dart';
@@ -87,7 +88,17 @@ Future<Directory> _notificationArtCacheDirectory() async {
 /// Uses embedded cover when present; otherwise a theme-aligned placeholder PNG
 /// (same rules as [TrackAlbumArt] and the home-screen widget).
 Future<Uri?> uriForNotificationAlbumArt(TrackItem track) async {
-  final bytes = track.albumArtBytes;
+  var bytes = track.albumArtBytes;
+  if (bytes == null || bytes.isEmpty) {
+    final path = track.filePath?.trim() ?? '';
+    if (path.isNotEmpty) {
+      bytes = await cachedAlbumArtForPathAnyDimension(
+        path,
+        targetDimension: 512,
+      );
+    }
+  }
+
   final Uint8List? forDisk;
   final int contentHash;
 

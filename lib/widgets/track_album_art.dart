@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../audio/album_art_resolver.dart';
+import '../audio/player_controller.dart';
 import '../models/track_item.dart';
 import '../services/album_art_cache.dart';
 import '../theme/app_theme.dart';
@@ -78,6 +80,28 @@ class TrackAlbumArt extends StatelessWidget {
         .clamp(96, 512)
         .toInt();
 
+    final scope = PlayerControllerScope.maybeOf(context);
+    if (scope != null) {
+      final player = scope.controller;
+      final sync = resolveAlbumArtBytesSync(
+        track,
+        player,
+        targetDimension: pixelSize,
+      );
+      if (sync != null && sync.isNotEmpty) {
+        return _imageShell(context, sync, pixelSize);
+      }
+      return FutureBuilder<Uint8List?>(
+        future: resolveAlbumArtBytes(
+          track,
+          player: player,
+          targetDimension: pixelSize,
+        ),
+        builder: (context, snapshot) =>
+            _artFromSnapshot(context, snapshot.data, pixelSize),
+      );
+    }
+
     final bytes = track.albumArtBytes;
     if (bytes != null && bytes.isNotEmpty) {
       final cached = cachedAlbumArtSync(track, maxDimension: pixelSize);
@@ -93,12 +117,18 @@ class TrackAlbumArt extends StatelessWidget {
 
     final path = track.filePath?.trim() ?? '';
     if (path.isNotEmpty) {
-      final fromDisk = cachedAlbumArtForPathSync(path, maxDimension: pixelSize);
+      final fromDisk = cachedAlbumArtForPathAnyDimensionSync(
+        path,
+        targetDimension: pixelSize,
+      );
       if (fromDisk != null && fromDisk.isNotEmpty) {
         return _imageShell(context, fromDisk, pixelSize);
       }
       return FutureBuilder<Uint8List?>(
-        future: cachedAlbumArtForPath(path, maxDimension: pixelSize),
+        future: cachedAlbumArtForPathAnyDimension(
+          path,
+          targetDimension: pixelSize,
+        ),
         builder: (context, snapshot) =>
             _artFromSnapshot(context, snapshot.data, pixelSize),
       );

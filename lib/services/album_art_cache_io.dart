@@ -13,6 +13,9 @@ import 'music_library_path_key.dart';
 const int _maxMemoryEntries = 80;
 const String _cacheDirName = 'album_art_cache';
 
+/// Disk cache dimensions written by [primeAlbumArtDiskCache] (default 512).
+const List<int> kPathAlbumArtDiskDimensions = [512, 256, 192, 128];
+
 final _memory = <String, Uint8List>{};
 final _inFlight = <String, Future<Uint8List?>>{};
 Directory? _cacheDir;
@@ -72,6 +75,49 @@ Uint8List? cachedAlbumArtForPathSync(
   return _memory[key];
 }
 
+/// Synchronous path art: any cached dimension (no resize; UI scales).
+Uint8List? cachedAlbumArtForPathAnyDimensionSync(
+  String filePath, {
+  int targetDimension = 512,
+}) {
+  final path = filePath.trim();
+  if (path.isEmpty) return null;
+  for (final dim in kPathAlbumArtDiskDimensions) {
+    final bytes = cachedAlbumArtForPathSync(path, maxDimension: dim);
+    if (bytes != null && bytes.isNotEmpty) return bytes;
+  }
+  return null;
+}
+
+/// Path-keyed disk art: tries [kPathAlbumArtDiskDimensions] largest-first, then
+/// resizes to [targetDimension] when the on-disk size differs (e.g. 512 cached, list asks 192).
+Future<Uint8List?> cachedAlbumArtForPathAnyDimension(
+  String filePath, {
+  int targetDimension = 512,
+}) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return null;
+  final target = targetDimension.clamp(96, 512).toInt();
+
+  for (final dim in kPathAlbumArtDiskDimensions) {
+    final bytes = await cachedAlbumArtForPath(path, maxDimension: dim);
+    if (bytes == null || bytes.isEmpty) continue;
+    if (dim == target) return bytes;
+    final resized = await _resizeToPng(bytes, target);
+    return (resized == null || resized.isEmpty) ? bytes : resized;
+  }
+  return null;
+}
+
+Future<bool> hasAlbumArtDiskCacheAnyDimension(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return false;
+  for (final dim in kPathAlbumArtDiskDimensions) {
+    if (await hasAlbumArtDiskCache(path, maxDimension: dim)) return true;
+  }
+  return false;
+}
+
 Future<Uint8List?> cachedAlbumArtForPath(
   String filePath, {
   int maxDimension = 512,
@@ -96,6 +142,48 @@ Future<Uint8List?> cachedAlbumArtForPath(
   } finally {
     _inFlight.remove(key);
   }
+}
+
+/// Path keys (canonical) that have a non-empty path-keyed disk cache file.
+///
+/// Scans the cache directory once, then matches [filePaths] by
+/// `canonicalMusicLibraryPathKey(path).hashCode.abs()` (any cached dimension).
+Future<Set<String>> pathKeysWithDiskAlbumArt(
+  Iterable<String> filePaths, {
+  int maxDimension = 512,
+}) async {
+  final dir = await _albumArtCacheDir();
+  final cachedHashes = <int>{};
+  try {
+    await for (final entity in dir.list()) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path);
+      if (!name.endsWith('.png')) continue;
+      final stem = name.substring(0, name.length - 4);
+      final match = RegExp(r'^path_(\d+)_\d+$').firstMatch(stem);
+      if (match == null) continue;
+      try {
+        if (entity.lengthSync() > 0) {
+          cachedHashes.add(int.parse(match.group(1)!));
+        }
+      } catch (_) {}
+    }
+  } catch (e, st) {
+    debugPrint('pathKeysWithDiskAlbumArt list: $e\n$st');
+    return const <String>{};
+  }
+
+  final out = <String>{};
+  for (final raw in filePaths) {
+    final path = raw.trim();
+    if (path.isEmpty) continue;
+    final pathKey = canonicalMusicLibraryPathKey(path);
+    if (pathKey.isEmpty) continue;
+    if (cachedHashes.contains(pathKey.hashCode.abs())) {
+      out.add(pathKey);
+    }
+  }
+  return out;
 }
 
 Future<bool> hasAlbumArtDiskCache(

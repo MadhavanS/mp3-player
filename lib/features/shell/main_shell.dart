@@ -370,6 +370,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               return bm.compareTo(am);
             });
       player.setLibraryCatalog(tracks);
+      unawaited(
+        player.prefillArtAvailabilityFromDiskCache(
+          tracks.map((t) => t.filePath).whereType<String>(),
+        ),
+      );
     }
 
     final restoreTracks = cachedByPath.values
@@ -497,6 +502,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
           .toList(growable: false);
       player.setLibraryCatalog(finalTracks);
+      unawaited(
+        player.prefillArtAvailabilityFromDiskCache(
+          finalTracks.map((t) => t.filePath).whereType<String>(),
+        ),
+      );
       _scheduleAlbumArtWarmup(player);
 
       if (finalTracks.isNotEmpty) {
@@ -513,17 +523,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   void _scheduleAlbumArtWarmup(PlayerController player) {
     if (kIsWeb) return;
-    // Avoid metadata/cover extraction bursts while audio is actively playing.
-    // On some devices this causes decoder backpressure (pipelineFull/drop spam).
-    if (player.isPlaying) {
-      _albumArtWarmupQueued = true;
-      _albumArtWarmupRetryTimer?.cancel();
-      _albumArtWarmupRetryTimer = Timer(const Duration(seconds: 12), () {
-        if (!mounted) return;
-        _scheduleAlbumArtWarmup(player);
-      });
-      return;
-    }
     if (_albumArtWarmupInProgress) {
       _albumArtWarmupQueued = true;
       return;
@@ -531,6 +530,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _albumArtWarmupInProgress = true;
     unawaited(() async {
       try {
+        // Shorter wait while playing so list art warmup resumes sooner.
+        while (player.isPlaying && mounted) {
+          await Future<void>.delayed(const Duration(seconds: 3));
+        }
+        if (!mounted) return;
+
         final candidates = player.metadataLibrary
             .where((t) {
               final p = t.filePath;
@@ -543,14 +548,17 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         final tracksNeedingArt = <TrackItem>[];
         for (final t in candidates) {
           final path = t.filePath!.trim();
-          if (await hasAlbumArtDiskCache(path)) continue;
+          if (await hasAlbumArtDiskCacheAnyDimension(path)) {
+            player.markAlbumArtAvailable(path);
+            continue;
+          }
           tracksNeedingArt.add(t);
         }
         if (tracksNeedingArt.isEmpty) return;
 
         await enrichPlaylistTracks(
           tracks: tracksNeedingArt,
-          batchSize: 1,
+          batchSize: 5,
           interBatchDelay: const Duration(milliseconds: 20),
           onTrackUpdated: (path, updated) {
             player.updateTrackByPath(
@@ -725,6 +733,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       unawaited(SongMetadataCache.deleteMissingPaths(files.toSet()));
       unawaited(SongMetadataCache.saveTracks(tracks));
       player.setLibraryCatalog(tracks);
+      unawaited(
+        player.prefillArtAvailabilityFromDiskCache(
+          tracks.map((t) => t.filePath).whereType<String>(),
+        ),
+      );
+      _scheduleAlbumArtWarmup(player);
 
       if (preservePlaybackAfterRescan) {
         if (keepCurrentQueue && player.playlist.isNotEmpty) {

@@ -29,6 +29,21 @@ Uint8List? cachedAlbumArtForPathSync(
 }) =>
     null;
 
+Uint8List? cachedAlbumArtForPathAnyDimensionSync(
+  String filePath, {
+  int targetDimension = 512,
+}) =>
+    null;
+
+Future<Uint8List?> cachedAlbumArtForPathAnyDimension(
+  String filePath, {
+  int targetDimension = 512,
+}) =>
+    Future<Uint8List?>.value(null);
+
+Future<bool> hasAlbumArtDiskCacheAnyDimension(String filePath) async =>
+    false;
+
 Future<Uint8List?> cachedAlbumArtForPath(
   String filePath, {
   int maxDimension = 512,
@@ -40,6 +55,12 @@ Future<bool> hasAlbumArtDiskCache(
   int maxDimension = 512,
 }) async =>
     false;
+
+Future<Set<String>> pathKeysWithDiskAlbumArt(
+  Iterable<String> filePaths, {
+  int maxDimension = 512,
+}) async =>
+    const <String>{};
 
 Future<void> primeAlbumArtDiskCache(
   String filePath,

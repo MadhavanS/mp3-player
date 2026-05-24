@@ -14,6 +14,8 @@ lib/
     player_controller.dart         # Playback coordinator (not a ChangeNotifier)
     player_notifiers.dart          # position / track / playback / queue notifiers
     library_catalog.dart           # Full-library index (tags only, no embedded art)
+    album_art_resolver.dart        # Unified cover bytes (hot → disk → embedded)
+    art_availability_notifier.dart # Broadcast when a path gains cached art
   features/
     library/                       # Songs tab, Files explorer, queue tab
     player/                        # Now playing, mini player
@@ -170,11 +172,42 @@ Guards:
 
 - **Isar `SongMetadataCache`:** tags + `fileModifiedMs` + **`fileSizeBytes`** for  
   change detection. Must preserve fingerprints on save or every restart re-parses all files.
-- **Disk art cache:** `album_art_cache_io.dart` — PNG per path key; list rows use  
-  `TrackListAlbumArt` (per-row notifier, deferred scroll, hot LRU promotion).
+- **Disk art cache:** `album_art_cache_io.dart` — PNG per path key and dimension  
+  (`path_<hash>_512.png`, etc.). Metadata reads prime **512** by default; list/mini  
+  request device-sized thumbs (~168–224px).
+- **Any-dimension read:** `cachedAlbumArtForPathAnyDimension` tries 512 → 256 → 192 → 128  
+  and resizes in memory so play/warmup at 512 still fills list rows at 192.
+- **Unified resolver:** `resolveAlbumArtBytes` / `resolveAlbumArtBytesSync` in  
+  `album_art_resolver.dart` — hot LRU → any disk size → embedded bytes. Used by  
+  `TrackListAlbumArt`, `TrackAlbumArt` (mini/NP), notification refresh, home widget.
+- **Art availability:** `PlayerController.artAvailability` — `markAlbumArtAvailable`  
+  after disk/hot updates; list `TrackArtNotifier` subscribes and retries loads.
+- **List rows:** `TrackListAlbumArt` + `TrackArtNotifier` (deferred scroll, no file read  
+  in notifier; visible-row enrich in `library_screen._enrichVisibleSongsArt` calls  
+  `readAudioMetadata` + `updateTrackByPath`).
+- **Current-track UI:** `updateTrackByPath` calls `_notifyTrack()` when art lands for the  
+  playing path so mini player rebuilds; notification uses debounced retry while loading.
+- **Notification / widget:** `uriForNotificationAlbumArt` falls back to path disk cache  
+  before rasterizing a gradient placeholder; widget sync in `app.dart` uses the resolver.
 - **Startup:** restore Isar → background sync only **changed** files (when fingerprints OK) →  
-  optional art warmup (skips paths that already have disk cache).
+  `prefillArtAvailabilityFromDiskCache` + optional art warmup (skips paths with any disk size).
 - **Folder add:** scan + enrich; idle rescan may run later.
+
+### Album art pipeline
+
+```
+readAudioMetadata / play enrich
+  → primeAlbumArtDiskCache (512 PNG under album_art_cache/)
+  → LibraryCatalog hot LRU + markAlbumArtAvailable(pathKey)
+
+UI resolveAlbumArtBytes(targetDimension)
+  → hot LRU
+  → cachedAlbumArtForPathAnyDimension (512|256|192|128, resize if needed)
+  → TrackItem.albumArtBytes
+  → placeholder
+
+Surfaces: TrackListAlbumArt | TrackAlbumArt | notification | home widget
+```
 
 ### Metadata backends
 
@@ -242,6 +275,9 @@ may still rasterize placeholders in Dart.
 | Playback coordinator | `lib/audio/player_controller.dart` |
 | Notifiers | `lib/audio/player_notifiers.dart` |
 | Catalog | `lib/audio/library_catalog.dart` |
+| Album art resolver | `lib/audio/album_art_resolver.dart` |
+| Path disk cache | `lib/services/album_art_cache_io.dart` |
+| Art availability | `lib/audio/art_availability_notifier.dart` |
 | Sort | `lib/services/library_track_sort.dart` |
 | Widget bridge | `lib/platform/android_home_widget_bridge.dart` |
 | Widget sync | `lib/app.dart` (`_pushAndroidHomeWidgetState`) |

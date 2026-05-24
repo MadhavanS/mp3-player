@@ -77,6 +77,7 @@ class _TrackListAlbumArtState extends State<TrackListAlbumArt> {
 
   @override
   void dispose() {
+    _notifier.unbindArtAvailability();
     _notifier.dispose();
     super.dispose();
   }

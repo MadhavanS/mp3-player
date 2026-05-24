@@ -21,7 +21,9 @@ import '../services/library_path_migration.dart';
 import '../services/music_library_path_key.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
+import 'art_availability_notifier.dart';
 import 'notification_art_uri.dart';
+import 'album_art_resolver.dart';
 import 'library_catalog.dart';
 import 'player_notifiers.dart';
 
@@ -250,6 +252,9 @@ class PlayerController {
   final PlaybackNotifier playback = PlaybackNotifier();
   final QueueNotifier queue = QueueNotifier();
 
+  /// List rows subscribe to retry art loads when disk/hot cache is filled.
+  final ArtAvailabilityNotifier artAvailability = ArtAvailabilityNotifier();
+
   /// Track + playback + queue updates only (excludes [position] ticks).
   Listenable get uiListenable =>
       Listenable.merge([track, playback, queue]);
@@ -269,6 +274,9 @@ class PlayerController {
   StreamSubscription<void>? _becomingNoisySub;
   StreamSubscription<AudioDevicesChangedEvent>? _devicesChangedSub;
   Timer? _notificationArtRefreshDebounce;
+  Timer? _notificationArtRetryTimer;
+  int _notificationArtRetryCount = 0;
+  static const int _kNotificationArtRetryMax = 8;
   bool _notificationArtRefreshInProgress = false;
 
   /// Set when the user explicitly pauses; blocks [_resumePlaybackAfterLoad] until play.
@@ -564,6 +572,25 @@ class PlayerController {
     final key = canonicalMusicLibraryPathKey(filePath.trim());
     if (key.isEmpty) return;
     _libraryCatalog.promoteArtBytes(key, art);
+    markAlbumArtAvailable(filePath);
+  }
+
+  /// Signals that [filePath] has cover art in hot LRU and/or path disk cache.
+  void markAlbumArtAvailable(String filePath) {
+    final key = canonicalMusicLibraryPathKey(filePath.trim());
+    if (key.isEmpty) return;
+    artAvailability.markAvailable(key);
+  }
+
+  /// Marks paths that already have on-disk thumbnails (startup / after scan).
+  Future<void> prefillArtAvailabilityFromDiskCache(
+    Iterable<String> filePaths,
+  ) async {
+    final keys = await pathKeysWithDiskAlbumArt(filePaths);
+    if (keys.isEmpty) return;
+    artAvailability.beginBatch();
+    artAvailability.markAvailableAll(keys);
+    artAvailability.endBatch();
   }
 
   /// Use for tag resolution in Library: full scan when available, else active queue.
@@ -584,6 +611,16 @@ class PlayerController {
     CatalogNotifyMode notify = CatalogNotifyMode.immediate,
   }) {
     _libraryCatalog.setAll(tracks);
+    for (final t in tracks) {
+      final art = t.albumArtBytes;
+      final path = t.filePath?.trim();
+      if (path != null &&
+          path.isNotEmpty &&
+          art != null &&
+          art.isNotEmpty) {
+        markAlbumArtAvailable(path);
+      }
+    }
     if (_playlistPaths.isNotEmpty) _invalidatePlaylistCache();
     _notifyCatalogListeners(notify);
   }
@@ -1821,10 +1858,19 @@ class PlayerController {
     if (changed) _invalidatePlaylistCache();
     if (_libraryCatalog.updateAtPath(path, updated)) {
       changed = true;
+      final art = updated.albumArtBytes;
+      if (art != null && art.isNotEmpty) {
+        markAlbumArtAvailable(path);
+      }
     }
     if (changed) {
       _notifyCatalogListeners(notify);
-      if (!_isLoadingSource &&
+      final artArrived = updated.albumArtBytes != null &&
+          updated.albumArtBytes!.isNotEmpty;
+      if (curKey == key && artArrived) {
+        _notifyTrack();
+        _scheduleNotificationArtRefresh(retryIfLoading: true);
+      } else if (!_isLoadingSource &&
           (shouldRefreshNotificationArt ||
               (refreshNotificationArt && curKey == key))) {
         _scheduleNotificationArtRefresh();
@@ -1835,13 +1881,29 @@ class PlayerController {
   /// Re-push notification [MediaItem.artUri] (e.g. after theme change).
   void scheduleNotificationArtRefresh() => _scheduleNotificationArtRefresh();
 
-  void _scheduleNotificationArtRefresh() {
+  void _scheduleNotificationArtRefresh({bool retryIfLoading = false}) {
     if (kIsWeb) return;
     if (defaultTargetPlatform != TargetPlatform.android &&
         defaultTargetPlatform != TargetPlatform.iOS) {
       return;
     }
-    if (_isLoadingSource || _notificationArtRefreshInProgress) return;
+    if (_notificationArtRefreshInProgress) return;
+
+    if (_isLoadingSource && retryIfLoading) {
+      if (_notificationArtRetryCount >= _kNotificationArtRetryMax) return;
+      _notificationArtRetryTimer?.cancel();
+      _notificationArtRetryTimer = Timer(const Duration(seconds: 2), () {
+        _notificationArtRetryTimer = null;
+        _notificationArtRetryCount++;
+        _scheduleNotificationArtRefresh(retryIfLoading: true);
+      });
+      return;
+    }
+
+    if (_isLoadingSource) return;
+
+    _notificationArtRetryCount = 0;
+    _notificationArtRetryTimer?.cancel();
     _notificationArtRefreshDebounce?.cancel();
     _notificationArtRefreshDebounce = Timer(
       const Duration(milliseconds: 280),
@@ -1863,7 +1925,18 @@ class PlayerController {
       final fp = track?.filePath?.trim();
       if (track == null || fp == null || fp.isEmpty) return;
       final trackKey = canonicalMusicLibraryPathKey(fp);
-      final artUri = await uriForNotificationAlbumArt(track);
+      final bytes = await resolveAlbumArtBytes(
+        track,
+        player: this,
+        targetDimension: 512,
+      );
+      final trackForArt = bytes != null && bytes.isNotEmpty
+          ? track.withEmbeddedMetadata(
+              albumArtBytes: bytes,
+              replaceAlbumArtFromFile: true,
+            )
+          : track;
+      final artUri = await uriForNotificationAlbumArt(trackForArt);
       if (artUri == null) return;
 
       await _waitForNotificationMetadataWindow();
@@ -2926,9 +2999,12 @@ class PlayerController {
   }
 
   void dispose() {
+    artAvailability.dispose();
     queue.cancelThrottle();
     _notificationArtRefreshDebounce?.cancel();
     _notificationArtRefreshDebounce = null;
+    _notificationArtRetryTimer?.cancel();
+    _notificationArtRetryTimer = null;
     _audioInterruptionSub?.cancel();
     _audioInterruptionSub = null;
     _becomingNoisySub?.cancel();
