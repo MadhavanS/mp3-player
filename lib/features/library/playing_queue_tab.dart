@@ -127,9 +127,8 @@ class PlayingQueueTab extends StatelessWidget {
                 onReorder: (oldIndex, newIndex) {
                   if (oldIndex < newIndex) newIndex -= 1;
                   if (oldIndex == newIndex) return;
-                  final oldRow = rows[oldIndex];
-                  final newRow = rows[newIndex];
-                  onReorder(oldRow.orderPos, newRow.orderPos);
+                  final destOrderIndex = newIndex;
+                  onReorder(rows[oldIndex].orderPos, destOrderIndex);
                 },
                 itemBuilder: (context, index) {
                   final r = rows[index];

@@ -1895,7 +1895,7 @@ class LibraryScreenState extends State<LibraryScreen>
           playbackOriginTab: LibraryTabId.nowPlayingList,
         ),
         onReorder: (oldOrder, newOrder) {
-          player.reorderPlaybackQueue(oldOrder, newOrder);
+          unawaited(player.reorderPlaybackQueue(oldOrder, newOrder));
         },
       ),
       LibraryTabId.recentlyAdded => _buildRecentlyAddedTab(

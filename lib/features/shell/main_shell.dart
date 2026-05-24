@@ -761,11 +761,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         }
         var resolvedStart = startIndex.clamp(0, tracks.length - 1);
         if (pathToPreserve != null && pathToPreserve.trim().isNotEmpty) {
-          final key = canonicalMusicLibraryPathKey(pathToPreserve);
+          final key = player.libraryPathKeyForScanMatch(pathToPreserve);
           if (key.isNotEmpty) {
             final idx = tracks.indexWhere(
               (t) =>
-                  canonicalMusicLibraryPathKey((t.filePath ?? '').trim()) ==
+                  player.libraryPathKeyForScanMatch(
+                    (t.filePath ?? '').trim(),
+                  ) ==
                   key,
             );
             if (idx >= 0) resolvedStart = idx;

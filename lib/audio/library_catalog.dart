@@ -85,6 +85,37 @@ class LibraryCatalog {
     return true;
   }
 
+  /// Re-keys a row after an on-disk rename ([oldPath] → [updated.filePath]).
+  bool replacePath(String oldPath, TrackItem updated) {
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    final newFp = updated.filePath?.trim() ?? '';
+    final newKey =
+        newFp.isNotEmpty ? canonicalMusicLibraryPathKey(newFp) : '';
+    if (oldKey.isEmpty) return false;
+
+    var found = false;
+    _paths = _paths
+        .map((p) {
+          if (canonicalMusicLibraryPathKey(p) != oldKey) return p;
+          found = true;
+          return newFp.isNotEmpty ? newFp : p;
+        })
+        .toList(growable: false);
+
+    final hot = _artHot.remove(oldKey);
+    _byKey.remove(oldKey);
+
+    if (newKey.isEmpty) return found;
+
+    _byKey[newKey] = updated.withoutAlbumArt();
+    if (updated.albumArtBytes != null && updated.albumArtBytes!.isNotEmpty) {
+      _putArtHot(newKey, updated);
+    } else if (hot != null) {
+      _putArtHot(newKey, hot);
+    }
+    return true;
+  }
+
   bool removeAtPath(String path) {
     final key = canonicalMusicLibraryPathKey(path);
     if (key.isEmpty) return false;

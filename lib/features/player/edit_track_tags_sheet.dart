@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -26,6 +27,62 @@ String _mimeFromFileName(String name) {
   if (lower.endsWith('.webp')) return 'image/webp';
   if (lower.endsWith('.gif')) return 'image/gif';
   return 'image/jpeg';
+}
+
+String _mimeFromArtBytes(Uint8List bytes) {
+  if (bytes.length >= 4 &&
+      bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47) {
+    return 'image/png';
+  }
+  if (bytes.length >= 3 &&
+      bytes[0] == 0xFF &&
+      bytes[1] == 0xD8 &&
+      bytes[2] == 0xFF) {
+    return 'image/jpeg';
+  }
+  if (bytes.length >= 12 &&
+      bytes[0] == 0x52 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x46) {
+    return 'image/webp';
+  }
+  return 'image/jpeg';
+}
+
+/// After a failed save, reload from [diskPath] when the file was renamed on disk.
+Future<void> recoverPlaybackAfterFailedTagWrite({
+  required PlayerController player,
+  required String originalPath,
+  required String diskPath,
+  required bool stoppedForEdit,
+  required bool saveSucceeded,
+  required Duration resumePos,
+  required bool wasPlaying,
+}) async {
+  if (!stoppedForEdit || saveSucceeded) return;
+
+  if (diskPath != originalPath) {
+    try {
+      final file = File(diskPath);
+      if (await file.exists()) {
+        await player.reloadCurrentSourceAfterTagWrite(
+          resumePosition: resumePos,
+          resumePlaying: wasPlaying,
+        );
+        return;
+      }
+    } catch (_) {}
+    return;
+  }
+
+  await player.reloadCurrentSourceAfterTagWrite(
+    resumePosition: resumePos,
+    resumePlaying: wasPlaying,
+  );
 }
 
 /// Shown when tag save / site-rename write fails — root overlay so it is visible
@@ -99,6 +156,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
   bool _saving = false;
   bool _siteRenameBusy = false;
+  bool _coverImportBusy = false;
 
   late final String _initialTitle;
   late final String _initialArtist;
@@ -167,6 +225,66 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         return _pickedCoverBytes;
       case AlbumArtEditKind.keep:
         return widget.track.albumArtBytes;
+    }
+  }
+
+  Future<void> _pickCoverFromOtherSong() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav'],
+      allowMultiple: false,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final pickedPath = result.files.single.path;
+    if (pickedPath == null || pickedPath.trim().isEmpty) return;
+
+    setState(() => _coverImportBusy = true);
+    try {
+      final normalized = p.normalize(File(pickedPath).absolute.path);
+      final meta = await readAudioMetadata(
+        TrackItem.fromFilePath(normalized),
+      );
+      if (!mounted) return;
+      final art = meta.albumArtBytes;
+      if (art == null || art.isEmpty) {
+        ActionPillToast.show(
+          context,
+          'No embedded cover in that file',
+          icon: Icons.image_not_supported_outlined,
+          uppercaseLabel: false,
+        );
+        return;
+      }
+      setState(() {
+        _artEdit = AlbumArtEditKind.replace;
+        _pickedCoverBytes = art;
+        _pickedCoverMime = _mimeFromArtBytes(art);
+      });
+      ActionPillToast.show(
+        context,
+        'Cover copied — tap Save to write',
+        icon: Icons.check_rounded,
+        uppercaseLabel: false,
+      );
+    } on FileSystemException catch (e) {
+      if (!mounted) return;
+      final msg = e.message.trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            msg.isNotEmpty
+                ? 'Could not read that file — $msg'
+                : 'Could not read that file.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not read cover — ${_oneLineError(e)}')),
+      );
+    } finally {
+      if (mounted) setState(() => _coverImportBusy = false);
     }
   }
 
@@ -374,8 +492,9 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     SiteRenameSuggestion suggestion, {
     required bool tagOnlyFlow,
   }) async {
-    final path = widget.track.filePath;
-    if (path == null || path.isEmpty) return;
+    final rawPath = widget.track.filePath;
+    if (rawPath == null || rawPath.isEmpty) return;
+    final path = p.normalize(File(rawPath).absolute.path);
 
     if (!await ensureCanWriteLibraryFiles(context)) {
       return;
@@ -390,9 +509,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     final resumePos = player.position;
     var stoppedForEdit = false;
     var saveSucceeded = false;
+    var diskPath = path;
 
     try {
-      final isCurrent = player.isCurrentTrackFilePath(path);
+      var isCurrent = player.isCurrentTrackFilePath(path);
       if (isCurrent) {
         await player.stopForExternalFileEdit();
         stoppedForEdit = true;
@@ -401,6 +521,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       var newPath = path;
       if (!tagOnlyFlow && suggestion.filenameChanged) {
         newPath = await renameMp3File(path, suggestion.newBasenameWithoutExt);
+        player.registerLibraryPathRename(path, newPath);
+      }
+      diskPath = newPath;
+      if (!isCurrent && newPath != path) {
+        isCurrent = await player.shouldRewirePlaybackForRenamedFile(path, newPath);
+        if (isCurrent && !stoppedForEdit) {
+          await player.stopForExternalFileEdit();
+          stoppedForEdit = true;
+        }
       }
 
       final snapBeforeWrite = await readAudioMetadata(
@@ -523,24 +652,28 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         );
       }
     } finally {
-      if (stoppedForEdit && !saveSucceeded) {
-        player.reloadCurrentSourceAfterTagWriteUnawaited(
-          resumePosition: resumePos,
-          resumePlaying: wasPlaying,
-        );
-      }
+      await recoverPlaybackAfterFailedTagWrite(
+        player: player,
+        originalPath: path,
+        diskPath: diskPath,
+        stoppedForEdit: stoppedForEdit,
+        saveSucceeded: saveSucceeded,
+        resumePos: resumePos,
+        wasPlaying: wasPlaying,
+      );
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _save() async {
-    final path = widget.track.filePath;
-    if (path == null || path.isEmpty) {
+    final rawPath = widget.track.filePath;
+    if (rawPath == null || rawPath.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('This track has no file path.')),
       );
       return;
     }
+    final path = p.normalize(File(rawPath).absolute.path);
 
     if (kIsWeb) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -560,9 +693,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     final resumePos = player.position;
     var stoppedForEdit = false;
     var saveSucceeded = false;
+    var diskPath = path;
 
     try {
-      final isCurrent = player.isCurrentTrackFilePath(path);
+      var isCurrent = player.isCurrentTrackFilePath(path);
       if (isCurrent) {
         await player.stopForExternalFileEdit();
         stoppedForEdit = true;
@@ -573,6 +707,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       final currentBasename = p.basenameWithoutExtension(path);
       if (desiredBasename != currentBasename) {
         targetPath = await renameMp3File(path, desiredBasename);
+        player.registerLibraryPathRename(path, targetPath);
+      }
+      diskPath = targetPath;
+      if (!isCurrent && targetPath != path) {
+        isCurrent = await player.shouldRewirePlaybackForRenamedFile(path, targetPath);
+        if (isCurrent && !stoppedForEdit) {
+          await player.stopForExternalFileEdit();
+          stoppedForEdit = true;
+        }
       }
       final tags = await _resolveTagsForPath(targetPath);
       await writeEmbeddedAudioTags(
@@ -670,12 +813,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         );
       }
     } finally {
-      if (stoppedForEdit && !saveSucceeded) {
-        player.reloadCurrentSourceAfterTagWriteUnawaited(
-          resumePosition: resumePos,
-          resumePlaying: wasPlaying,
-        );
-      }
+      await recoverPlaybackAfterFailedTagWrite(
+        player: player,
+        originalPath: path,
+        diskPath: diskPath,
+        stoppedForEdit: stoppedForEdit,
+        saveSucceeded: saveSucceeded,
+        resumePos: resumePos,
+        wasPlaying: wasPlaying,
+      );
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -789,9 +935,30 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                       runSpacing: 4,
                       children: [
                         TextButton.icon(
-                          onPressed: _saving ? null : _pickCover,
+                          onPressed: (_saving || _coverImportBusy)
+                              ? null
+                              : _pickCover,
                           icon: const Icon(Icons.image_outlined, size: 20),
-                          label: const Text('Cover image'),
+                          label: const Text('Image file'),
+                        ),
+                        TextButton.icon(
+                          onPressed: (_saving || _coverImportBusy)
+                              ? null
+                              : _pickCoverFromOtherSong,
+                          icon: _coverImportBusy
+                              ? SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: context.controlAccent,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.library_music_outlined,
+                                  size: 20,
+                                ),
+                          label: const Text('From another song'),
                         ),
                         if (_artEdit != AlbumArtEditKind.keep ||
                             widget.track.albumArtBytes != null)
