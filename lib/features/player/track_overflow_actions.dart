@@ -11,6 +11,7 @@ import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/music_library_path_key.dart';
 import '../../services/song_metadata_cache.dart';
+import '../../services/storage_access.dart';
 import '../../services/track_file_delete.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
@@ -698,11 +699,27 @@ Future<void> applyTrackOverflowAction(
       );
       if (confirmed != true || !context.mounted) return;
 
+      if (!await ensureCanWriteLibraryFiles(
+        context,
+        settingsHint:
+            'To delete files on Android, allow "All files access" for this app in system settings.',
+      )) {
+        return;
+      }
+      if (!context.mounted) return;
+
       final wasPlaying = player.isPlaying;
-      final targetsCurrent = player.currentTrack?.filePath == path;
+      final pathKey = canonicalMusicLibraryPathKey(path);
+      final curPath = player.currentTrack?.filePath?.trim();
+      final targetsCurrent = curPath != null &&
+          curPath.isNotEmpty &&
+          canonicalMusicLibraryPathKey(curPath) == pathKey;
 
       if (targetsCurrent) {
         await player.stopForExternalFileEdit();
+        if (defaultTargetPlatform == TargetPlatform.windows) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
       }
 
       final err = await deleteMusicFileOrError(path);
@@ -724,7 +741,12 @@ Future<void> applyTrackOverflowAction(
 
       player.removeFromLibraryCatalogByPath(path);
       unawaited(SongMetadataCache.deletePaths([path]));
-      final queueIx = player.playlist.indexWhere((t) => t.filePath == path);
+      final queueIx = player.playlist.indexWhere((t) {
+        final fp = t.filePath?.trim();
+        return fp != null &&
+            fp.isNotEmpty &&
+            canonicalMusicLibraryPathKey(fp) == pathKey;
+      });
       if (queueIx >= 0) {
         await player.removePlaylistEntryAt(
           queueIx,

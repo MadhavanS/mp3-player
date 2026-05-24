@@ -75,8 +75,13 @@ Future<bool> ensureCanReadMusicFiles(
 /// folder. On API 30+ you typically need **All files access** ([`MANAGE_EXTERNAL_STORAGE`]).
 /// On API ≤32, [Permission.storage] may be sufficient.
 ///
-/// Call this before saving ID3 tags. Returns false if the user must enable access in Settings.
-Future<bool> ensureCanWriteLibraryFiles(BuildContext context) async {
+/// Call before saving tags or deleting files on disk. Returns false if the user
+/// must enable access in Settings.
+Future<bool> ensureCanWriteLibraryFiles(
+  BuildContext context, {
+  String settingsHint =
+      'To save tags on Android, allow "All files access" (or storage) for this app in system settings.',
+}) async {
   if (kIsWeb) {
     return true;
   }
@@ -109,9 +114,7 @@ Future<bool> ensureCanWriteLibraryFiles(BuildContext context) async {
   if (context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text(
-          'To save tags on Android, allow "All files access" (or storage) for this app in system settings.',
-        ),
+        content: Text(settingsHint),
         action: SnackBarAction(
           label: 'Settings',
           onPressed: () {
