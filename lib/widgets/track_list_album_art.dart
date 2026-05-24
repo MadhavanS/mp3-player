@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../audio/player_controller.dart';
 import '../models/track_item.dart';
+import '../services/album_art_dimensions.dart';
 import 'track_album_art.dart';
 import 'track_art_notifier.dart';
 
@@ -31,7 +32,9 @@ class _TrackListAlbumArtState extends State<TrackListAlbumArt> {
   int? _pixelSize;
 
   int _listPixelSize(BuildContext context) {
-    return (_size * MediaQuery.devicePixelRatioOf(context)).round().clamp(96, 512);
+    return (_size * MediaQuery.devicePixelRatioOf(context))
+        .round()
+        .clamp(kAlbumArtMinDimension, kAlbumArtListMaxDimension);
   }
 
   static const double _size = 56;
@@ -96,7 +99,7 @@ class _TrackListAlbumArtState extends State<TrackListAlbumArt> {
           return AnimatedSwitcher(
             duration: const Duration(milliseconds: 150),
             child: TrackAlbumArt(
-              key: ValueKey<int>(Object.hash(trackArtPathKey(widget.track), art.length)),
+              key: ValueKey<String>('${trackArtPathKey(widget.track)}.loaded'),
               track: _trackWithArt(art),
               display: TrackArtDisplay.list,
               showShadow: widget.showShadow,

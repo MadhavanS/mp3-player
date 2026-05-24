@@ -95,7 +95,7 @@ class RecentlyPlayedStore {
       next.add(p);
     }
 
-    if (!replaced && oldKey == newKey) return;
+    if (!replaced) return;
 
     if (oldKey != newKey) {
       final at = (replacedIndex ?? 0).clamp(0, next.length);

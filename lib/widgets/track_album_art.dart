@@ -6,6 +6,7 @@ import '../audio/album_art_resolver.dart';
 import '../audio/player_controller.dart';
 import '../models/track_item.dart';
 import '../services/album_art_cache.dart';
+import '../services/album_art_dimensions.dart';
 import '../services/music_library_path_key.dart';
 import '../theme/app_theme.dart';
 import 'daisy_background.dart';
@@ -80,12 +81,26 @@ class TrackAlbumArt extends StatelessWidget {
     return _gradientDecoration(context);
   }
 
+  int _decodePixelSize(BuildContext context) {
+    final logical = _size * MediaQuery.devicePixelRatioOf(context);
+    final maxCap = switch (display) {
+      TrackArtDisplay.mini => 256,
+      TrackArtDisplay.list => kAlbumArtListMaxDimension,
+      TrackArtDisplay.nowPlaying => kAlbumArtMaxDimension,
+      TrackArtDisplay.full => kAlbumArtMaxDimension,
+    };
+    return logical.round().clamp(kAlbumArtMinDimension, maxCap);
+  }
+
+  FilterQuality get _imageFilterQuality => switch (display) {
+    TrackArtDisplay.nowPlaying => FilterQuality.high,
+    TrackArtDisplay.full => FilterQuality.high,
+    _ => FilterQuality.medium,
+  };
+
   @override
   Widget build(BuildContext context) {
-    final pixelSize = (_size * MediaQuery.devicePixelRatioOf(context))
-        .round()
-        .clamp(96, 512)
-        .toInt();
+    final pixelSize = _decodePixelSize(context);
 
     final scope = PlayerControllerScope.maybeOf(context);
     if (scope != null) {
@@ -197,7 +212,7 @@ class TrackAlbumArt extends StatelessWidget {
       cacheWidth: pixelSize,
       cacheHeight: pixelSize,
       gaplessPlayback: true,
-      filterQuality: FilterQuality.medium,
+      filterQuality: _imageFilterQuality,
       errorBuilder: (_, __, ___) => _noArtPlaceholder(context),
     );
 

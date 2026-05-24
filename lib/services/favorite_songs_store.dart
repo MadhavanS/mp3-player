@@ -103,7 +103,8 @@ class FavoriteSongsStore {
       next.add(p);
     }
 
-    if (!replaced && oldKey == newKey) return;
+    // Only update favourites when [oldPath] (or [newPath]) was already stored.
+    if (!replaced) return;
 
     if (oldKey != newKey) {
       final at = (replacedIndex ?? 0).clamp(0, next.length);

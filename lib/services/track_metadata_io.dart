@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:flutter/foundation.dart';
 
+import '../audio/notification_art_uri.dart';
 import '../models/track_item.dart';
 import 'album_art_cache.dart';
 import 'metadata_backend_config.dart';
@@ -129,12 +130,13 @@ Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
 Future<TrackItem> _finalizeMetadataRead(TrackItem result) async {
   final path = result.filePath?.trim();
   final art = result.albumArtBytes;
-  if (path != null &&
-      path.isNotEmpty &&
-      art != null &&
-      art.isNotEmpty) {
-    await primeAlbumArtDiskCache(path, art);
-    await SongMetadataCache.markArtDiskCachedForPath(path);
+  if (path != null && path.isNotEmpty) {
+    if (art != null && art.isNotEmpty) {
+      await primeAlbumArtDiskCache(path, art);
+      await SongMetadataCache.markArtDiskCachedForPath(path);
+    }
+    // Drop stale notification PNGs when embedded art changes in place.
+    await evictNotificationArtCacheForPath(path);
   }
   return result;
 }

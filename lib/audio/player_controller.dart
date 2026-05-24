@@ -572,6 +572,7 @@ class PlayerController {
   void promoteArtBytesForPath(String filePath, Uint8List art) {
     final key = canonicalMusicLibraryPathKey(filePath.trim());
     if (key.isEmpty) return;
+    evictPathAlbumArtMemory(filePath);
     _libraryCatalog.promoteArtBytes(key, art);
     markAlbumArtAvailable(filePath);
   }

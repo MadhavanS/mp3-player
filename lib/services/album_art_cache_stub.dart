@@ -13,6 +13,8 @@ void evictCachedAlbumArt(TrackItem track) {}
 
 Future<void> evictPathAlbumArtCaches(String filePath) async {}
 
+void evictPathAlbumArtMemory(String filePath) {}
+
 Future<void> prewarmPathAlbumArtForPaths(
   Iterable<String> filePaths, {
   int maxCount = 15,

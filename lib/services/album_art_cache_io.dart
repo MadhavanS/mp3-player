@@ -8,17 +8,29 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/track_item.dart';
+import 'album_art_dimensions.dart';
 import 'music_library_path_key.dart';
 
-const int _maxMemoryEntries = 80;
+const int _maxMemoryEntries = 40;
 const String _cacheDirName = 'album_art_cache';
-
-/// Disk cache dimensions written by [primeAlbumArtDiskCache] (default 512).
-const List<int> kPathAlbumArtDiskDimensions = [512, 256, 192, 128];
 
 final _memory = <String, Uint8List>{};
 final _inFlight = <String, Future<Uint8List?>>{};
+final _inFlightByPathKey = <String, Future<Uint8List?>>{};
 Directory? _cacheDir;
+
+/// Drops path-keyed decoded entries from [_memory] (disk files unchanged).
+///
+/// Called when bytes are promoted into [LibraryCatalog] hot LRU so the same
+/// cover is not held in two RAM caches.
+void evictPathAlbumArtMemory(String filePath) {
+  final path = filePath.trim();
+  if (path.isEmpty) return;
+  final pathKey = canonicalMusicLibraryPathKey(path);
+  if (pathKey.isEmpty) return;
+  final prefix = 'path_${pathKey.hashCode.abs()}_';
+  _memory.removeWhere((key, _) => key.startsWith(prefix));
+}
 
 Uint8List? cachedAlbumArtSync(TrackItem track, {int maxDimension = 512}) {
   final raw = track.albumArtBytes;
@@ -33,7 +45,7 @@ Future<Uint8List?> cachedAlbumArt(
   final raw = track.albumArtBytes;
   if (raw == null || raw.isEmpty) return null;
 
-  final normalizedMax = maxDimension.clamp(96, 512).toInt();
+  final normalizedMax = clampAlbumArtDimension(maxDimension);
   final key = _cacheKey(track, raw, normalizedMax);
   final cached = _memory[key];
   if (cached != null) {
@@ -103,7 +115,7 @@ Uint8List? cachedAlbumArtForPathSync(
   String filePath, {
   int maxDimension = 512,
 }) {
-  final key = _pathDiskKey(filePath, maxDimension.clamp(96, 512).toInt());
+  final key = _pathDiskKey(filePath, clampAlbumArtDimension(maxDimension));
   if (key.isEmpty) return null;
   return _memory[key];
 }
@@ -122,24 +134,17 @@ Uint8List? cachedAlbumArtForPathAnyDimensionSync(
   return null;
 }
 
-/// Path-keyed disk art: tries [kPathAlbumArtDiskDimensions] largest-first, then
-/// resizes to [targetDimension] when the on-disk size differs (e.g. 512 cached, list asks 192).
+/// Path-keyed disk art: largest cached/on-disk bytes, then resize to [targetDimension].
 Future<Uint8List?> cachedAlbumArtForPathAnyDimension(
   String filePath, {
   int targetDimension = 512,
 }) async {
   final path = filePath.trim();
   if (path.isEmpty) return null;
-  final target = targetDimension.clamp(96, 512).toInt();
-
-  for (final dim in kPathAlbumArtDiskDimensions) {
-    final bytes = await cachedAlbumArtForPath(path, maxDimension: dim);
-    if (bytes == null || bytes.isEmpty) continue;
-    if (dim == target) return bytes;
-    final resized = await _resizeToPng(bytes, target);
-    return (resized == null || resized.isEmpty) ? bytes : resized;
-  }
-  return null;
+  final target = clampAlbumArtDimension(targetDimension);
+  final largest = await _loadLargestPathArtBytes(path);
+  if (largest == null || largest.isEmpty) return null;
+  return _bytesAtTargetDimension(path, largest, target: target);
 }
 
 Future<bool> hasAlbumArtDiskCacheAnyDimension(String filePath) async {
@@ -155,7 +160,7 @@ Future<Uint8List?> cachedAlbumArtForPath(
   String filePath, {
   int maxDimension = 512,
 }) async {
-  final normalizedMax = maxDimension.clamp(96, 512).toInt();
+  final normalizedMax = clampAlbumArtDimension(maxDimension);
   final key = _pathDiskKey(filePath, normalizedMax);
   if (key.isEmpty) return null;
 
@@ -165,16 +170,14 @@ Future<Uint8List?> cachedAlbumArtForPath(
     return cached;
   }
 
-  final existing = _inFlight[key];
-  if (existing != null) return existing;
-
-  final future = _loadPathDiskCache(filePath, normalizedMax, key);
-  _inFlight[key] = future;
-  try {
-    return await future;
-  } finally {
-    _inFlight.remove(key);
-  }
+  final largest = await _loadLargestPathArtBytes(filePath);
+  if (largest == null || largest.isEmpty) return null;
+  return _bytesAtTargetDimension(
+    filePath,
+    largest,
+    target: normalizedMax,
+    cacheKey: key,
+  );
 }
 
 /// Path keys (canonical) that have a non-empty path-keyed disk cache file.
@@ -223,7 +226,7 @@ Future<bool> hasAlbumArtDiskCache(
   String filePath, {
   int maxDimension = 512,
 }) async {
-  final key = _pathDiskKey(filePath, maxDimension.clamp(96, 512).toInt());
+  final key = _pathDiskKey(filePath, clampAlbumArtDimension(maxDimension));
   if (key.isEmpty) return false;
   if (_memory.containsKey(key)) return true;
   final file = await _cacheFile(key);
@@ -233,10 +236,10 @@ Future<bool> hasAlbumArtDiskCache(
 Future<void> primeAlbumArtDiskCache(
   String filePath,
   Uint8List raw, {
-  int maxDimension = 512,
+  int maxDimension = kAlbumArtPrimeDimension,
 }) async {
   if (filePath.trim().isEmpty || raw.isEmpty) return;
-  final normalizedMax = maxDimension.clamp(96, 512).toInt();
+  final normalizedMax = clampAlbumArtDimension(maxDimension);
   final key = _pathDiskKey(filePath, normalizedMax);
   if (key.isEmpty) return;
 
@@ -265,6 +268,77 @@ Future<Uint8List?> _loadPathDiskCache(
     }
   } catch (_) {}
   return null;
+}
+
+/// Largest path art in RAM or on disk; one in-flight load per canonical path key.
+Future<Uint8List?> _loadLargestPathArtBytes(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return null;
+  final pathKey = canonicalMusicLibraryPathKey(path);
+  if (pathKey.isEmpty) return null;
+
+  for (final dim in kPathAlbumArtDiskDimensions) {
+    final bytes = cachedAlbumArtForPathSync(path, maxDimension: dim);
+    if (bytes != null && bytes.isNotEmpty) return bytes;
+  }
+
+  final existing = _inFlightByPathKey[pathKey];
+  if (existing != null) return existing;
+
+  final future = _loadLargestPathArtFromDisk(path);
+  _inFlightByPathKey[pathKey] = future;
+  try {
+    return await future;
+  } finally {
+    _inFlightByPathKey.remove(pathKey);
+  }
+}
+
+Future<Uint8List?> _loadLargestPathArtFromDisk(String filePath) async {
+  final path = filePath.trim();
+  for (final dim in kPathAlbumArtDiskDimensions) {
+    final key = _pathDiskKey(path, dim);
+    if (key.isEmpty) continue;
+    final bytes = await _loadPathDiskCache(path, dim, key);
+    if (bytes != null && bytes.isNotEmpty) return bytes;
+  }
+  return null;
+}
+
+int? _memoryDimensionForPath(String filePath) {
+  final path = filePath.trim();
+  for (final dim in kPathAlbumArtDiskDimensions) {
+    final key = _pathDiskKey(path, dim);
+    if (key.isNotEmpty && _memory.containsKey(key)) return dim;
+  }
+  return null;
+}
+
+Future<Uint8List?> _bytesAtTargetDimension(
+  String filePath,
+  Uint8List source, {
+  required int target,
+  String? cacheKey,
+}) async {
+  if (source.isEmpty) return null;
+
+  if (cacheKey != null) {
+    final exact = _memory[cacheKey];
+    if (exact != null && exact.isNotEmpty) {
+      _touchMemory(cacheKey, exact);
+      return exact;
+    }
+  }
+
+  if (_memoryDimensionForPath(filePath) == target) {
+    final key = _pathDiskKey(filePath, target);
+    if (key.isNotEmpty) return _memory[key];
+  }
+
+  final resized = await _resizeToPng(source, target);
+  final out = (resized == null || resized.isEmpty) ? source : resized;
+  if (cacheKey != null && out.isNotEmpty) _putMemory(cacheKey, out);
+  return out;
 }
 
 /// Warms path-keyed disk/memory cache for the first screen of a library list.
