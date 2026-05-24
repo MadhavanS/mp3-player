@@ -479,6 +479,145 @@ String _albumDropYearBrackets(String text) {
       .trim();
 }
 
+/// Parses `Album - Title` style basenames. Returns `(album, title)`.
+(String, String) _albumTitleFromBasename(String basename) {
+  final stem = basename.trim();
+  if (stem.isEmpty) return ('', '');
+  final split = stem.indexOf(' - ');
+  if (split > 0) {
+    return (
+      stem.substring(0, split).trim(),
+      stem.substring(split + 3).trim(),
+    );
+  }
+  return ('', stem);
+}
+
+/// Values to pass to [writeEmbeddedAudioTags] after merging editor, site rules,
+/// and existing embedded tags (avoids wiping tags when a field was left blank).
+class ResolvedTagsForWrite {
+  const ResolvedTagsForWrite({
+    required this.title,
+    required this.artist,
+    required this.album,
+    required this.genre,
+  });
+
+  final String title;
+  final String artist;
+  final String album;
+  final String genre;
+}
+
+/// Merges manual editor fields with [computeSiteRename] and on-disk tags.
+ResolvedTagsForWrite resolveTagsForWrite({
+  required String filePath,
+  required String editorTitle,
+  required String editorArtist,
+  required String editorAlbum,
+  required String editorGenre,
+  required String initialTitle,
+  required String initialArtist,
+  required String initialAlbum,
+  required String initialGenre,
+  String? embeddedTitle,
+  String? embeddedArtist,
+  String? embeddedAlbum,
+  String? embeddedGenre,
+}) {
+  final fileTitle = (embeddedTitle ?? '').trim();
+  final fileArtist = (embeddedArtist ?? '').trim();
+  final fileAlbum = (embeddedAlbum ?? '').trim();
+  final fileGenre = (embeddedGenre ?? '').trim();
+
+  final suggestion = computeSiteRename(
+    filePath: filePath,
+    albumFromTags: editorAlbum.trim().isNotEmpty
+        ? editorAlbum
+        : (fileAlbum.isNotEmpty ? fileAlbum : initialAlbum),
+    artistFromTags: editorArtist.trim().isNotEmpty
+        ? editorArtist
+        : (fileArtist.isNotEmpty ? fileArtist : initialArtist),
+    titleFromTags: editorTitle.trim().isNotEmpty
+        ? editorTitle
+        : (fileTitle.isNotEmpty ? fileTitle : initialTitle),
+    genreFromTags: editorGenre.trim().isNotEmpty
+        ? editorGenre
+        : (fileGenre.isNotEmpty ? fileGenre : initialGenre),
+  );
+
+  String pick(
+    String editor,
+    String initial,
+    String suggested,
+    String fromFile,
+  ) {
+    final e = editor.trim();
+    if (e.isNotEmpty) return e;
+    if (initial.trim().isNotEmpty) return '';
+    final s = suggested.trim();
+    if (s.isNotEmpty) return s;
+    return fromFile.trim();
+  }
+
+  final clearedTitle =
+      editorTitle.trim().isEmpty && initialTitle.trim().isNotEmpty;
+  final clearedArtist =
+      editorArtist.trim().isEmpty && initialArtist.trim().isNotEmpty;
+  final clearedAlbum =
+      editorAlbum.trim().isEmpty && initialAlbum.trim().isNotEmpty;
+  final clearedGenre =
+      editorGenre.trim().isEmpty && initialGenre.trim().isNotEmpty;
+
+  var title = pick(
+    editorTitle,
+    initialTitle,
+    suggestion.suggestedTitle,
+    fileTitle,
+  );
+  var artist = pick(
+    editorArtist,
+    initialArtist,
+    suggestion.suggestedArtist,
+    fileArtist,
+  );
+  var album = pick(
+    editorAlbum,
+    initialAlbum,
+    suggestion.suggestedAlbum,
+    fileAlbum,
+  );
+  var genre = pick(
+    editorGenre,
+    initialGenre,
+    suggestion.suggestedGenre,
+    fileGenre,
+  );
+
+  final fromName = _albumTitleFromBasename(
+    p.basenameWithoutExtension(filePath),
+  );
+  if (!clearedTitle && title.isEmpty && fromName.$2.isNotEmpty) {
+    title = fromName.$2;
+  }
+  if (!clearedAlbum && album.isEmpty && fromName.$1.isNotEmpty) {
+    album = fromName.$1;
+  }
+  if (!clearedArtist && artist.isEmpty && fileArtist.isNotEmpty) {
+    artist = fileArtist;
+  }
+  if (!clearedGenre && genre.isEmpty && fileGenre.isNotEmpty) {
+    genre = fileGenre;
+  }
+
+  return ResolvedTagsForWrite(
+    title: title,
+    artist: artist,
+    album: album,
+    genre: genre,
+  );
+}
+
 String _sanitizeFilename(String input) {
   var out = input.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_');
   out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -717,22 +856,28 @@ SiteRenameSuggestion computeSiteRename({
   }
 
   if (!matchedRule) {
+    final fromName = _albumTitleFromBasename(originalBase);
     return SiteRenameSuggestion(
       newBasenameWithoutExt: originalBase,
-      suggestedArtist: '',
-      suggestedAlbum: '',
-      suggestedTitle: '',
-      suggestedGenre: '',
+      suggestedArtist: sourceFields[SiteTextConst.artist] ?? '',
+      suggestedAlbum: fromName.$1,
+      suggestedTitle: fromName.$2,
+      suggestedGenre: sourceFields[SiteTextConst.genre] ?? '',
       originalBasenameWithoutExt: originalBase,
     );
   }
 
+  final sourceArtist = sourceFields[SiteTextConst.artist] ?? '';
+  if (artist.trim().isEmpty && sourceArtist.trim().isNotEmpty) {
+    artist = sourceArtist.trim();
+  }
+
+  final fromChosen = _albumTitleFromBasename(chosenName);
   if (title.trim().isEmpty) {
-    title = chosenName;
+    title = fromChosen.$2.isNotEmpty ? fromChosen.$2 : chosenName.trim();
   }
   if (album.trim().isEmpty) {
-    final dash = chosenName.indexOf('-');
-    if (dash > 0) album = chosenName.substring(0, dash).trim();
+    album = fromChosen.$1;
   }
 
   return SiteRenameSuggestion(

@@ -176,12 +176,38 @@ Future<void> _applySiteRenameStandalone(
       );
     }
 
+    final snapBeforeWrite = await readAudioMetadata(
+      TrackItem.fromFilePath(newPath),
+    );
+    final albumBefore =
+        snapBeforeWrite.metaLine == 'mp3' ? '' : snapBeforeWrite.metaLine;
+    final artistBefore = snapBeforeWrite.artist == 'Unknown artist'
+        ? ''
+        : snapBeforeWrite.artist.trim();
+    final tags = resolveTagsForWrite(
+      filePath: newPath,
+      editorTitle: suggestion.suggestedTitle,
+      editorArtist: suggestion.suggestedArtist,
+      editorAlbum: suggestion.suggestedAlbum,
+      editorGenre: suggestion.suggestedGenre,
+      initialTitle: '',
+      initialArtist: '',
+      initialAlbum: '',
+      initialGenre: '',
+      embeddedTitle: snapBeforeWrite.title,
+      embeddedArtist: artistBefore,
+      embeddedAlbum: albumBefore,
+      embeddedGenre: snapBeforeWrite.genres
+          .replaceAll('#', ' ')
+          .trim()
+          .replaceAll(RegExp(r'\s+'), ' '),
+    );
     await writeEmbeddedAudioTags(
       filePath: newPath,
-      title: suggestion.suggestedTitle,
-      album: suggestion.suggestedAlbum,
-      artist: suggestion.suggestedArtist,
-      genre: suggestion.suggestedGenre,
+      title: tags.title,
+      album: tags.album,
+      artist: tags.artist,
+      genre: tags.genre,
       artEdit: AlbumArtEditKind.keep,
     );
 
@@ -204,13 +230,13 @@ Future<void> _applySiteRenameStandalone(
         refreshNotificationArt: false,
       );
       if (isCurrent) {
-        await player.reloadCurrentSourceAfterTagWrite(
+        player.reloadCurrentSourceAfterTagWriteUnawaited(
           resumePosition: resumePos,
           resumePlaying: wasPlaying,
         );
       }
     }
-    await SongMetadataCache.saveTracks([refreshed]);
+    unawaited(SongMetadataCache.saveTracks([refreshed]));
 
     saveSucceeded = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -246,7 +272,7 @@ Future<void> _applySiteRenameStandalone(
     messenger?.showSnackBar(SnackBar(content: Text('Error: $e')));
   } finally {
     if (stoppedForEdit && !saveSucceeded) {
-      await player.reloadCurrentSourceAfterTagWrite(
+      player.reloadCurrentSourceAfterTagWriteUnawaited(
         resumePosition: resumePos,
         resumePlaying: wasPlaying,
       );

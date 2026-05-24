@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'local_file_present.dart';
+import 'music_library_path_key.dart';
 import 'recent_list_limits_store.dart';
 
 /// Persists absolute file paths in MRU order (newest first), capped.
@@ -22,8 +24,14 @@ class RecentlyPlayedStore {
     try {
       final decoded = jsonDecode(raw) as List<dynamic>;
       final list = decoded.cast<String>();
-      if (list.length <= limit) return list;
-      final trimmed = list.sublist(0, limit);
+      final present = list.where(localFileStillPresent).toList();
+      if (present.length <= limit) {
+        if (present.length != list.length) {
+          await prefs.setString(_key, jsonEncode(present));
+        }
+        return present;
+      }
+      final trimmed = present.sublist(0, limit);
       await prefs.setString(_key, jsonEncode(trimmed));
       return trimmed;
     } catch (_) {
@@ -51,6 +59,53 @@ class RecentlyPlayedStore {
     final prefs = await SharedPreferences.getInstance();
     final list = await loadPaths();
     await prefs.setString(_key, jsonEncode(list));
+    revision.value++;
+  }
+
+  /// After [PlayerController.replaceTrackPath], swap [oldPath] for [newPath] and
+  /// drop duplicate canonical keys so RecentlyPlayed does not show two rows.
+  static Future<void> replacePath(String oldPath, String newPath) async {
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    final newKey = canonicalMusicLibraryPathKey(newPath);
+    if (oldKey.isEmpty || newKey.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final list = await loadPaths();
+    final next = <String>[];
+    var replaced = false;
+    int? replacedIndex;
+    final seenKeys = <String>{};
+
+    for (var i = 0; i < list.length; i++) {
+      final p = list[i];
+      final k = canonicalMusicLibraryPathKey(p);
+      if (k == oldKey) {
+        if (replacedIndex == null) replacedIndex = next.length;
+        replaced = true;
+        continue;
+      }
+      if (k == newKey) {
+        replaced = true;
+        continue;
+      }
+      if (k.isNotEmpty) {
+        if (seenKeys.contains(k)) continue;
+        seenKeys.add(k);
+      }
+      next.add(p);
+    }
+
+    if (!replaced && oldKey == newKey) return;
+
+    if (oldKey != newKey) {
+      final at = (replacedIndex ?? 0).clamp(0, next.length);
+      next.insert(at, newPath);
+    }
+
+    final limit = await RecentListLimitsStore.loadRecentlyPlayedLimit();
+    final trimmed =
+        next.length > limit ? next.sublist(0, limit) : next;
+    await prefs.setString(_key, jsonEncode(trimmed));
     revision.value++;
   }
 }

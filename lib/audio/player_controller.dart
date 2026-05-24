@@ -17,6 +17,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 import '../models/library_tab_id.dart';
 import '../models/track_item.dart';
 import '../services/album_art_cache.dart';
+import '../services/library_path_migration.dart';
 import '../services/music_library_path_key.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
@@ -804,6 +805,136 @@ class PlayerController {
     _shufflePos = 0;
   }
 
+  bool _isNativeShuffleIndexRangeError(Object e) {
+    if (e is! RangeError) return false;
+    final msg = e.toString();
+    return msg.contains('Not in inclusive range') ||
+        msg.contains('Invalid value');
+  }
+
+  void _sanitizeShuffleState() {
+    if (!_shuffle || _playlistPaths.isEmpty) return;
+    final n = _playlistPaths.length;
+    final valid = _shuffleOrder.where((i) => i >= 0 && i < n).toList();
+    if (valid.length != n) {
+      final cur = _index.clamp(0, n - 1);
+      final order = List<int>.generate(n, (j) => j)..shuffle();
+      order.remove(cur);
+      _shuffleOrder = [cur, ...order];
+    } else {
+      _shuffleOrder = valid;
+    }
+    _shufflePos = _shufflePos.clamp(0, _shuffleOrder.length - 1);
+    _index = _shuffleOrder[_shufflePos].clamp(0, n - 1);
+  }
+
+  Future<void> _prepareAudioSourceLoad() async {
+    _concatExpandGeneration++;
+    _sanitizeShuffleState();
+  }
+
+  /// Serializes [setAudioSource] so tag reload / concat expand cannot interrupt
+  /// each other ("Loading interrupted").
+  Future<void>? _exclusiveSourceTail;
+
+  Future<T> _runExclusiveSourceMutation<T>(Future<T> Function() action) async {
+    final previous = _exclusiveSourceTail ?? Future<void>.value();
+    final gate = Completer<void>();
+    _exclusiveSourceTail = gate.future;
+    await previous;
+    try {
+      return await action();
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+    }
+  }
+
+  /// Cancels in-flight concat expansion and waits for the native player to settle.
+  Future<void> _stabilizePlayerBeforeSourceMutation({
+    bool stopPlayer = true,
+  }) async {
+    _concatExpandGeneration++;
+    _concatSource = null;
+    if (stopPlayer) {
+      try {
+        await _player.stop();
+      } catch (_) {}
+    }
+    final deadline = DateTime.now().add(const Duration(milliseconds: 700));
+    while (DateTime.now().isBefore(deadline)) {
+      final ps = _player.processingState;
+      if (ps != ProcessingState.loading) {
+        await Future<void>.delayed(const Duration(milliseconds: 35));
+        if (_player.processingState != ProcessingState.loading) return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 45));
+    }
+  }
+
+  Future<void> _setPlayerAudioSource(
+    AudioSource source, {
+    int? initialIndex,
+    required Duration initialPosition,
+    String context = 'setAudioSource',
+    bool stopBeforeLoad = true,
+  }) async {
+    await _runExclusiveSourceMutation(() async {
+      for (var attempt = 0; attempt < 4; attempt++) {
+        try {
+          await _stabilizePlayerBeforeSourceMutation(
+            stopPlayer: stopBeforeLoad || attempt > 0,
+          );
+          if (initialIndex != null) {
+            await _player.setAudioSource(
+              source,
+              initialIndex: initialIndex,
+              initialPosition: initialPosition,
+            );
+          } else {
+            await _player.setAudioSource(
+              source,
+              initialPosition: initialPosition,
+            );
+          }
+          return;
+        } catch (e, st) {
+          if (_isInterruptedAbort(e) && attempt < 3) {
+            await Future<void>.delayed(
+              Duration(milliseconds: 100 * (attempt + 1)),
+            );
+            continue;
+          }
+          debugPrint('$context: $e\n$st');
+          rethrow;
+        }
+      }
+    });
+  }
+
+  /// After tag edit / failed reload the handler can still reference a shrunken
+  /// concat; reload one track without [ConcatenatingAudioSource] shuffle state.
+  Future<bool> _recoverFromBrokenNativeShuffle({
+    required Duration initialPosition,
+    required bool resumePlaying,
+    String context = 'shuffleRecovery',
+  }) async {
+    if (_playlistPaths.isEmpty) return false;
+    debugPrint('$context: rebuilding single-track source');
+    _concatExpandGeneration++;
+    _concatSource = null;
+    _activeSourceOrder = <int>[];
+    try {
+      await _player.stop();
+    } catch (_) {}
+    await _reloadPlayingTrackOnly(
+      initialPosition: initialPosition,
+      resumePlaying: resumePlaying,
+      context: context,
+      allowShuffleRecovery: false,
+    );
+    return true;
+  }
+
   /// Playback order mirrored as [ConcatenatingAudioSource] children (shuffle or scoped).
   List<int> _effectiveQueueOrder() {
     if (_playlistPaths.isEmpty) return [];
@@ -813,7 +944,13 @@ class PlayerController {
     return List<int>.generate(_playlistPaths.length, (i) => i);
   }
 
-  int _logicalPlaylistIndex() => _shuffle ? _shuffleOrder[_shufflePos] : _index;
+  int _logicalPlaylistIndex() {
+    if (!_shuffle || _shuffleOrder.isEmpty) {
+      return _index.clamp(0, _playlistPaths.isEmpty ? 0 : _playlistPaths.length - 1);
+    }
+    return _shuffleOrder[_shufflePos.clamp(0, _shuffleOrder.length - 1)]
+        .clamp(0, _playlistPaths.isEmpty ? 0 : _playlistPaths.length - 1);
+  }
 
   bool _applyConcatIndexChanged(int concatIdx) {
     if (_playlistPaths.isEmpty) return false;
@@ -1019,16 +1156,20 @@ class PlayerController {
       debugPrint('_loadCurrentFastStart: no AudioSource for playlist index $logical');
       return;
     }
-    _concatSource = ConcatenatingAudioSource(
+    final concat = ConcatenatingAudioSource(
       useLazyPreparation: _concatUseLazyPreparationForPlatform(),
       children: [source],
     );
     _activeSourceOrder = [logical];
-    await _player.setAudioSource(
-      _concatSource!,
+    await _prepareAudioSourceLoad();
+    await _setPlayerAudioSource(
+      concat,
       initialIndex: 0,
       initialPosition: initialPosition,
+      context: '_loadCurrentFastStart',
+      stopBeforeLoad: false,
     );
+    _concatSource = concat;
     await _applyPreferredVolume();
     _postLoadExpectedConcatIndex = 0;
     _postLoadConcatGuardUntil = DateTime.now().add(
@@ -1809,9 +1950,27 @@ class PlayerController {
       changed = true;
     }
     if (!changed) return;
+
+    final pathUnchanged = newPath != null &&
+        canonicalMusicLibraryPathKey(newPath) == oldKey;
+    if (pathUnchanged) {
+      _notifyTrack();
+      if (isCurrentTrackPathBeingReplaced) {
+        _scheduleNotificationArtRefresh();
+      }
+      return;
+    }
+
+    if (newPath != null && newPath.isNotEmpty) {
+      unawaited(migrateLibraryPathReferences(oldPath, newPath));
+    }
+
     // The currently loaded audio source still points to old file URIs.
     _sourceNeedsReload = true;
     _notifyTrackPlaybackQueue();
+    if (isCurrentTrackPathBeingReplaced) {
+      _notifyTrack();
+    }
 
     // Only reload the audio pipeline when the renamed/replaced file is the
     // track currently loaded in the player.  For any other track in the queue,
@@ -1820,18 +1979,10 @@ class PlayerController {
     // would hit setAudioSource and interrupt the currently playing song.
     if (!isCurrentTrackPathBeingReplaced) return;
 
-    unawaited(() async {
-      await _loadCurrent(
-        initialPosition: resumePositionAfterReload,
-        stopBeforeLoad: false, // already stopped by stopForExternalFileEdit
-      );
-      if (resumePlayingAfterReload) {
-        _playbackPausedByUser = false;
-        await _resumePlaybackAfterLoad(
-          context: 'replaceTrackPath.resumePlay',
-        );
-      }
-    }());
+    reloadCurrentSourceAfterTagWriteUnawaited(
+      resumePosition: resumePositionAfterReload,
+      resumePlaying: resumePlayingAfterReload,
+    );
   }
 
   bool _prunePlaylistPathsNotInCatalog() {
@@ -2064,7 +2215,8 @@ class PlayerController {
           : order;
 
       final useFastStart = !_useSingleTrackAudioSourceForPlatform() &&
-          sourceOrder.length > _fastStartConcatThreshold;
+          sourceOrder.length > _fastStartConcatThreshold &&
+          !_shuffle;
       if (useFastStart) {
         await _loadCurrentFastStart(
           logical: logical,
@@ -2108,22 +2260,28 @@ class PlayerController {
       initialConcatIndex = initialConcatIndex.clamp(0, children.length - 1);
       _activeSourceOrder = loadedOrder;
 
+      await _prepareAudioSourceLoad();
       if (_useSingleTrackAudioSourceForPlatform()) {
         _concatSource = null;
-        await _player.setAudioSource(
+        await _setPlayerAudioSource(
           children.single,
           initialPosition: initialPosition,
+          context: '_loadCurrent.single',
+          stopBeforeLoad: false,
         );
       } else {
-        _concatSource = ConcatenatingAudioSource(
+        final concat = ConcatenatingAudioSource(
           useLazyPreparation: _concatUseLazyPreparationForPlatform(),
           children: children,
         );
-        await _player.setAudioSource(
-          _concatSource!,
+        await _setPlayerAudioSource(
+          concat,
           initialIndex: initialConcatIndex,
           initialPosition: initialPosition,
+          context: '_loadCurrent.concat',
+          stopBeforeLoad: false,
         );
+        _concatSource = concat;
       }
       await _applyPreferredVolume();
       _postLoadExpectedConcatIndex = initialConcatIndex;
@@ -2246,16 +2404,107 @@ class PlayerController {
     }
   }
 
+  /// Reload only the playing file after a tag write (same path). Avoids rebuilding
+  /// a thousand-track concat (and native shuffle index crashes).
+  Future<void> _reloadPlayingTrackOnly({
+    required Duration initialPosition,
+    required bool resumePlaying,
+    String context = 'reloadPlayingTrackOnly',
+    bool allowShuffleRecovery = true,
+  }) async {
+    if (_playlistPaths.isEmpty) return;
+
+    _loadCurrentDepth++;
+    _isLoadingSource = true;
+    try {
+      final logical = _logicalPlaylistIndex();
+      final source = await _audioSourceForPlaylistIndex(logical);
+      if (source == null) {
+        debugPrint('$context: no AudioSource for playlist index $logical');
+        return;
+      }
+
+      await _prepareAudioSourceLoad();
+      _concatSource = null;
+      _activeSourceOrder = [logical];
+      await _setPlayerAudioSource(
+        source,
+        initialPosition: initialPosition,
+        context: context,
+        stopBeforeLoad: true,
+      );
+      await _applyPreferredVolume();
+      _postLoadExpectedConcatIndex = 0;
+      _postLoadConcatGuardUntil = DateTime.now().add(
+        const Duration(milliseconds: 650),
+      );
+      // Next skip rebuilds the full queue (shuffle-safe full [_loadCurrent]).
+      _sourceNeedsReload = true;
+      _notifyTrack();
+    } catch (e, st) {
+      if (!_isInterruptedAbort(e)) {
+        debugPrint('$context: $e\n$st');
+      }
+      if (allowShuffleRecovery && _isNativeShuffleIndexRangeError(e)) {
+        await _recoverFromBrokenNativeShuffle(
+          initialPosition: initialPosition,
+          resumePlaying: resumePlaying,
+          context: '$context.recover',
+        );
+        return;
+      }
+    } finally {
+      _loadCurrentDepth--;
+      if (_loadCurrentDepth <= 0) {
+        _loadCurrentDepth = 0;
+        _isLoadingSource = false;
+        _suppressTrackCompletedAdvance = false;
+        _ignoreSpuriousPlaybackCompletedUntil = null;
+        _scheduleNotificationArtRefresh();
+      }
+    }
+
+    if (resumePlaying) {
+      _playbackPausedByUser = false;
+      await _guardedTransport(() async {
+        await _resumePlaybackAfterLoad(context: '$context.play');
+      });
+    }
+  }
+
   /// Reload after [stopForExternalFileEdit] rewrote tags on the playing file.
   Future<void> reloadCurrentSourceAfterTagWrite({
     required Duration resumePosition,
     required bool resumePlaying,
   }) =>
-      reloadCurrentSource(
+      _reloadPlayingTrackOnly(
         initialPosition: resumePosition,
         resumePlaying: resumePlaying,
-        stopBeforeLoad: false,
+        context: 'reloadCurrentSourceAfterTagWrite',
       );
+
+  /// Tag sheets must not [await] reload — [setAudioSource] can wait on the audio
+  /// lock or native prep and strand the save spinner even though the file is written.
+  void reloadCurrentSourceAfterTagWriteUnawaited({
+    required Duration resumePosition,
+    required bool resumePlaying,
+  }) {
+    unawaited(() async {
+      try {
+        await reloadCurrentSourceAfterTagWrite(
+          resumePosition: resumePosition,
+          resumePlaying: resumePlaying,
+        ).timeout(const Duration(seconds: 25));
+      } on TimeoutException {
+        debugPrint(
+          'reloadCurrentSourceAfterTagWriteUnawaited: timed out; '
+          'playback may need play/skip to resync',
+        );
+      } catch (e, st) {
+        debugPrint('reloadCurrentSourceAfterTagWriteUnawaited: $e\n$st');
+      }
+    }());
+  }
 
   /// Same as [reloadCurrentSource] but does not block — for UI flows (tag sheets)
   /// where awaiting lazy [setAudioSource] prep can strand the sheet on “saving”.
@@ -2283,6 +2532,8 @@ class PlayerController {
     _ignoreSpuriousPlaybackCompletedUntil = DateTime.now().add(
       const Duration(milliseconds: 900),
     );
+    _concatExpandGeneration++;
+    _concatSource = null;
     try {
       await _player.stop();
     } catch (_) {}
@@ -2310,6 +2561,14 @@ class PlayerController {
       }
     } catch (e, st) {
       debugPrint('play error: $e\n$st');
+      if (_isNativeShuffleIndexRangeError(e)) {
+        final pos = _player.position;
+        await _recoverFromBrokenNativeShuffle(
+          initialPosition: pos,
+          resumePlaying: true,
+          context: 'play.recover',
+        );
+      }
     }
     _schedulePlayerUiNotify();
   }
@@ -2333,6 +2592,13 @@ class PlayerController {
       }
     } catch (e, st) {
       debugPrint('pause error: $e\n$st');
+      if (_isNativeShuffleIndexRangeError(e)) {
+        await _recoverFromBrokenNativeShuffle(
+          initialPosition: _player.position,
+          resumePlaying: false,
+          context: 'pause.recover',
+        );
+      }
     }
     _schedulePlayerUiNotify();
   }

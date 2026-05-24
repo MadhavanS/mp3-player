@@ -73,6 +73,48 @@ class FavoriteSongsStore {
   }
 
   /// Removes entries whose files no longer exist on disk (no-op on web).
+  static Future<void> replacePath(String oldPath, String newPath) async {
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    final newKey = canonicalMusicLibraryPathKey(newPath);
+    if (oldKey.isEmpty || newKey.isEmpty || oldKey == newKey) return;
+
+    await ensureLoaded();
+    final prefs = await SharedPreferences.getInstance();
+    final next = <String>[];
+    var replaced = false;
+    int? replacedIndex;
+    final seenKeys = <String>{};
+
+    for (final p in _paths) {
+      final k = canonicalMusicLibraryPathKey(p);
+      if (k == oldKey) {
+        if (replacedIndex == null) replacedIndex = next.length;
+        replaced = true;
+        continue;
+      }
+      if (k == newKey) {
+        replaced = true;
+        continue;
+      }
+      if (k.isNotEmpty) {
+        if (seenKeys.contains(k)) continue;
+        seenKeys.add(k);
+      }
+      next.add(p);
+    }
+
+    if (!replaced && oldKey == newKey) return;
+
+    if (oldKey != newKey) {
+      final at = (replacedIndex ?? 0).clamp(0, next.length);
+      next.insert(at, newPath);
+    }
+
+    _paths = next;
+    await prefs.setString(_key, jsonEncode(_paths));
+    revision.value++;
+  }
+
   static Future<void> pruneMissingPaths() async {
     await ensureLoaded();
     final kept = _paths.where(localFileStillPresent).toList();

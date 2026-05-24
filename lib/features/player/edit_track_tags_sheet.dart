@@ -100,16 +100,23 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   bool _saving = false;
   bool _siteRenameBusy = false;
 
+  late final String _initialTitle;
+  late final String _initialArtist;
+  late final String _initialAlbum;
+  late final String _initialGenre;
+
   @override
   void initState() {
     super.initState();
     final t = widget.track;
-    _title = TextEditingController(text: t.title);
-    _artist = TextEditingController(
-      text: t.artist == 'Unknown artist' ? '' : t.artist,
-    );
-    _album = TextEditingController(text: t.metaLine == 'mp3' ? '' : t.metaLine);
-    _genre = TextEditingController(text: _genreTextFromTrack(t));
+    _initialTitle = t.title;
+    _initialArtist = t.artist == 'Unknown artist' ? '' : t.artist;
+    _initialAlbum = t.metaLine == 'mp3' ? '' : t.metaLine;
+    _initialGenre = _genreTextFromTrack(t);
+    _title = TextEditingController(text: _initialTitle);
+    _artist = TextEditingController(text: _initialArtist);
+    _album = TextEditingController(text: _initialAlbum);
+    _genre = TextEditingController(text: _initialGenre);
     final fp = t.filePath ?? '';
     _fileName = TextEditingController(
       text: fp.isEmpty ? '' : p.basenameWithoutExtension(fp),
@@ -192,6 +199,28 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       _artEdit = AlbumArtEditKind.keep;
       _pickedCoverBytes = null;
     });
+  }
+
+  Future<ResolvedTagsForWrite> _resolveTagsForPath(String filePath) async {
+    final snap = await readAudioMetadata(TrackItem.fromFilePath(filePath));
+    final albumFromFile = snap.metaLine == 'mp3' ? '' : snap.metaLine;
+    final artistFromFile =
+        snap.artist == 'Unknown artist' ? '' : snap.artist.trim();
+    return resolveTagsForWrite(
+      filePath: filePath,
+      editorTitle: _title.text,
+      editorArtist: _artist.text,
+      editorAlbum: _album.text,
+      editorGenre: _genre.text,
+      initialTitle: _initialTitle,
+      initialArtist: _initialArtist,
+      initialAlbum: _initialAlbum,
+      initialGenre: _initialGenre,
+      embeddedTitle: snap.title,
+      embeddedArtist: artistFromFile,
+      embeddedAlbum: albumFromFile,
+      embeddedGenre: _genreTextFromTrack(snap),
+    );
   }
 
   Future<void> _previewSiteRename({required bool tagOnlyFlow}) async {
@@ -374,12 +403,36 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         newPath = await renameMp3File(path, suggestion.newBasenameWithoutExt);
       }
 
+      final snapBeforeWrite = await readAudioMetadata(
+        TrackItem.fromFilePath(newPath),
+      );
+      final albumBefore = snapBeforeWrite.metaLine == 'mp3'
+          ? ''
+          : snapBeforeWrite.metaLine;
+      final artistBefore = snapBeforeWrite.artist == 'Unknown artist'
+          ? ''
+          : snapBeforeWrite.artist.trim();
+      final tags = resolveTagsForWrite(
+        filePath: newPath,
+        editorTitle: suggestion.suggestedTitle,
+        editorArtist: suggestion.suggestedArtist,
+        editorAlbum: suggestion.suggestedAlbum,
+        editorGenre: suggestion.suggestedGenre,
+        initialTitle: _initialTitle,
+        initialArtist: _initialArtist,
+        initialAlbum: _initialAlbum,
+        initialGenre: _initialGenre,
+        embeddedTitle: snapBeforeWrite.title,
+        embeddedArtist: artistBefore,
+        embeddedAlbum: albumBefore,
+        embeddedGenre: _genreTextFromTrack(snapBeforeWrite),
+      );
       await writeEmbeddedAudioTags(
         filePath: newPath,
-        title: suggestion.suggestedTitle,
-        album: suggestion.suggestedAlbum,
-        artist: suggestion.suggestedArtist,
-        genre: suggestion.suggestedGenre,
+        title: tags.title,
+        album: tags.album,
+        artist: tags.artist,
+        genre: tags.genre,
         artEdit: _artEdit,
         newCoverBytes: _pickedCoverBytes,
         newCoverMimeType: _pickedCoverMime,
@@ -399,16 +452,16 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         player.updateTrackByPath(
           path,
           refreshed,
+          notify: CatalogNotifyMode.throttled,
           refreshNotificationArt: false,
         );
         if (isCurrent) {
-          await player.reloadCurrentSourceAfterTagWrite(
+          player.reloadCurrentSourceAfterTagWriteUnawaited(
             resumePosition: resumePos,
             resumePlaying: wasPlaying,
           );
         }
       }
-      await SongMetadataCache.saveTracks([refreshed]);
 
       saveSucceeded = true;
       if (mounted) {
@@ -420,6 +473,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
+      unawaited(SongMetadataCache.saveTracks([refreshed]));
     } on StateError catch (e) {
       if (mounted) {
         final msg = e.toString();
@@ -470,7 +524,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       }
     } finally {
       if (stoppedForEdit && !saveSucceeded) {
-        await player.reloadCurrentSourceAfterTagWrite(
+        player.reloadCurrentSourceAfterTagWriteUnawaited(
           resumePosition: resumePos,
           resumePlaying: wasPlaying,
         );
@@ -520,12 +574,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       if (desiredBasename != currentBasename) {
         targetPath = await renameMp3File(path, desiredBasename);
       }
+      final tags = await _resolveTagsForPath(targetPath);
       await writeEmbeddedAudioTags(
         filePath: targetPath,
-        title: _title.text,
-        artist: _artist.text,
-        album: _album.text,
-        genre: _genre.text,
+        title: tags.title,
+        artist: tags.artist,
+        album: tags.album,
+        genre: tags.genre,
         artEdit: _artEdit,
         newCoverBytes: _pickedCoverBytes,
         newCoverMimeType: _pickedCoverMime,
@@ -545,10 +600,11 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         player.updateTrackByPath(
           path,
           refreshed,
+          notify: CatalogNotifyMode.throttled,
           refreshNotificationArt: false,
         );
         if (isCurrent) {
-          await player.reloadCurrentSourceAfterTagWrite(
+          player.reloadCurrentSourceAfterTagWriteUnawaited(
             resumePosition: resumePos,
             resumePlaying: wasPlaying,
           );
@@ -564,7 +620,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
-      await SongMetadataCache.saveTracks([refreshed]);
+      unawaited(SongMetadataCache.saveTracks([refreshed]));
     } on UnsupportedError catch (e) {
       if (mounted) {
         final detail = (e.message ?? '').trim();
@@ -615,7 +671,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       }
     } finally {
       if (stoppedForEdit && !saveSucceeded) {
-        await player.reloadCurrentSourceAfterTagWrite(
+        player.reloadCurrentSourceAfterTagWriteUnawaited(
           resumePosition: resumePos,
           resumePlaying: wasPlaying,
         );

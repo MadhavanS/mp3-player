@@ -113,4 +113,24 @@ class RecentlyAddedStore {
     await prefs.setString(_prefsKey, jsonEncode(m));
     revision.value++;
   }
+
+  /// Moves first-seen metadata from [oldPath] to [newPath] after a rename.
+  static Future<void> replacePathKey(String oldPath, String newPath) async {
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    final newKey = canonicalMusicLibraryPathKey(newPath);
+    if (oldKey.isEmpty || newKey.isEmpty || oldKey == newKey) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final m = await _loadMap();
+    final ts = m.remove(oldKey);
+    if (ts != null && !m.containsKey(newKey)) {
+      m[newKey] = ts;
+    } else if (ts != null) {
+      // Keep the newer timestamp if both keys existed.
+      final existing = m[newKey] ?? 0;
+      m[newKey] = ts > existing ? ts : existing;
+    }
+    await prefs.setString(_prefsKey, jsonEncode(m));
+    revision.value++;
+  }
 }

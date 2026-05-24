@@ -164,4 +164,47 @@ class UserPlaylistsStore {
     await _save(list);
     return true;
   }
+
+  /// Rewrites [oldPath] → [newPath] in every saved playlist (canonical keys).
+  static Future<void> replacePathInAllPlaylists(
+    String oldPath,
+    String newPath,
+  ) async {
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    final newKey = canonicalMusicLibraryPathKey(newPath);
+    if (oldKey.isEmpty || newKey.isEmpty || oldKey == newKey) return;
+
+    final list = await loadAll();
+    var changed = false;
+    for (var i = 0; i < list.length; i++) {
+      final pl = list[i];
+      final next = <String>[];
+      var replaced = false;
+      int? replacedIndex;
+      final seenKeys = <String>{};
+      for (final p in pl.paths) {
+        final k = canonicalMusicLibraryPathKey(p);
+        if (k == oldKey) {
+          if (replacedIndex == null) replacedIndex = next.length;
+          replaced = true;
+          continue;
+        }
+        if (k == newKey) {
+          replaced = true;
+          continue;
+        }
+        if (k.isNotEmpty) {
+          if (seenKeys.contains(k)) continue;
+          seenKeys.add(k);
+        }
+        next.add(p);
+      }
+      if (!replaced) continue;
+      final at = (replacedIndex ?? 0).clamp(0, next.length);
+      next.insert(at, newPath);
+      list[i] = UserPlaylistEntry(id: pl.id, name: pl.name, paths: next);
+      changed = true;
+    }
+    if (changed) await _save(list);
+  }
 }

@@ -1024,8 +1024,16 @@ extension AudioSourceExtension on AudioSourceMessage {
         offset += childIndices.length;
       }
       final indices = <int>[];
+      final childCount = childIndicesList.length;
       for (final index in self.shuffleOrder) {
+        if (index < 0 || index >= childCount) {
+          // Stale shuffleOrder after concat shrink (fast-start, tag reload, etc.).
+          continue;
+        }
         indices.addAll(childIndicesList[index]);
+      }
+      if (indices.isEmpty && childCount > 0) {
+        return List.generate(childCount, (i) => i);
       }
       return indices;
     } else if (self is LoopingAudioSourceMessage) {
