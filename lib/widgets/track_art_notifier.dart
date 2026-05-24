@@ -15,6 +15,7 @@ import '../services/music_library_path_key.dart';
 class TrackArtNotifier extends ChangeNotifier {
   Uint8List? _art;
   bool _loading = false;
+  bool _disposed = false;
 
   ArtAvailabilityNotifier? _availability;
   String? _subscribedPathKey;
@@ -26,6 +27,10 @@ class TrackArtNotifier extends ChangeNotifier {
 
   Uint8List? get art => _art;
   bool get isLoading => _loading;
+
+  void _safeNotify() {
+    if (!_disposed) notifyListeners();
+  }
 
   /// Synchronous art already available (hot LRU, any-dimension disk memory).
   Uint8List? resolveSyncArt(
@@ -45,6 +50,7 @@ class TrackArtNotifier extends ChangeNotifier {
     PlayerController player, {
     int maxDimension = 192,
   }) async {
+    if (_disposed) return;
     _trackForRetry = track;
     _playerForRetry = player;
     _maxDimensionForRetry = maxDimension;
@@ -57,7 +63,7 @@ class TrackArtNotifier extends ChangeNotifier {
     final sync = resolveSyncArt(track, player, maxDimension);
     if (sync != null && sync.isNotEmpty) {
       _art = sync;
-      notifyListeners();
+      _safeNotify();
       return;
     }
 
@@ -94,6 +100,7 @@ class TrackArtNotifier extends ChangeNotifier {
 
     if (_loading) {
       SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (_disposed) return;
         _onArtBecameAvailable();
       });
       return;
@@ -110,12 +117,13 @@ class TrackArtNotifier extends ChangeNotifier {
     PlayerController player, {
     required int maxDimension,
   }) async {
-    if (_art != null || _loading) return;
+    if (_disposed || _art != null || _loading) return;
 
     final sync = resolveSyncArt(track, player, maxDimension);
     if (sync != null && sync.isNotEmpty) {
+      if (_disposed) return;
       _art = sync;
-      notifyListeners();
+      _safeNotify();
       unbindArtAvailability();
       return;
     }
@@ -130,13 +138,15 @@ class TrackArtNotifier extends ChangeNotifier {
         player: player,
         targetDimension: maxDimension,
       );
+      if (_disposed) return;
       if (bytes != null && bytes.isNotEmpty) {
         _art = bytes;
         unbindArtAvailability();
       }
     } finally {
+      if (_disposed) return;
       _loading = false;
-      notifyListeners();
+      _safeNotify();
     }
   }
 
@@ -160,6 +170,7 @@ class TrackArtNotifier extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     unbindArtAvailability();
     clear();
     super.dispose();
