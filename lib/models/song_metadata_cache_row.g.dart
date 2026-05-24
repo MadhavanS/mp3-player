@@ -53,6 +53,22 @@ const SongMetadataCacheRowSchema = IsarGeneratedSchema(
         name: 'updatedAtMs',
         type: IsarType.long,
       ),
+      IsarPropertySchema(
+        name: 'hasArtDiskCache',
+        type: IsarType.bool,
+      ),
+      IsarPropertySchema(
+        name: 'artCachedForModifiedMs',
+        type: IsarType.long,
+      ),
+      IsarPropertySchema(
+        name: 'artCachedForSizeBytes',
+        type: IsarType.long,
+      ),
+      IsarPropertySchema(
+        name: 'isArtCacheValid',
+        type: IsarType.bool,
+      ),
     ],
     indexes: [
       IsarIndexSchema(
@@ -91,6 +107,10 @@ int serializeSongMetadataCacheRow(
   }
   IsarCore.writeLong(writer, 7, object.fileSizeBytes);
   IsarCore.writeLong(writer, 8, object.updatedAtMs);
+  IsarCore.writeBool(writer, 9, object.hasArtDiskCache);
+  IsarCore.writeLong(writer, 10, object.artCachedForModifiedMs);
+  IsarCore.writeLong(writer, 11, object.artCachedForSizeBytes);
+  IsarCore.writeBool(writer, 12, object.isArtCacheValid);
   return object.id;
 }
 
@@ -122,6 +142,9 @@ SongMetadataCacheRow deserializeSongMetadataCacheRow(IsarReader reader) {
   }
   object.fileSizeBytes = IsarCore.readLong(reader, 7);
   object.updatedAtMs = IsarCore.readLong(reader, 8);
+  object.hasArtDiskCache = IsarCore.readBool(reader, 9);
+  object.artCachedForModifiedMs = IsarCore.readLong(reader, 10);
+  object.artCachedForSizeBytes = IsarCore.readLong(reader, 11);
   return object;
 }
 
@@ -162,6 +185,14 @@ dynamic deserializeSongMetadataCacheRowProp(IsarReader reader, int property) {
       return IsarCore.readLong(reader, 7);
     case 8:
       return IsarCore.readLong(reader, 8);
+    case 9:
+      return IsarCore.readBool(reader, 9);
+    case 10:
+      return IsarCore.readLong(reader, 10);
+    case 11:
+      return IsarCore.readLong(reader, 11);
+    case 12:
+      return IsarCore.readBool(reader, 12);
     default:
       throw ArgumentError('Unknown property: $property');
   }
@@ -177,6 +208,10 @@ sealed class _SongMetadataCacheRowUpdate {
     String? genres,
     int? fileSizeBytes,
     int? updatedAtMs,
+    bool? hasArtDiskCache,
+    int? artCachedForModifiedMs,
+    int? artCachedForSizeBytes,
+    bool? isArtCacheValid,
   });
 }
 
@@ -195,6 +230,10 @@ class _SongMetadataCacheRowUpdateImpl implements _SongMetadataCacheRowUpdate {
     Object? genres = ignore,
     Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
+    Object? hasArtDiskCache = ignore,
+    Object? artCachedForModifiedMs = ignore,
+    Object? artCachedForSizeBytes = ignore,
+    Object? isArtCacheValid = ignore,
   }) {
     return collection.updateProperties([
           id
@@ -206,6 +245,12 @@ class _SongMetadataCacheRowUpdateImpl implements _SongMetadataCacheRowUpdate {
           if (genres != ignore) 5: genres as String?,
           if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
           if (updatedAtMs != ignore) 8: updatedAtMs as int?,
+          if (hasArtDiskCache != ignore) 9: hasArtDiskCache as bool?,
+          if (artCachedForModifiedMs != ignore)
+            10: artCachedForModifiedMs as int?,
+          if (artCachedForSizeBytes != ignore)
+            11: artCachedForSizeBytes as int?,
+          if (isArtCacheValid != ignore) 12: isArtCacheValid as bool?,
         }) >
         0;
   }
@@ -221,6 +266,10 @@ sealed class _SongMetadataCacheRowUpdateAll {
     String? genres,
     int? fileSizeBytes,
     int? updatedAtMs,
+    bool? hasArtDiskCache,
+    int? artCachedForModifiedMs,
+    int? artCachedForSizeBytes,
+    bool? isArtCacheValid,
   });
 }
 
@@ -240,6 +289,10 @@ class _SongMetadataCacheRowUpdateAllImpl
     Object? genres = ignore,
     Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
+    Object? hasArtDiskCache = ignore,
+    Object? artCachedForModifiedMs = ignore,
+    Object? artCachedForSizeBytes = ignore,
+    Object? isArtCacheValid = ignore,
   }) {
     return collection.updateProperties(id, {
       if (path != ignore) 1: path as String?,
@@ -249,6 +302,10 @@ class _SongMetadataCacheRowUpdateAllImpl
       if (genres != ignore) 5: genres as String?,
       if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
       if (updatedAtMs != ignore) 8: updatedAtMs as int?,
+      if (hasArtDiskCache != ignore) 9: hasArtDiskCache as bool?,
+      if (artCachedForModifiedMs != ignore) 10: artCachedForModifiedMs as int?,
+      if (artCachedForSizeBytes != ignore) 11: artCachedForSizeBytes as int?,
+      if (isArtCacheValid != ignore) 12: isArtCacheValid as bool?,
     });
   }
 }
@@ -271,6 +328,10 @@ sealed class _SongMetadataCacheRowQueryUpdate {
     String? genres,
     int? fileSizeBytes,
     int? updatedAtMs,
+    bool? hasArtDiskCache,
+    int? artCachedForModifiedMs,
+    int? artCachedForSizeBytes,
+    bool? isArtCacheValid,
   });
 }
 
@@ -290,6 +351,10 @@ class _SongMetadataCacheRowQueryUpdateImpl
     Object? genres = ignore,
     Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
+    Object? hasArtDiskCache = ignore,
+    Object? artCachedForModifiedMs = ignore,
+    Object? artCachedForSizeBytes = ignore,
+    Object? isArtCacheValid = ignore,
   }) {
     return query.updateProperties(limit: limit, {
       if (path != ignore) 1: path as String?,
@@ -299,6 +364,10 @@ class _SongMetadataCacheRowQueryUpdateImpl
       if (genres != ignore) 5: genres as String?,
       if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
       if (updatedAtMs != ignore) 8: updatedAtMs as int?,
+      if (hasArtDiskCache != ignore) 9: hasArtDiskCache as bool?,
+      if (artCachedForModifiedMs != ignore) 10: artCachedForModifiedMs as int?,
+      if (artCachedForSizeBytes != ignore) 11: artCachedForSizeBytes as int?,
+      if (isArtCacheValid != ignore) 12: isArtCacheValid as bool?,
     });
   }
 }
@@ -328,6 +397,10 @@ class _SongMetadataCacheRowQueryBuilderUpdateImpl
     Object? genres = ignore,
     Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
+    Object? hasArtDiskCache = ignore,
+    Object? artCachedForModifiedMs = ignore,
+    Object? artCachedForSizeBytes = ignore,
+    Object? isArtCacheValid = ignore,
   }) {
     final q = query.build();
     try {
@@ -339,6 +412,11 @@ class _SongMetadataCacheRowQueryBuilderUpdateImpl
         if (genres != ignore) 5: genres as String?,
         if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
         if (updatedAtMs != ignore) 8: updatedAtMs as int?,
+        if (hasArtDiskCache != ignore) 9: hasArtDiskCache as bool?,
+        if (artCachedForModifiedMs != ignore)
+          10: artCachedForModifiedMs as int?,
+        if (artCachedForSizeBytes != ignore) 11: artCachedForSizeBytes as int?,
+        if (isArtCacheValid != ignore) 12: isArtCacheValid as bool?,
       });
     } finally {
       q.close();
@@ -1624,6 +1702,206 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
       );
     });
   }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> hasArtDiskCacheEqualTo(
+    bool value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        EqualCondition(
+          property: 9,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForModifiedMsEqualTo(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        EqualCondition(
+          property: 10,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForModifiedMsGreaterThan(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        GreaterCondition(
+          property: 10,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForModifiedMsGreaterThanOrEqualTo(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        GreaterOrEqualCondition(
+          property: 10,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForModifiedMsLessThan(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        LessCondition(
+          property: 10,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForModifiedMsLessThanOrEqualTo(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        LessOrEqualCondition(
+          property: 10,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForModifiedMsBetween(
+    int lower,
+    int upper,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        BetweenCondition(
+          property: 10,
+          lower: lower,
+          upper: upper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForSizeBytesEqualTo(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        EqualCondition(
+          property: 11,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForSizeBytesGreaterThan(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        GreaterCondition(
+          property: 11,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForSizeBytesGreaterThanOrEqualTo(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        GreaterOrEqualCondition(
+          property: 11,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForSizeBytesLessThan(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        LessCondition(
+          property: 11,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForSizeBytesLessThanOrEqualTo(
+    int value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        LessOrEqualCondition(
+          property: 11,
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> artCachedForSizeBytesBetween(
+    int lower,
+    int upper,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        BetweenCondition(
+          property: 11,
+          lower: lower,
+          upper: upper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> isArtCacheValidEqualTo(
+    bool value,
+  ) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        EqualCondition(
+          property: 12,
+          value: value,
+        ),
+      );
+    });
+  }
 }
 
 extension SongMetadataCacheRowQueryObject on QueryBuilder<SongMetadataCacheRow,
@@ -1777,6 +2055,62 @@ extension SongMetadataCacheRowQuerySortBy
       return query.addSortBy(8, sort: Sort.desc);
     });
   }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByHasArtDiskCache() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(9);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByHasArtDiskCacheDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(9, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByArtCachedForModifiedMs() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(10);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByArtCachedForModifiedMsDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(10, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByArtCachedForSizeBytes() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(11);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByArtCachedForSizeBytesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(11, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByIsArtCacheValid() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(12);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByIsArtCacheValidDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(12, sort: Sort.desc);
+    });
+  }
 }
 
 extension SongMetadataCacheRowQuerySortThenBy
@@ -1892,6 +2226,62 @@ extension SongMetadataCacheRowQuerySortThenBy
       return query.addSortBy(8, sort: Sort.desc);
     });
   }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByHasArtDiskCache() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(9);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByHasArtDiskCacheDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(9, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByArtCachedForModifiedMs() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(10);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByArtCachedForModifiedMsDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(10, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByArtCachedForSizeBytes() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(11);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByArtCachedForSizeBytesDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(11, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByIsArtCacheValid() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(12);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByIsArtCacheValidDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(12, sort: Sort.desc);
+    });
+  }
 }
 
 extension SongMetadataCacheRowQueryWhereDistinct
@@ -1949,6 +2339,34 @@ extension SongMetadataCacheRowQueryWhereDistinct
       distinctByUpdatedAtMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(8);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
+      distinctByHasArtDiskCache() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(9);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
+      distinctByArtCachedForModifiedMs() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(10);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
+      distinctByArtCachedForSizeBytes() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(11);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
+      distinctByIsArtCacheValid() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(12);
     });
   }
 }
@@ -2009,6 +2427,34 @@ extension SongMetadataCacheRowQueryProperty1
       updatedAtMsProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(8);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, bool, QAfterProperty>
+      hasArtDiskCacheProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, int, QAfterProperty>
+      artCachedForModifiedMsProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(10);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, int, QAfterProperty>
+      artCachedForSizeBytesProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(11);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, bool, QAfterProperty>
+      isArtCacheValidProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(12);
     });
   }
 }
@@ -2076,6 +2522,34 @@ extension SongMetadataCacheRowQueryProperty2<R>
       return query.addProperty(8);
     });
   }
+
+  QueryBuilder<SongMetadataCacheRow, (R, bool), QAfterProperty>
+      hasArtDiskCacheProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R, int), QAfterProperty>
+      artCachedForModifiedMsProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(10);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R, int), QAfterProperty>
+      artCachedForSizeBytesProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(11);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R, bool), QAfterProperty>
+      isArtCacheValidProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(12);
+    });
+  }
 }
 
 extension SongMetadataCacheRowQueryProperty3<R1, R2>
@@ -2139,6 +2613,34 @@ extension SongMetadataCacheRowQueryProperty3<R1, R2>
       updatedAtMsProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(8);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R1, R2, bool), QOperations>
+      hasArtDiskCacheProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R1, R2, int), QOperations>
+      artCachedForModifiedMsProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(10);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R1, R2, int), QOperations>
+      artCachedForSizeBytesProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(11);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R1, R2, bool), QOperations>
+      isArtCacheValidProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(12);
     });
   }
 }

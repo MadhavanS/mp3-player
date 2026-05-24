@@ -94,6 +94,13 @@ class LibraryCatalog {
     return _paths.length != before;
   }
 
+  /// Drops in-memory cover bytes for [path] (rename/delete).
+  void evictArtHotAtPath(String path) {
+    final key = canonicalMusicLibraryPathKey(path.trim());
+    if (key.isEmpty) return;
+    _artHot.remove(key);
+  }
+
   TrackItem _resolve(String path) {
     final key = canonicalMusicLibraryPathKey(path);
     final base = _byKey[key] ?? TrackItem.fromFilePath(path);

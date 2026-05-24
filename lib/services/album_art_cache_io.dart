@@ -60,6 +60,39 @@ void evictCachedAlbumArt(TrackItem track) {
   _memory.removeWhere((key, _) => key.startsWith(prefix));
 }
 
+/// Removes path-keyed list thumbnails (all dimensions) and in-memory entries.
+Future<void> evictPathAlbumArtCaches(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return;
+  final pathKey = canonicalMusicLibraryPathKey(path);
+  if (pathKey.isEmpty) return;
+  final hash = pathKey.hashCode.abs();
+  final diskPrefix = 'path_${hash}_';
+  _memory.removeWhere((key, _) => key.startsWith(diskPrefix));
+
+  try {
+    final dir = await _albumArtCacheDir();
+    final toDelete = <File>[];
+    await for (final entity in dir.list()) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path);
+      if (name.startsWith(diskPrefix) && name.endsWith('.png')) {
+        toDelete.add(entity);
+      }
+    }
+    await Future.wait(
+      toDelete.map((f) async {
+        try {
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }),
+      eagerError: false,
+    );
+  } catch (e, st) {
+    debugPrint('evictPathAlbumArtCaches($path): $e\n$st');
+  }
+}
+
 String _pathDiskKey(String filePath, int maxDimension) {
   final pathKey = canonicalMusicLibraryPathKey(filePath.trim());
   if (pathKey.isEmpty) return '';

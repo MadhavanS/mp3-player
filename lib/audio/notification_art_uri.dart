@@ -7,3 +7,6 @@ import 'notification_art_uri_stub.dart'
 /// can decode for the media notification (not a Flutter asset path). Web returns null.
 Future<Uri?> uriForNotificationAlbumArt(TrackItem track) =>
     impl.uriForNotificationAlbumArt(track);
+
+Future<void> evictNotificationArtCacheForPath(String filePath) =>
+    impl.evictNotificationArtCacheForPath(filePath);

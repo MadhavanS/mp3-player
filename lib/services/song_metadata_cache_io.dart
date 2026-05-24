@@ -5,12 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:isar/isar.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/song_metadata_cache_row.dart';
 import '../models/track_item.dart';
+import 'album_art_cache.dart';
+import 'music_library_path_key.dart';
 import 'song_metadata_cache_types.dart';
 
 Isar? _isar;
+const _backfillArtFlagKey = 'song_metadata_art_disk_flag_backfill_v1';
 
 /// Isar refuses to open when [directory] is missing or names an existing file.
 Future<String> _ensureIsarDatabaseDirectory(
@@ -38,11 +42,60 @@ Future<Isar> _openIsar() async {
   final db = await Isar.openAsync(
     schemas: [SongMetadataCacheRowSchema],
     directory: dbPath,
-    // Bump after schema change so installs don't reuse incompatible Isar files.
-    name: 'mp3_player_metadata_v3',
+    name: 'mp3_player_metadata_v4',
   );
   _isar = db;
+  await _maybeBackfillArtDiskCacheFlags(db);
   return db;
+}
+
+void _copyArtDiskFlags({
+  required SongMetadataCacheRow row,
+  required SongMetadataCacheRow? prev,
+  required bool fingerprintMatchesPrev,
+}) {
+  if (prev == null || !fingerprintMatchesPrev) {
+    row.hasArtDiskCache = false;
+    row.artCachedForModifiedMs = 0;
+    row.artCachedForSizeBytes = 0;
+    return;
+  }
+  row.hasArtDiskCache = prev.hasArtDiskCache;
+  row.artCachedForModifiedMs = prev.artCachedForModifiedMs;
+  row.artCachedForSizeBytes = prev.artCachedForSizeBytes;
+}
+
+Future<void> _maybeBackfillArtDiskCacheFlags(Isar db) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_backfillArtFlagKey) == true) return;
+
+    final all = db.songMetadataCacheRows.where().findAll();
+    if (all.isEmpty) {
+      await prefs.setBool(_backfillArtFlagKey, true);
+      return;
+    }
+
+    final paths = all.map((r) => r.path).toList(growable: false);
+    final keysWithDisk = await pathKeysWithDiskAlbumArt(paths);
+
+    if (keysWithDisk.isNotEmpty) {
+      await db.writeAsync((isar) {
+        for (final row in all) {
+          final key = canonicalMusicLibraryPathKey(row.path);
+          if (!keysWithDisk.contains(key)) continue;
+          row.hasArtDiskCache = true;
+          row.artCachedForModifiedMs = row.updatedAtMs;
+          row.artCachedForSizeBytes = row.fileSizeBytes;
+        }
+        isar.songMetadataCacheRows.putAll(all);
+      });
+    }
+
+    await prefs.setBool(_backfillArtFlagKey, true);
+  } catch (e, st) {
+    debugPrint('SongMetadataCache._maybeBackfillArtDiskCacheFlags: $e\n$st');
+  }
 }
 
 Future<Map<String, TrackItem>> loadTracksByPaths(List<String> paths) async {
@@ -112,6 +165,11 @@ Future<void> saveTracks(Iterable<TrackItem> tracks) async {
         // every file after art-only warmup or tag edits.
         ..fileSizeBytes = prev?.fileSizeBytes ?? 0
         ..updatedAtMs = prev?.updatedAtMs ?? now;
+      _copyArtDiskFlags(
+        row: row,
+        prev: prev,
+        fingerprintMatchesPrev: prev != null,
+      );
       rows.add(row);
     }
     await db.writeAsync((isar) {
@@ -128,7 +186,7 @@ Future<Map<String, CachedTrackSnapshot>> loadSnapshotsForRoots(
   if (roots.isEmpty) return const <String, CachedTrackSnapshot>{};
   try {
     final db = await _openIsar();
-    final rows = await db.songMetadataCacheRows.where().findAll();
+    final rows = db.songMetadataCacheRows.where().findAll();
     final out = <String, CachedTrackSnapshot>{};
     for (final row in rows) {
       if (!_isPathUnderRoots(row.path, roots)) continue;
@@ -159,27 +217,55 @@ Future<Map<String, CachedTrackSnapshot>> loadSnapshotsForRoots(
 }
 
 Future<void> saveTrackSnapshots(Iterable<CachedTrackSnapshot> tracks) async {
-  final rows = <SongMetadataCacheRow>[];
-  for (final s in tracks) {
-    final path = s.track.filePath?.trim();
-    if (path == null || path.isEmpty) continue;
-    final row = SongMetadataCacheRow()
-      ..id = _stablePathId(path)
-      ..path = path
-      ..title = s.track.title
-      ..artist = s.track.artist
-      ..album = s.track.metaLine
-      ..genres = s.track.genres
-      ..artColorValues = s.track.artColors
-          .map((c) => c.toARGB32())
-          .toList(growable: false)
-      ..fileSizeBytes = s.fileSizeBytes
-      ..updatedAtMs = s.fileModifiedMs;
-    rows.add(row);
-  }
-  if (rows.isEmpty) return;
+  final snapshots = tracks.toList(growable: false);
+  if (snapshots.isEmpty) return;
+
   try {
     final db = await _openIsar();
+    final paths = snapshots
+        .map((s) => s.track.filePath?.trim())
+        .whereType<String>()
+        .where((p0) => p0.isNotEmpty)
+        .toList(growable: false);
+    final existingByPath = <String, SongMetadataCacheRow>{};
+    if (paths.isNotEmpty) {
+      final existingRows = db.songMetadataCacheRows
+          .where()
+          .anyOf(paths, (q, path) => q.pathEqualTo(path))
+          .findAll();
+      for (final r in existingRows) {
+        existingByPath[r.path] = r;
+      }
+    }
+
+    final rows = <SongMetadataCacheRow>[];
+    for (final s in snapshots) {
+      final path = s.track.filePath?.trim();
+      if (path == null || path.isEmpty) continue;
+      final prev = existingByPath[path];
+      final fingerprintMatchesPrev = prev != null &&
+          prev.updatedAtMs == s.fileModifiedMs &&
+          prev.fileSizeBytes == s.fileSizeBytes;
+      final row = SongMetadataCacheRow()
+        ..id = _stablePathId(path)
+        ..path = path
+        ..title = s.track.title
+        ..artist = s.track.artist
+        ..album = s.track.metaLine
+        ..genres = s.track.genres
+        ..artColorValues = s.track.artColors
+            .map((c) => c.toARGB32())
+            .toList(growable: false)
+        ..fileSizeBytes = s.fileSizeBytes
+        ..updatedAtMs = s.fileModifiedMs;
+      _copyArtDiskFlags(
+        row: row,
+        prev: prev,
+        fingerprintMatchesPrev: fingerprintMatchesPrev,
+      );
+      rows.add(row);
+    }
+    if (rows.isEmpty) return;
     await db.writeAsync((isar) {
       isar.songMetadataCacheRows.putAll(rows);
     });
@@ -215,7 +301,7 @@ Future<void> deletePaths(Iterable<String> paths) async {
   if (normalized.isEmpty) return;
   try {
     final db = await _openIsar();
-    final rows = await db.songMetadataCacheRows
+    final rows = db.songMetadataCacheRows
         .where()
         .anyOf(normalized.toList(), (q, path) => q.pathEqualTo(path))
         .findAll();
@@ -226,6 +312,94 @@ Future<void> deletePaths(Iterable<String> paths) async {
     });
   } catch (e, st) {
     debugPrint('SongMetadataCache.deletePaths: $e\n$st');
+  }
+}
+
+/// Marks path-keyed disk art as present for the row's current file fingerprint.
+Future<void> markArtDiskCachedForPath(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return;
+  try {
+    final db = await _openIsar();
+    final row = db.songMetadataCacheRows
+        .where()
+        .pathEqualTo(path)
+        .findFirst();
+    if (row == null) return;
+    row.hasArtDiskCache = true;
+    row.artCachedForModifiedMs = row.updatedAtMs;
+    row.artCachedForSizeBytes = row.fileSizeBytes;
+    await db.writeAsync((isar) {
+      isar.songMetadataCacheRows.put(row);
+    });
+  } catch (e, st) {
+    debugPrint('SongMetadataCache.markArtDiskCachedForPath: $e\n$st');
+  }
+}
+
+Future<void> clearArtDiskCacheFlagForPath(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return;
+  try {
+    final db = await _openIsar();
+    final row = db.songMetadataCacheRows
+        .where()
+        .pathEqualTo(path)
+        .findFirst();
+    if (row == null) return;
+    row.hasArtDiskCache = false;
+    row.artCachedForModifiedMs = 0;
+    row.artCachedForSizeBytes = 0;
+    await db.writeAsync((isar) {
+      isar.songMetadataCacheRows.put(row);
+    });
+  } catch (e, st) {
+    debugPrint('SongMetadataCache.clearArtDiskCacheFlagForPath: $e\n$st');
+  }
+}
+
+Future<bool> hasValidArtDiskCacheForPath(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return false;
+  try {
+    final db = await _openIsar();
+    final row = db.songMetadataCacheRows
+        .where()
+        .pathEqualTo(path)
+        .findFirst();
+    return row != null && row.isArtCacheValid;
+  } catch (e, st) {
+    debugPrint('SongMetadataCache.hasValidArtDiskCacheForPath: $e\n$st');
+    return false;
+  }
+}
+
+/// Canonical path keys with a valid Isar art-disk flag (no filesystem probe).
+Future<Set<String>> pathKeysWithValidArtDiskCache(
+  Iterable<String> filePaths,
+) async {
+  final paths = filePaths
+      .map((p0) => p0.trim())
+      .where((p0) => p0.isNotEmpty)
+      .toList(growable: false);
+  if (paths.isEmpty) return const <String>{};
+
+  try {
+    final db = await _openIsar();
+    final rows = db.songMetadataCacheRows
+        .where()
+        .anyOf(paths, (q, path) => q.pathEqualTo(path))
+        .findAll();
+    final out = <String>{};
+    for (final row in rows) {
+      if (!row.isArtCacheValid) continue;
+      final key = canonicalMusicLibraryPathKey(row.path);
+      if (key.isNotEmpty) out.add(key);
+    }
+    return out;
+  } catch (e, st) {
+    debugPrint('SongMetadataCache.pathKeysWithValidArtDiskCache: $e\n$st');
+    return const <String>{};
   }
 }
 

@@ -739,6 +739,7 @@ Future<void> applyTrackOverflowAction(
         return;
       }
 
+      await player.evictArtCachesForPath(path);
       player.removeFromLibraryCatalogByPath(path);
       unawaited(SongMetadataCache.deletePaths([path]));
       final queueIx = player.playlist.indexWhere((t) {

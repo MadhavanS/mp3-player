@@ -1,7 +1,12 @@
+import 'dart:typed_data';
+
 import '../models/track_item.dart';
 import 'track_metadata_stub.dart' if (dart.library.io) 'track_metadata_io.dart' as impl;
 
 Future<TrackItem> readAudioMetadata(TrackItem base) => impl.readAudioMetadata(base);
+
+Future<Uint8List?> readCoverBytesOnly(String filePath) =>
+    impl.readCoverBytesOnly(filePath);
 
 /// Loads metadata in small batches to avoid UI jank from large cover extraction.
 Future<void> enrichPlaylistTracks({

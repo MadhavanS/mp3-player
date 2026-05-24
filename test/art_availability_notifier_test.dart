@@ -15,6 +15,17 @@ void main() {
     expect(count, 1);
   });
 
+  test('revoke removes path without notifying', () {
+    final n = ArtAvailabilityNotifier();
+    var count = 0;
+    n.addListener(() => count++);
+
+    n.markAvailable('path-a');
+    n.revoke('path-a');
+    expect(n.hasArt('path-a'), isFalse);
+    expect(count, 1);
+  });
+
   test('markAvailableAll batches with beginBatch/endBatch', () {
     final n = ArtAvailabilityNotifier();
     var count = 0;

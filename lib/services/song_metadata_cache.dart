@@ -27,4 +27,19 @@ class SongMetadataCache {
 
   static Future<void> deletePaths(Iterable<String> paths) =>
       impl.deletePaths(paths);
+
+  static Future<void> markArtDiskCachedForPath(String filePath) =>
+      impl.markArtDiskCachedForPath(filePath);
+
+  static Future<void> clearArtDiskCacheFlagForPath(String filePath) =>
+      impl.clearArtDiskCacheFlagForPath(filePath);
+
+  static Future<bool> hasValidArtDiskCacheForPath(String filePath) =>
+      impl.hasValidArtDiskCacheForPath(filePath);
+
+  /// Path keys with [SongMetadataCacheRow.isArtCacheValid] (no disk dir scan).
+  static Future<Set<String>> pathKeysWithValidArtDiskCache(
+    Iterable<String> filePaths,
+  ) =>
+      impl.pathKeysWithValidArtDiskCache(filePaths);
 }

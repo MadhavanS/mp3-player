@@ -17,6 +17,7 @@ import '../../services/music_library_path_key.dart';
 import '../../services/recent_list_limits_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
+import '../../services/song_metadata_cache.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/daisy_background.dart';
@@ -599,7 +600,12 @@ class LibraryScreenState extends State<LibraryScreen>
       if (path == null || path.isEmpty) continue;
       final art = track.albumArtBytes;
       if (art != null && art.isNotEmpty) continue;
+      if (await SongMetadataCache.hasValidArtDiskCacheForPath(path)) {
+        player.markAlbumArtAvailable(path);
+        continue;
+      }
       if (await hasAlbumArtDiskCacheAnyDimension(path)) {
+        await SongMetadataCache.markArtDiskCachedForPath(path);
         player.markAlbumArtAvailable(path);
         continue;
       }

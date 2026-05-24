@@ -34,4 +34,10 @@ class ArtAvailabilityNotifier extends ChangeNotifier {
     _batching = false;
     notifyListeners();
   }
+
+  /// Clears availability after rename/delete (no [notifyListeners]).
+  void revoke(String pathKey) {
+    if (pathKey.isEmpty) return;
+    _available.remove(pathKey);
+  }
 }

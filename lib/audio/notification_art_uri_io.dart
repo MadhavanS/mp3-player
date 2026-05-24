@@ -74,6 +74,38 @@ String _notificationArtCacheFileName(TrackItem track, int contentHash) {
   return 'art_${trackId}_$contentHash.png';
 }
 
+/// Deletes cached notification/widget art PNGs for [filePath] (all content hashes).
+Future<void> evictNotificationArtCacheForPath(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return;
+  final pathKey = canonicalMusicLibraryPathKey(path);
+  if (pathKey.isEmpty) return;
+  final trackId = pathKey.hashCode.abs();
+  final prefix = 'art_${trackId}_';
+
+  try {
+    final dir = await _notificationArtCacheDirectory();
+    final toDelete = <File>[];
+    await for (final entity in dir.list()) {
+      if (entity is! File) continue;
+      final name = p.basename(entity.path);
+      if (name.startsWith(prefix) && name.endsWith('.png')) {
+        toDelete.add(entity);
+      }
+    }
+    await Future.wait(
+      toDelete.map((f) async {
+        try {
+          if (await f.exists()) await f.delete();
+        } catch (_) {}
+      }),
+      eagerError: false,
+    );
+  } catch (e, st) {
+    debugPrint('evictNotificationArtCacheForPath($path): $e\n$st');
+  }
+}
+
 Future<Directory> _notificationArtCacheDirectory() async {
   final root = await getTemporaryDirectory();
   final dir = Directory(p.join(root.path, _notifyArtCacheDirName));

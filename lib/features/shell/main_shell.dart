@@ -459,7 +459,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         await SongMetadataCache.saveTrackSnapshots(repairSnapshots);
       }
 
-      const batchSize = 4;
+      const batchSize = 6;
       for (var i = 0; i < changedPaths.length; i += batchSize) {
         final batch = changedPaths
             .skip(i)
@@ -530,12 +530,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _albumArtWarmupInProgress = true;
     unawaited(() async {
       try {
-        // Shorter wait while playing so list art warmup resumes sooner.
-        while (player.isPlaying && mounted) {
-          await Future<void>.delayed(const Duration(seconds: 3));
-        }
-        if (!mounted) return;
-
         final candidates = player.metadataLibrary
             .where((t) {
               final p = t.filePath;
@@ -545,31 +539,39 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             .toList(growable: false);
         if (candidates.isEmpty) return;
 
-        final tracksNeedingArt = <TrackItem>[];
+        var warmed = 0;
         for (final t in candidates) {
+          if (!mounted) return;
           final path = t.filePath!.trim();
-          if (await hasAlbumArtDiskCacheAnyDimension(path)) {
+          final pathKey = canonicalMusicLibraryPathKey(path);
+          if (pathKey.isEmpty) continue;
+
+          if (player.artAvailability.hasArt(pathKey)) continue;
+          if (await SongMetadataCache.hasValidArtDiskCacheForPath(path)) {
             player.markAlbumArtAvailable(path);
             continue;
           }
-          tracksNeedingArt.add(t);
-        }
-        if (tracksNeedingArt.isEmpty) return;
+          if (await hasAlbumArtDiskCacheAnyDimension(path)) {
+            await SongMetadataCache.markArtDiskCachedForPath(path);
+            player.markAlbumArtAvailable(path);
+            continue;
+          }
 
-        await enrichPlaylistTracks(
-          tracks: tracksNeedingArt,
-          batchSize: 5,
-          interBatchDelay: const Duration(milliseconds: 20),
-          onTrackUpdated: (path, updated) {
-            player.updateTrackByPath(
-              path,
-              updated,
-              notify: CatalogNotifyMode.throttled,
-              refreshNotificationArt: false,
-            );
-            // Tags already in Isar from sync; readAudioMetadata primed disk art.
-          },
-        );
+          final art = await readCoverBytesOnly(path);
+          if (art != null && art.isNotEmpty) {
+            await primeAlbumArtDiskCache(path, art);
+            await SongMetadataCache.markArtDiskCachedForPath(path);
+            player.markAlbumArtAvailable(path);
+          }
+
+          warmed++;
+          final playing = player.isPlaying;
+          if (playing) {
+            await Future<void>.delayed(const Duration(milliseconds: 300));
+          } else if (warmed % 5 == 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          }
+        }
       } catch (e, st) {
         debugPrint('_scheduleAlbumArtWarmup: $e\n$st');
       } finally {

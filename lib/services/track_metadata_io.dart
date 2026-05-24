@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/track_item.dart';
 import 'album_art_cache.dart';
 import 'metadata_backend_config.dart';
+import 'song_metadata_cache.dart';
 import 'metadata_god_init_io.dart';
 import 'metadata_god_reader_io.dart';
 
@@ -133,8 +134,57 @@ Future<TrackItem> _finalizeMetadataRead(TrackItem result) async {
       art != null &&
       art.isNotEmpty) {
     await primeAlbumArtDiskCache(path, art);
+    await SongMetadataCache.markArtDiskCachedForPath(path);
   }
   return result;
+}
+
+/// Cover bytes only (warmup). Still reads the file; skips tag merge overhead.
+Future<Uint8List?> readCoverBytesOnly(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return null;
+
+  if (kUseMetadataGod && metadataGodAvailable) {
+    final base = TrackItem.fromFilePath(path);
+    final fromGod = await tryReadAudioMetadataWithGod(base);
+    final art = fromGod?.albumArtBytes;
+    if (art != null && art.isNotEmpty) return art;
+  }
+
+  return _readCoverBytesWithDartReader(path);
+}
+
+Future<Uint8List?> _readCoverBytesWithDartReader(String path) async {
+  final file = File(path);
+  if (!await file.exists()) return null;
+
+  try {
+    if (path.toLowerCase().endsWith('.mp3')) {
+      final raf = file.openSync();
+      try {
+        if (MP3Parser.canUserParser(raf)) {
+          final mp3 = MP3Parser(fetchImage: true).parse(raf);
+          if (mp3.pictures.isNotEmpty) {
+            final raw = mp3.pictures.first.bytes;
+            if (raw.isNotEmpty) return raw;
+          }
+        }
+      } finally {
+        try {
+          raf.closeSync();
+        } catch (_) {}
+      }
+    }
+
+    final meta = readMetadata(file, getImage: true);
+    if (meta.pictures.isNotEmpty) {
+      final raw = meta.pictures.first.bytes;
+      if (raw.isNotEmpty) return raw;
+    }
+  } catch (e) {
+    _logMetadataSkipOnce(path, e);
+  }
+  return null;
 }
 
 /// Reads embedded tags + cover. On this branch tries [metadata_god] first when

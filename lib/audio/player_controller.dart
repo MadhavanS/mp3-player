@@ -19,6 +19,7 @@ import '../models/track_item.dart';
 import '../services/album_art_cache.dart';
 import '../services/library_path_migration.dart';
 import '../services/music_library_path_key.dart';
+import '../services/song_metadata_cache.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
 import 'art_availability_notifier.dart';
@@ -582,11 +583,25 @@ class PlayerController {
     artAvailability.markAvailable(key);
   }
 
-  /// Marks paths that already have on-disk thumbnails (startup / after scan).
+  /// Clears list, notification, and hot LRU art for [filePath] (rename/delete).
+  Future<void> evictArtCachesForPath(String filePath) async {
+    final path = filePath.trim();
+    if (path.isEmpty) return;
+    final key = canonicalMusicLibraryPathKey(path);
+    _libraryCatalog.evictArtHotAtPath(path);
+    await evictPathAlbumArtCaches(path);
+    await evictNotificationArtCacheForPath(path);
+    await SongMetadataCache.clearArtDiskCacheFlagForPath(path);
+    if (key.isNotEmpty) artAvailability.revoke(key);
+  }
+
+  /// Marks paths with valid Isar art-disk flags (no cache directory scan).
   Future<void> prefillArtAvailabilityFromDiskCache(
     Iterable<String> filePaths,
   ) async {
-    final keys = await pathKeysWithDiskAlbumArt(filePaths);
+    final keys = await SongMetadataCache.pathKeysWithValidArtDiskCache(
+      filePaths,
+    );
     if (keys.isEmpty) return;
     artAvailability.beginBatch();
     artAvailability.markAvailableAll(keys);
@@ -2035,7 +2050,10 @@ class PlayerController {
     }
 
     if (newPath != null && newPath.isNotEmpty) {
-      unawaited(migrateLibraryPathReferences(oldPath, newPath));
+      unawaited(() async {
+        await migrateLibraryPathReferences(oldPath, newPath);
+        await evictArtCachesForPath(oldPath);
+      }());
     }
 
     // The currently loaded audio source still points to old file URIs.

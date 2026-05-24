@@ -170,8 +170,10 @@ Guards:
 
 ### Persistence & sync
 
-- **Isar `SongMetadataCache`:** tags + `fileModifiedMs` + **`fileSizeBytes`** for  
-  change detection. Must preserve fingerprints on save or every restart re-parses all files.
+- **Isar `SongMetadataCache` (v4 DB):** tags + `fileModifiedMs` + **`fileSizeBytes`** for  
+  change detection; **`hasArtDiskCache`** + fingerprint fields for path-keyed PNG art  
+  (`isArtCacheValid` when mtime/size match). Startup prefill uses Isar only (no cache-dir scan).  
+  One-time backfill maps existing disk PNGs into flags after upgrade.
 - **Disk art cache:** `album_art_cache_io.dart` — PNG per path key and dimension  
   (`path_<hash>_512.png`, etc.). Metadata reads prime **512** by default; list/mini  
   request device-sized thumbs (~168–224px).
@@ -190,8 +192,10 @@ Guards:
 - **Notification / widget:** `uriForNotificationAlbumArt` falls back to path disk cache  
   before rasterizing a gradient placeholder; widget sync in `app.dart` uses the resolver.
 - **Startup:** restore Isar → background sync only **changed** files (when fingerprints OK) →  
-  `prefillArtAvailabilityFromDiskCache` + optional art warmup (skips paths with any disk size).
+  `prefillArtAvailabilityFromDiskCache` (Isar `hasArtDiskCache` query) + art warmup (cover-only).
 - **Folder add:** scan + enrich; idle rescan may run later.
+- **Rename/delete:** `evictArtCachesForPath` clears path disk art, notification art cache, hot LRU, and `artAvailability` for the old path.
+- **Art warmup:** cover-only `readCoverBytesOnly` (tags already in Isar); continues at 300ms/item while playing instead of pausing entirely.
 
 ### Album art pipeline
 
