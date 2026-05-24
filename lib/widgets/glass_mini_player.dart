@@ -3,6 +3,8 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 
 import '../audio/player_controller.dart';
+import '../audio/player_notifiers.dart';
+import '../services/music_library_path_key.dart';
 import '../theme/app_theme.dart';
 import 'daisy_background.dart';
 import 'liquid_glass.dart';
@@ -33,8 +35,6 @@ class GlassMiniPlayer extends StatefulWidget {
 }
 
 class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
-  double? _dragFraction;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -154,15 +154,17 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
         : const CircleBorder();
 
     if (ivy) {
-      return _buildIvyMiniPlayer(
-        theme: theme,
-        borderRadius: borderRadius,
-        accent: accent,
-        titleColor: titleColor,
-        iconColor: iconColor,
-        mutedIcon: mutedIcon,
-        thumbColor: accent,
-        inactiveTrack: inactiveTrack,
+      return RepaintBoundary(
+        child: _buildIvyMiniPlayer(
+          theme: theme,
+          borderRadius: borderRadius,
+          accent: accent,
+          titleColor: titleColor,
+          iconColor: iconColor,
+          mutedIcon: mutedIcon,
+          thumbColor: accent,
+          inactiveTrack: inactiveTrack,
+        ),
       );
     }
 
@@ -236,11 +238,11 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                             builder: (context, _) {
                               final t = widget.controller.currentTrack!;
                               return TrackAlbumArt(
-                                key: ValueKey<int>(Object.hash(
-                                  t.filePath,
-                                  t.title,
-                                  identityHashCode(t.albumArtBytes),
-                                )),
+                                key: ValueKey<String>(
+                                  canonicalMusicLibraryPathKey(
+                                    (t.filePath ?? '').trim(),
+                                  ),
+                                ),
                                 track: t,
                                 display: TrackArtDisplay.mini,
                                 showShadow: false,
@@ -343,7 +345,9 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                    child: _buildProgressSlider(
+                    child: _MiniSeekBar(
+                      positionNotifier: widget.controller.positionNotifier,
+                      controller: widget.controller,
                       accent: accent,
                       iconColor: iconColor,
                       thumbColor: thumbColor,
@@ -406,11 +410,11 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                       builder: (context, _) {
                         final t = widget.controller.currentTrack!;
                         return TrackAlbumArt(
-                          key: ValueKey<int>(Object.hash(
-                            t.filePath,
-                            t.title,
-                            identityHashCode(t.albumArtBytes),
-                          )),
+                          key: ValueKey<String>(
+                            canonicalMusicLibraryPathKey(
+                              (t.filePath ?? '').trim(),
+                            ),
+                          ),
                           track: t,
                           display: TrackArtDisplay.mini,
                           showShadow: false,
@@ -500,7 +504,9 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: _buildProgressSlider(
+              child: _MiniSeekBar(
+                positionNotifier: widget.controller.positionNotifier,
+                controller: widget.controller,
                 accent: accent,
                 iconColor: iconColor,
                 thumbColor: thumbColor,
@@ -512,38 +518,60 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
       ),
     ),
   );
+  }
 }
 
-  Widget _buildProgressSlider({
-    required Color accent,
-    required Color iconColor,
-    required Color thumbColor,
-    required Color inactiveTrack,
-  }) {
+/// Isolated seek row so position ticks do not rebuild glass chrome or transport.
+class _MiniSeekBar extends StatefulWidget {
+  const _MiniSeekBar({
+    required this.positionNotifier,
+    required this.controller,
+    required this.accent,
+    required this.iconColor,
+    required this.thumbColor,
+    required this.inactiveTrack,
+  });
+
+  final PositionNotifier positionNotifier;
+  final PlayerController controller;
+  final Color accent;
+  final Color iconColor;
+  final Color thumbColor;
+  final Color inactiveTrack;
+
+  @override
+  State<_MiniSeekBar> createState() => _MiniSeekBarState();
+}
+
+class _MiniSeekBarState extends State<_MiniSeekBar> {
+  double? _dragFraction;
+
+  @override
+  Widget build(BuildContext context) {
     final daisy = context.appliedThemePalette == AppThemePalette.daisy;
     final leah = context.appliedThemePalette == AppThemePalette.leah;
     final isIvy = context.appliedThemePalette == AppThemePalette.ivy;
 
     return ListenableBuilder(
-      listenable: widget.controller.positionNotifier,
+      listenable: widget.positionNotifier,
       builder: (context, _) {
-        final posNotifier = widget.controller.positionNotifier;
+        final posNotifier = widget.positionNotifier;
         final dur = posNotifier.duration ?? widget.controller.duration;
         final pos = posNotifier.position;
         final total = dur?.inMilliseconds ?? 0;
         final live = total > 0
             ? (pos.inMilliseconds / total).clamp(0.0, 1.0)
             : 0.0;
-        final p = (_dragFraction ?? live).clamp(0.0, 1.0);
+        final value = (_dragFraction ?? live).clamp(0.0, 1.0);
 
         return PlayerAdaptiveSlider(
-          value: p,
+          value: value,
           appearance: isIvy
               ? PlayerSliderAppearance.ivy
               : PlayerSliderAppearance.miniPill,
-          activeColor: (daisy || leah) ? iconColor : accent,
-          inactiveColor: inactiveTrack,
-          thumbColor: thumbColor,
+          activeColor: (daisy || leah) ? widget.iconColor : widget.accent,
+          inactiveColor: widget.inactiveTrack,
+          thumbColor: widget.thumbColor,
           onChanged: total <= 0
               ? null
               : (v) {

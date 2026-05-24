@@ -6,6 +6,7 @@ import '../audio/album_art_resolver.dart';
 import '../audio/player_controller.dart';
 import '../models/track_item.dart';
 import '../services/album_art_cache.dart';
+import '../services/music_library_path_key.dart';
 import '../theme/app_theme.dart';
 import 'daisy_background.dart';
 
@@ -60,6 +61,12 @@ class TrackAlbumArt extends StatelessWidget {
     return cornerRadius ?? _radiusFor(context);
   }
 
+  /// Stable art identity (not [Uint8List] instance hash).
+  String get _pathKey {
+    final key = canonicalMusicLibraryPathKey(track.filePath?.trim() ?? '');
+    return key.isEmpty ? 'track-art' : key;
+  }
+
   Widget _noArtPlaceholder(BuildContext context) {
     if (context.appliedThemePalette == AppThemePalette.daisy) {
       return _daisyPlaceholderDecoration(context);
@@ -89,9 +96,15 @@ class TrackAlbumArt extends StatelessWidget {
         targetDimension: pixelSize,
       );
       if (sync != null && sync.isNotEmpty) {
-        return _imageShell(context, sync, pixelSize);
+        return _imageShell(
+          context,
+          sync,
+          pixelSize,
+          key: ValueKey<String>('$_pathKey.sync'),
+        );
       }
       return FutureBuilder<Uint8List?>(
+        key: ValueKey<String>('$_pathKey.async'),
         future: resolveAlbumArtBytes(
           track,
           player: player,
@@ -106,9 +119,15 @@ class TrackAlbumArt extends StatelessWidget {
     if (bytes != null && bytes.isNotEmpty) {
       final cached = cachedAlbumArtSync(track, maxDimension: pixelSize);
       if (cached != null && cached.isNotEmpty) {
-        return _imageShell(context, cached, pixelSize);
+        return _imageShell(
+          context,
+          cached,
+          pixelSize,
+          key: ValueKey<String>('$_pathKey.sync'),
+        );
       }
       return FutureBuilder<Uint8List?>(
+        key: ValueKey<String>('$_pathKey.async'),
         future: cachedAlbumArt(track, maxDimension: pixelSize),
         builder: (context, snapshot) =>
             _artFromSnapshot(context, snapshot.data, pixelSize),
@@ -122,9 +141,15 @@ class TrackAlbumArt extends StatelessWidget {
         targetDimension: pixelSize,
       );
       if (fromDisk != null && fromDisk.isNotEmpty) {
-        return _imageShell(context, fromDisk, pixelSize);
+        return _imageShell(
+          context,
+          fromDisk,
+          pixelSize,
+          key: ValueKey<String>('$_pathKey.sync'),
+        );
       }
       return FutureBuilder<Uint8List?>(
+        key: ValueKey<String>('$_pathKey.async'),
         future: cachedAlbumArtForPathAnyDimension(
           path,
           targetDimension: pixelSize,
@@ -151,7 +176,7 @@ class TrackAlbumArt extends StatelessWidget {
         context,
         art,
         pixelSize,
-        key: ValueKey<int>(identityHashCode(art)),
+        key: ValueKey<String>('$_pathKey.loaded'),
       ),
     );
   }
