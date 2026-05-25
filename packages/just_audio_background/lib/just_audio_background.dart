@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
@@ -12,6 +14,16 @@ export 'package:audio_service/audio_service.dart' show MediaItem;
 
 late SwitchAudioHandler _audioHandler;
 late JustAudioPlatform _platform;
+
+Future<void> _activateAudioSessionForHandlerTransport() async {
+  if (kIsWeb) return;
+  try {
+    final session = await AudioSession.instance;
+    await session.setActive(true);
+  } catch (e, st) {
+    debugPrint('just_audio_background: AudioSession.setActive(true): $e\n$st');
+  }
+}
 
 /// Provides the [init] method to initialise just_audio for background playback.
 class JustAudioBackground {
@@ -743,6 +755,7 @@ class _PlayerAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> play() async {
+    await _activateAudioSessionForHandlerTransport();
     if (_justAudioEvent.processingState == ProcessingStateMessage.completed) {
       await (await _player).seek(
         SeekRequest(position: Duration.zero, index: 0),
@@ -755,8 +768,10 @@ class _PlayerAudioHandler extends BaseAudioHandler
       customEvent.add(_PlayingEvent(_playing = true));
       _broadcastState();
       _startPositionBroadcastTimer();
-      await (await _player).play(PlayRequest());
     }
+    // Always forward play to the platform player. [_playing] can stay true after
+    // a failed or partial pause (notification/widget tap would otherwise no-op).
+    await (await _player).play(PlayRequest());
   }
 
   @override

@@ -225,7 +225,7 @@ Future<void> _applySiteRenameStandalone(
     final base = TrackItem.fromFilePath(newPath);
     final refreshed = await readAudioMetadata(base);
     if (suggestion.filenameChanged) {
-      player.replaceTrackPath(
+      await player.replaceTrackPath(
         originalPath,
         refreshed,
         resumePosition: isCurrent ? resumePos : null,

@@ -228,9 +228,15 @@ class PlayerController {
           !_ignoreSpuriousTransportPause) {
         _invalidatePlayResumeRetries();
         _playbackPausedByUser = true;
+        if (!kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.android ||
+                defaultTargetPlatform == TargetPlatform.iOS)) {
+          unawaited(JustAudioBackground.ensureNativePaused());
+        }
       }
       if (playing && !_lastDispatchedPlaying) {
         _playbackPausedByUser = false;
+        unawaited(_activateAudioSessionForPlayback());
       }
 
       if (!_playerUiDispatchInitialized ||
@@ -1278,16 +1284,7 @@ class PlayerController {
   void _onConcatIndexChanged(int? concatIdx) {
     if (concatIdx == null) return;
     if (_manualQueueAdvance) return;
-    // Queue was edited (play next, reorder) but native children are stale until reload.
-    if (_sourceNeedsReload) {
-      // Dart queue already changed; native concat children are still the old order.
-      final order = _effectiveQueueOrder();
-      final logical = _logicalPlaylistIndex();
-      final expectedConcatIdx = order.indexOf(logical);
-      if (expectedConcatIdx < 0 || concatIdx != expectedConcatIdx) {
-        return;
-      }
-    }
+
     if (_postLoadConcatGuardUntil != null &&
         !DateTime.now().isBefore(_postLoadConcatGuardUntil!)) {
       _postLoadConcatGuardUntil = null;
@@ -1360,13 +1357,26 @@ class PlayerController {
       }
     }
 
-    // Repeat-one: concat auto-advances before [ProcessingState.completed]; keep
-    // [_index] on the current track and restart it at position zero.
+    // Repeat-one: concat auto-advances before [ProcessingState.completed]. Must run
+    // before the [_sourceNeedsReload] guard — auto-advance changes concatIdx.
     if (_repeat == PlaylistRepeatMode.one && _isConcatAutoAdvance(concatIdx)) {
-      final currentConcatIdx =
-          _concatIndexForLogical(_logicalPlaylistIndex())!;
-      _scheduleRepeatOneReplay(currentConcatIdx);
-      return;
+      final currentConcatIdx = _concatIndexForLogical(_logicalPlaylistIndex());
+      if (currentConcatIdx != null) {
+        _scheduleRepeatOneReplay(currentConcatIdx);
+        return;
+      }
+    }
+
+    // Queue was edited (play next, reorder) but native children are stale until reload.
+    if (_sourceNeedsReload) {
+      final order = _activeSourceOrder.isNotEmpty
+          ? _activeSourceOrder
+          : _effectiveQueueOrder();
+      final logical = _logicalPlaylistIndex();
+      final expectedConcatIdx = order.indexOf(logical);
+      if (expectedConcatIdx < 0 || concatIdx != expectedConcatIdx) {
+        return;
+      }
     }
 
     if (_applyConcatIndexChanged(concatIdx)) {
@@ -2208,12 +2218,12 @@ class PlayerController {
     return canonicalMusicLibraryPathKey(path) == oldKey;
   }
 
-  void replaceTrackPath(
+  Future<void> replaceTrackPath(
     String oldPath,
     TrackItem updated, {
     Duration? resumePosition,
     bool? resumePlaying,
-  }) {
+  }) async {
     final oldKey = canonicalMusicLibraryPathKey(oldPath);
     final newPath = updated.filePath?.trim() ?? '';
     final newKey =
@@ -2262,31 +2272,33 @@ class PlayerController {
       }());
     }
 
-    unawaited(() async {
-      final shouldReloadPlayer = isCurrentTrackPathBeingReplaced ||
-          await shouldRewirePlaybackForRenamedFile(oldPath, newPath);
-      if (!changed && !shouldReloadPlayer) return;
-
-      _sourceNeedsReload = true;
+    final shouldReloadPlayer = isCurrentTrackPathBeingReplaced ||
+        await shouldRewirePlaybackForRenamedFile(oldPath, newPath);
+    if (!changed && !shouldReloadPlayer) {
       _notifyTrackPlaybackQueue();
-      if (!shouldReloadPlayer) return;
+      return;
+    }
 
-      _loadCurrentPathOverride = updated;
-      try {
-        await _loadCurrent(
-          initialPosition: resumePositionAfterReload,
-          stopBeforeLoad: false,
-        );
-        if (resumePlayingAfterReload) {
-          _playbackPausedByUser = false;
-          await _resumePlaybackAfterLoad(
-            context: 'replaceTrackPath.resumePlay',
-          );
-        }
-      } finally {
-        _loadCurrentPathOverride = null;
-      }
-    }());
+    _sourceNeedsReload = true;
+    if (!shouldReloadPlayer) {
+      _notifyTrackPlaybackQueue();
+      return;
+    }
+
+    // Reload only the playing row — rebuilding a large concat can still open the
+    // pre-rename URI (ENOENT) while the native player is settling after [stop].
+    _loadCurrentPathOverride = updated;
+    try {
+      await _reloadPlayingTrackOnly(
+        initialPosition: resumePositionAfterReload,
+        resumePlaying: resumePlayingAfterReload,
+        context: 'replaceTrackPath',
+        stopBeforeLoad: true,
+      );
+    } finally {
+      _loadCurrentPathOverride = null;
+      _notifyTrackPlaybackQueue();
+    }
   }
 
   bool _prunePlaylistPathsNotInCatalog() {
@@ -2455,7 +2467,7 @@ class PlayerController {
     bool stopBeforeLoad = true,
     bool retryAfterMissingPath = true,
   }) async {
-    final preview = currentTrack;
+    final preview = _loadCurrentPathOverride ?? currentTrack;
     final pathPreview = preview?.filePath;
     if (preview == null || pathPreview == null || pathPreview.isEmpty) {
       _suppressTrackCompletedAdvance = false;
@@ -2745,6 +2757,7 @@ class PlayerController {
     required bool resumePlaying,
     String context = 'reloadPlayingTrackOnly',
     bool allowShuffleRecovery = true,
+    bool stopBeforeLoad = true,
   }) async {
     if (_playlistPaths.isEmpty) return;
 
@@ -2765,7 +2778,7 @@ class PlayerController {
         source,
         initialPosition: initialPosition,
         context: context,
-        stopBeforeLoad: true,
+        stopBeforeLoad: stopBeforeLoad,
       );
       await _applyPreferredVolume();
       _postLoadExpectedConcatIndex = 0;
@@ -2775,6 +2788,12 @@ class PlayerController {
       // Next skip rebuilds the full queue (shuffle-safe full [_loadCurrent]).
       _sourceNeedsReload = true;
       _notifyTrack();
+      if (resumePlaying) {
+        _playbackPausedByUser = false;
+        await _guardedTransport(() async {
+          await _resumePlaybackAfterLoad(context: '$context.play');
+        });
+      }
     } catch (e, st) {
       if (!_isInterruptedAbort(e)) {
         debugPrint('$context: $e\n$st');
@@ -2796,13 +2815,6 @@ class PlayerController {
         _ignoreSpuriousPlaybackCompletedUntil = null;
         _scheduleNotificationArtRefresh();
       }
-    }
-
-    if (resumePlaying) {
-      _playbackPausedByUser = false;
-      await _guardedTransport(() async {
-        await _resumePlaybackAfterLoad(context: '$context.play');
-      });
     }
   }
 

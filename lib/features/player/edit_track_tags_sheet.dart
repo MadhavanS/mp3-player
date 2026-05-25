@@ -16,6 +16,8 @@ import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
+import '../../services/picker_album_art_loader.dart';
+import 'pick_cover_from_library_sheet.dart';
 
 String _genreTextFromTrack(TrackItem t) {
   return t.genres.replaceAll('#', ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -154,6 +156,11 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   Uint8List? _pickedCoverBytes;
   String _pickedCoverMime = 'image/jpeg';
 
+  /// Small preview only (full cover is read on save / import, not held in memory).
+  Uint8List? _embeddedArtBytes;
+  bool _embeddedArtLoading = false;
+  bool _diskHasEmbeddedArt = false;
+
   bool _saving = false;
   bool _siteRenameBusy = false;
   bool _coverImportBusy = false;
@@ -167,6 +174,14 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   void initState() {
     super.initState();
     final t = widget.track;
+    _diskHasEmbeddedArt =
+        t.albumArtBytes != null && t.albumArtBytes!.isNotEmpty;
+    _embeddedArtLoading = t.filePath != null && t.filePath!.isNotEmpty;
+    if (_embeddedArtLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_loadEmbeddedAlbumArtPreview());
+      });
+    }
     _initialTitle = t.title;
     _initialArtist = t.artist == 'Unknown artist' ? '' : t.artist;
     _initialAlbum = t.metaLine == 'mp3' ? '' : t.metaLine;
@@ -188,6 +203,55 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
   void _onTagFieldChanged() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _loadEmbeddedAlbumArtPreview() async {
+    final rawPath = widget.track.filePath?.trim();
+    if (rawPath == null || rawPath.isEmpty) {
+      if (mounted) setState(() => _embeddedArtLoading = false);
+      return;
+    }
+
+    final path = p.normalize(File(rawPath).absolute.path);
+    try {
+      var merged = widget.track;
+      if (mounted) {
+        final fromLibrary = PlayerController.of(context).trackForLibraryPath(path);
+        final libArt = fromLibrary.albumArtBytes;
+        if ((merged.albumArtBytes == null || merged.albumArtBytes!.isEmpty) &&
+            libArt != null &&
+            libArt.isNotEmpty) {
+          merged = merged.withEmbeddedMetadata(
+            albumArtBytes: libArt,
+            replaceAlbumArtFromFile: true,
+          );
+        }
+      }
+
+      final thumb = await PickerAlbumArtLoader.thumbForTrack(merged);
+      if (!mounted) return;
+      setState(() {
+        _embeddedArtBytes = thumb;
+        _diskHasEmbeddedArt =
+            _diskHasEmbeddedArt || (thumb != null && thumb.isNotEmpty);
+        _embeddedArtLoading = false;
+      });
+    } catch (e, st) {
+      debugPrint(
+        'EditTrackTagsSheet: album art preview failed for $path: $e\n$st',
+      );
+      if (mounted) setState(() => _embeddedArtLoading = false);
+    }
+  }
+
+  bool get _trackHasKnownEmbeddedArt {
+    if (_artEdit == AlbumArtEditKind.remove) return false;
+    if (_pickedCoverBytes != null && _pickedCoverBytes!.isNotEmpty) {
+      return true;
+    }
+    if (_diskHasEmbeddedArt) return true;
+    final preview = _embeddedArtBytes;
+    return preview != null && preview.isNotEmpty;
   }
 
   Widget? _clearFieldSuffix(TextEditingController controller) {
@@ -224,20 +288,11 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       case AlbumArtEditKind.replace:
         return _pickedCoverBytes;
       case AlbumArtEditKind.keep:
-        return widget.track.albumArtBytes;
+        return _embeddedArtBytes ?? widget.track.albumArtBytes;
     }
   }
 
-  Future<void> _pickCoverFromOtherSong() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav'],
-      allowMultiple: false,
-    );
-    if (result == null || result.files.isEmpty) return;
-    final pickedPath = result.files.single.path;
-    if (pickedPath == null || pickedPath.trim().isEmpty) return;
-
+  Future<void> _applyEmbeddedCoverFromPath(String pickedPath) async {
     setState(() => _coverImportBusy = true);
     try {
       final normalized = p.normalize(File(pickedPath).absolute.path);
@@ -286,6 +341,45 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     } finally {
       if (mounted) setState(() => _coverImportBusy = false);
     }
+  }
+
+  Future<void> _pickCoverFromLibrary() async {
+    final picked = await showPickCoverFromLibrarySheet(
+      context,
+      excludePath: widget.track.filePath,
+    );
+    if (picked == null || !mounted) return;
+    final path = picked.filePath?.trim();
+    if (path == null || path.isEmpty) return;
+    final cachedArt = picked.albumArtBytes;
+    if (cachedArt != null && cachedArt.isNotEmpty) {
+      setState(() {
+        _artEdit = AlbumArtEditKind.replace;
+        _pickedCoverBytes = cachedArt;
+        _pickedCoverMime = _mimeFromArtBytes(cachedArt);
+      });
+      ActionPillToast.show(
+        context,
+        'Cover copied — tap Save to write',
+        icon: Icons.check_rounded,
+        uppercaseLabel: false,
+      );
+      return;
+    }
+    await _applyEmbeddedCoverFromPath(path);
+  }
+
+  /// Device file picker for audio (no album-art preview on Android).
+  Future<void> _pickCoverFromAudioFile() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav'],
+      allowMultiple: false,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final pickedPath = result.files.single.path;
+    if (pickedPath == null || pickedPath.trim().isEmpty) return;
+    await _applyEmbeddedCoverFromPath(pickedPath);
   }
 
   Future<void> _pickCover() async {
@@ -570,7 +664,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       final base = TrackItem.fromFilePath(newPath);
       final refreshed = await readAudioMetadata(base);
       if (!tagOnlyFlow && suggestion.filenameChanged) {
-        player.replaceTrackPath(
+        await player.replaceTrackPath(
           path,
           refreshed,
           resumePosition: isCurrent ? resumePos : null,
@@ -732,7 +826,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         TrackItem.fromFilePath(targetPath),
       );
       if (targetPath != path) {
-        player.replaceTrackPath(
+        await player.replaceTrackPath(
           path,
           refreshed,
           resumePosition: isCurrent ? resumePos : null,
@@ -864,214 +958,31 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                   color: context.palette.textSecondary,
                 ),
               ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  IconButton(
-                    tooltip: 'Auto edit tags (tag-only)',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: (_saving || _siteRenameBusy)
-                        ? null
-                        : () => _previewSiteRename(tagOnlyFlow: true),
-                    icon: _siteRenameBusy
-                        ? SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: context.controlAccent,
-                            ),
-                          )
-                        : Icon(
-                            Icons.auto_fix_high_outlined,
-                            size: 24,
-                            color: context.controlAccent,
-                          ),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: (_saving || _siteRenameBusy)
-                          ? null
-                          : () => _previewSiteRename(tagOnlyFlow: false),
-                      child: const Text('Clean site-style name'),
-                    ),
-                  ),
-                ],
-              ),
               const SizedBox(height: 16),
-              Center(
-                child: Column(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: _effectivePreviewBytes != null
-                          ? Image.memory(
-                              _effectivePreviewBytes!,
-                              width: 120,
-                              height: 120,
-                              fit: BoxFit.cover,
-                            )
-                          : Container(
-                              width: 120,
-                              height: 120,
-                              color: context.controlAccent.withValues(
-                                alpha: 0.12,
-                              ),
-                              child: Icon(
-                                Icons.album_outlined,
-                                size: 48,
-                                color: context.palette.textSecondary.withValues(
-                                  alpha: 0.6,
-                                ),
-                              ),
-                            ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 8,
-                      runSpacing: 4,
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final sideBySide = constraints.maxWidth >= 480;
+                  final coverPanel = _buildCoverArtPanel(context, theme);
+                  final formPanel = _buildTagFormPanel(context, theme);
+                  if (sideBySide) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TextButton.icon(
-                          onPressed: (_saving || _coverImportBusy)
-                              ? null
-                              : _pickCover,
-                          icon: const Icon(Icons.image_outlined, size: 20),
-                          label: const Text('Image file'),
+                        SizedBox(
+                          width: 272,
+                          child: coverPanel,
                         ),
-                        TextButton.icon(
-                          onPressed: (_saving || _coverImportBusy)
-                              ? null
-                              : _pickCoverFromOtherSong,
-                          icon: _coverImportBusy
-                              ? SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: context.controlAccent,
-                                  ),
-                                )
-                              : const Icon(
-                                  Icons.library_music_outlined,
-                                  size: 20,
-                                ),
-                          label: const Text('From another song'),
-                        ),
-                        if (_artEdit != AlbumArtEditKind.keep ||
-                            widget.track.albumArtBytes != null)
-                          TextButton.icon(
-                            onPressed: _saving ? null : _clearCover,
-                            icon: const Icon(
-                              Icons.hide_image_outlined,
-                              size: 20,
-                            ),
-                            label: const Text('Remove art'),
-                          ),
-                        if (_artEdit != AlbumArtEditKind.keep)
-                          TextButton(
-                            onPressed: _saving ? null : _resetCoverEdit,
-                            child: const Text('Reset cover'),
-                          ),
+                        const SizedBox(width: 20),
+                        Expanded(child: formPanel),
                       ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _fileName,
-                enabled: !_saving,
-                decoration: InputDecoration(
-                  labelText: 'File name',
-                  helperText: 'Saved as .mp3',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: _clearFieldSuffix(_fileName),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _title,
-                enabled: !_saving,
-                decoration: InputDecoration(
-                  labelText: 'Title',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: _clearFieldSuffix(_title),
-                ),
-                textCapitalization: TextCapitalization.sentences,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _artist,
-                enabled: !_saving,
-                decoration: InputDecoration(
-                  labelText: 'Artist',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: _clearFieldSuffix(_artist),
-                ),
-                textCapitalization: TextCapitalization.words,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _album,
-                enabled: !_saving,
-                decoration: InputDecoration(
-                  labelText: 'Album',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: _clearFieldSuffix(_album),
-                ),
-                textCapitalization: TextCapitalization.sentences,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _genre,
-                enabled: !_saving,
-                decoration: InputDecoration(
-                  labelText: 'Genre (comma-separated)',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: _clearFieldSuffix(_genre),
-                ),
-                textCapitalization: TextCapitalization.words,
-              ),
-              const SizedBox(height: 24),
-              Builder(
-                builder: (context) {
-                  final outlineStyle = OutlinedButton.styleFrom(
-                    foregroundColor: context.palette.textPrimary,
-                    side: BorderSide(
-                      color: context.palette.textMuted.withValues(alpha: 0.45),
-                    ),
-                  );
-                  return Row(
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          style: outlineStyle,
-                          onPressed: _saving
-                              ? null
-                              : () => Navigator.of(context).pop(),
-                          child: const Text('Cancel'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton(
-                          style: outlineStyle,
-                          onPressed: _saving ? null : _save,
-                          child: _saving
-                              ? SizedBox(
-                                  height: 22,
-                                  width: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: context.controlAccent,
-                                  ),
-                                )
-                              : const Text('Save'),
-                        ),
-                      ),
+                      coverPanel,
+                      const SizedBox(height: 16),
+                      formPanel,
                     ],
                   );
                 },
@@ -1080,6 +991,271 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildCoverArtPanel(BuildContext context, ThemeData theme) {
+    const previewSize = 120.0;
+    final busy = _saving || _coverImportBusy;
+
+    Widget coverButton({
+      required IconData icon,
+      required String label,
+      required VoidCallback? onPressed,
+      Widget? iconWidget,
+    }) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+          ),
+          icon: iconWidget ?? Icon(icon, size: 20),
+          label: Text(label),
+        ),
+      );
+    }
+
+    final preview = ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: previewSize,
+        height: previewSize,
+        child: _embeddedArtLoading && _artEdit == AlbumArtEditKind.keep
+            ? ColoredBox(
+                color: context.controlAccent.withValues(alpha: 0.12),
+                child: Center(
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: context.controlAccent,
+                    ),
+                  ),
+                ),
+              )
+            : _effectivePreviewBytes != null
+            ? Image.memory(
+                _effectivePreviewBytes!,
+                width: previewSize,
+                height: previewSize,
+                fit: BoxFit.cover,
+              )
+            : ColoredBox(
+                color: context.controlAccent.withValues(alpha: 0.12),
+                child: Icon(
+                  Icons.album_outlined,
+                  size: 48,
+                  color: context.palette.textSecondary.withValues(alpha: 0.6),
+                ),
+              ),
+      ),
+    );
+
+    const optionGap = SizedBox(height: 8);
+    final optionButtons = <Widget>[
+      coverButton(
+        icon: Icons.image_outlined,
+        label: 'Cover image',
+        onPressed: busy ? null : _pickCover,
+      ),
+      coverButton(
+        icon: Icons.library_music_outlined,
+        label: 'From library',
+        onPressed: busy ? null : _pickCoverFromLibrary,
+        iconWidget: _coverImportBusy
+            ? SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: context.controlAccent,
+                ),
+              )
+            : const Icon(Icons.library_music_outlined, size: 20),
+      ),
+      coverButton(
+        icon: Icons.audio_file_outlined,
+        label: 'Audio file',
+        onPressed: busy ? null : _pickCoverFromAudioFile,
+      ),
+      if (_trackHasKnownEmbeddedArt)
+        coverButton(
+          icon: Icons.hide_image_outlined,
+          label: 'Remove art',
+          onPressed: busy ? null : _clearCover,
+        ),
+      if (_artEdit != AlbumArtEditKind.keep)
+        coverButton(
+          icon: Icons.undo_rounded,
+          label: 'Reset cover',
+          onPressed: busy ? null : _resetCoverEdit,
+        ),
+    ];
+
+    final options = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < optionButtons.length; i++) ...[
+          if (i > 0) optionGap,
+          optionButtons[i],
+        ],
+      ],
+    );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        preview,
+        const SizedBox(width: 12),
+        Expanded(child: options),
+      ],
+    );
+  }
+
+  Widget _buildTagFormPanel(BuildContext context, ThemeData theme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Auto edit tags (tag-only)',
+              visualDensity: VisualDensity.compact,
+              onPressed: (_saving || _siteRenameBusy)
+                  ? null
+                  : () => _previewSiteRename(tagOnlyFlow: true),
+              icon: _siteRenameBusy
+                  ? SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: context.controlAccent,
+                      ),
+                    )
+                  : Icon(
+                      Icons.auto_fix_high_outlined,
+                      size: 24,
+                      color: context.controlAccent,
+                    ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: (_saving || _siteRenameBusy)
+                    ? null
+                    : () => _previewSiteRename(tagOnlyFlow: false),
+                child: const Text('Clean site-style name'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        TextField(
+          controller: _fileName,
+          enabled: !_saving,
+          decoration: InputDecoration(
+            labelText: 'File name',
+            helperText: 'Saved as .mp3',
+            border: const OutlineInputBorder(),
+            suffixIcon: _clearFieldSuffix(_fileName),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _title,
+          enabled: !_saving,
+          decoration: InputDecoration(
+            labelText: 'Title',
+            border: const OutlineInputBorder(),
+            suffixIcon: _clearFieldSuffix(_title),
+          ),
+          textCapitalization: TextCapitalization.sentences,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _artist,
+          enabled: !_saving,
+          decoration: InputDecoration(
+            labelText: 'Artist',
+            border: const OutlineInputBorder(),
+            suffixIcon: _clearFieldSuffix(_artist),
+          ),
+          textCapitalization: TextCapitalization.words,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _album,
+          enabled: !_saving,
+          decoration: InputDecoration(
+            labelText: 'Album',
+            border: const OutlineInputBorder(),
+            suffixIcon: _clearFieldSuffix(_album),
+          ),
+          textCapitalization: TextCapitalization.sentences,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _genre,
+          enabled: !_saving,
+          decoration: InputDecoration(
+            labelText: 'Genre (comma-separated)',
+            border: const OutlineInputBorder(),
+            suffixIcon: _clearFieldSuffix(_genre),
+          ),
+          textCapitalization: TextCapitalization.words,
+        ),
+        const SizedBox(height: 24),
+        Builder(
+          builder: (context) {
+            final outlineStyle = OutlinedButton.styleFrom(
+              foregroundColor: context.palette.textPrimary,
+              side: BorderSide(
+                color: context.palette.textMuted.withValues(alpha: 0.45),
+              ),
+            );
+            return Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    style: outlineStyle,
+                    onPressed: _saving
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: OutlinedButton(
+                    style: outlineStyle,
+                    onPressed: _saving ? null : _save,
+                    child: _saving
+                        ? SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: context.controlAccent,
+                            ),
+                          )
+                        : const Text('Save'),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ],
     );
   }
 }

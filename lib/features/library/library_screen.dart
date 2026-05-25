@@ -139,6 +139,13 @@ class LibraryScreen extends StatefulWidget {
 class LibraryScreenState extends State<LibraryScreen>
     with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
+  LibrarySearchQuery _appliedSearchQuery = LibrarySearchQuery.parse('');
+  Timer? _searchFilterDebounce;
+  static const Duration _searchFilterDebounceDelay = Duration(milliseconds: 200);
+
+  List<int>? _songsTabIndicesCache;
+  int _songsTabIndicesCacheKey = 0;
+
   late TabController _tabController;
   List<LibraryTabId> _visibleTabs = List<LibraryTabId>.from(
     LibraryTabId.values,
@@ -295,7 +302,7 @@ class LibraryScreenState extends State<LibraryScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: _visibleTabs.length, vsync: this);
-    _searchController.addListener(() => setState(() {}));
+    _searchController.addListener(_onSearchTextChanged);
     _tabController.addListener(_onTabChanged);
     LibraryTabsStore.revision.addListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.addListener(_onSongSortStoreRevision);
@@ -343,7 +350,12 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _reloadSongSortMode() async {
     final m = await LibraryTrackSortStore.load();
-    if (mounted) setState(() => _songSortMode = m);
+    if (mounted) {
+      setState(() {
+        _songSortMode = m;
+        _songsTabIndicesCache = null;
+      });
+    }
   }
 
   void _onSongSortStoreRevision() {
@@ -483,8 +495,72 @@ class LibraryScreenState extends State<LibraryScreen>
     if (mounted) _exitSongsMultiSelectMode();
   }
 
+  void _onSearchTextChanged() {
+    _searchFilterDebounce?.cancel();
+    _searchFilterDebounce = Timer(_searchFilterDebounceDelay, () {
+      if (!mounted) return;
+      final next = _parseSearchQuery(_searchController.text);
+      if (next.field == _appliedSearchQuery.field &&
+          next.term == _appliedSearchQuery.term) {
+        return;
+      }
+      setState(() {
+        _appliedSearchQuery = next;
+        _songsTabIndicesCache = null;
+      });
+    });
+  }
+
+  void _applySearchFilterImmediately() {
+    _searchFilterDebounce?.cancel();
+    final next = _parseSearchQuery(_searchController.text);
+    if (next.field == _appliedSearchQuery.field &&
+        next.term == _appliedSearchQuery.term) {
+      return;
+    }
+    setState(() {
+      _appliedSearchQuery = next;
+      _songsTabIndicesCache = null;
+    });
+  }
+
+  int _songsTabIndicesCacheFingerprint(
+    List<TrackItem> tracks,
+    LibrarySearchQuery query,
+    Set<String>? browsePathKeys,
+  ) {
+    final browseList = browsePathKeys?.toList() ?? const <String>[];
+    if (browseList.length > 1) {
+      browseList.sort();
+    }
+    return Object.hash(
+      identityHashCode(tracks),
+      query.field,
+      query.term,
+      Object.hashAll(browseList),
+      _songSortMode,
+      Object.hashAll(widget.folderPaths),
+    );
+  }
+
+  List<int> _sortedSongsTabIndicesCached(
+    List<TrackItem> tracks,
+    LibrarySearchQuery query,
+    Set<String>? browsePathKeys,
+  ) {
+    final key = _songsTabIndicesCacheFingerprint(tracks, query, browsePathKeys);
+    if (_songsTabIndicesCache != null && _songsTabIndicesCacheKey == key) {
+      return _songsTabIndicesCache!;
+    }
+    final result = _sortedSongsTabIndices(tracks, query, browsePathKeys);
+    _songsTabIndicesCache = result;
+    _songsTabIndicesCacheKey = key;
+    return result;
+  }
+
   @override
   void dispose() {
+    _searchFilterDebounce?.cancel();
     _songsArtEnrichDebounce?.cancel();
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
@@ -696,7 +772,7 @@ class LibraryScreenState extends State<LibraryScreen>
     final currentPl = player.currentIndex;
     if (currentPl < 0 || currentPl >= playlist.length) return;
 
-    final searchQuery = _parseSearchQuery(_searchController.text);
+    final searchQuery = _appliedSearchQuery;
     final order = player.playbackOrderIndices;
 
     var listIndex = -1;
@@ -729,7 +805,7 @@ class LibraryScreenState extends State<LibraryScreen>
     if (pathKey.isEmpty) return;
 
     final tracks = player.metadataLibrary;
-    final searchQuery = _parseSearchQuery(_searchController.text);
+    final searchQuery = _appliedSearchQuery;
     final browsePathKeys = widget.songsBrowsePathKeys.value;
 
     switch (_currentLibraryTabId) {
@@ -1584,6 +1660,7 @@ class LibraryScreenState extends State<LibraryScreen>
               ),
               onPressed: () {
                 _searchController.clear();
+                _applySearchFilterImmediately();
                 FocusScope.of(context).unfocus();
               },
             )
@@ -1595,7 +1672,7 @@ class LibraryScreenState extends State<LibraryScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final player = PlayerController.of(context);
-    final searchQuery = _parseSearchQuery(_searchController.text);
+    final searchQuery = _appliedSearchQuery;
     final pal = context.palette;
     final hint = _searchHintForTab(_currentLibraryTabId);
     final onSongsTab = _currentLibraryTabId == LibraryTabId.songs;
@@ -1617,7 +1694,7 @@ class LibraryScreenState extends State<LibraryScreen>
                 valueListenable: widget.songsBrowsePathKeys,
                 builder: (context, browsePathKeys, _) {
                   final tracks = player.metadataLibrary;
-                  final songsTabIndices = _sortedSongsTabIndices(
+                  final songsTabIndices = _sortedSongsTabIndicesCached(
                     tracks,
                     searchQuery,
                     browsePathKeys,
@@ -1658,26 +1735,32 @@ class LibraryScreenState extends State<LibraryScreen>
                                       fontWeight: FontWeight.w600,
                                     ),
                                   )
-                                : TextField(
-                                    key: librarySearchFieldKey,
-                                    controller: _searchController,
-                                    textInputAction: TextInputAction.search,
-                                    keyboardType: TextInputType.text,
-                                    onSubmitted: (_) =>
-                                        FocusManager.instance.primaryFocus
-                                            ?.unfocus(),
-                                    onTapOutside: (_) =>
-                                        FocusManager.instance.primaryFocus
-                                            ?.unfocus(),
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: pal.onScaffold,
-                                      fontSize: 15,
-                                    ),
-                                    decoration: _searchDecoration(
-                                      pal,
-                                      theme,
-                                      hintText: hint,
-                                    ),
+                                : AnimatedBuilder(
+                                    animation: _searchController,
+                                    builder: (context, _) {
+                                      return TextField(
+                                        key: librarySearchFieldKey,
+                                        controller: _searchController,
+                                        textInputAction: TextInputAction.search,
+                                        keyboardType: TextInputType.text,
+                                        onSubmitted: (_) =>
+                                            FocusManager.instance.primaryFocus
+                                                ?.unfocus(),
+                                        onTapOutside: (_) =>
+                                            FocusManager.instance.primaryFocus
+                                                ?.unfocus(),
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                          color: pal.onScaffold,
+                                          fontSize: 15,
+                                        ),
+                                        decoration: _searchDecoration(
+                                          pal,
+                                          theme,
+                                          hintText: hint,
+                                        ),
+                                      );
+                                    },
                                   ),
                           ),
                           if (inSongsSelect) ...[

@@ -526,7 +526,7 @@ packages:
       path: "packages/just_audio_background"
       relative: true
     source: path
-    version: "0.0.1-beta.17+local.2"
+    version: "0.0.1-beta.17+local.3"
   just_audio_platform_interface:
     dependency: transitive
     description:
