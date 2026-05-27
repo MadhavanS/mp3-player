@@ -24,10 +24,10 @@ Future<Uint8List?> resolveAlbumArtBytes(
 
   if (useHot) {
     if (player != null) {
-      final hot = player.hotArtBytesForPath(path);
+      final hot = player.hotArtBytesForPath(path, minPixelSize: target);
       if (hot != null && hot.isNotEmpty) return hot;
     } else if (catalog != null) {
-      final hot = catalog.hotArtBytesForPathKey(pathKey);
+      final hot = catalog.hotArtBytesForPathKey(pathKey, minPixelSize: target);
       if (hot != null && hot.isNotEmpty) return hot;
     }
   }
@@ -38,14 +38,16 @@ Future<Uint8List?> resolveAlbumArtBytes(
   );
   if (disk != null && disk.isNotEmpty) {
     if (useHot) {
-      player?.promoteArtBytesForPath(path, disk);
-      catalog?.promoteArtBytes(pathKey, disk);
+      player?.promoteArtBytesForPath(path, disk, pixelSize: target);
+      catalog?.promoteArtBytes(pathKey, disk, pixelSize: target);
     }
     return disk;
   }
 
   final embedded = track.albumArtBytes;
-  if (embedded != null && embedded.isNotEmpty) return embedded;
+  if (embedded != null && embedded.isNotEmpty) {
+    return cachedAlbumArt(track, maxDimension: target);
+  }
   return null;
 }
 
@@ -60,7 +62,7 @@ Uint8List? resolveAlbumArtBytesSync(
   final target = clampAlbumArtDimension(targetDimension);
 
   if (albumArtTargetUsesHotLru(target)) {
-    final hot = player.hotArtBytesForPath(path);
+    final hot = player.hotArtBytesForPath(path, minPixelSize: target);
     if (hot != null && hot.isNotEmpty) return hot;
   }
 
@@ -71,6 +73,8 @@ Uint8List? resolveAlbumArtBytesSync(
   if (disk != null && disk.isNotEmpty) return disk;
 
   final embedded = track.albumArtBytes;
-  if (embedded != null && embedded.isNotEmpty) return embedded;
+  if (embedded != null && embedded.isNotEmpty) {
+    return cachedAlbumArtSync(track, maxDimension: target) ?? embedded;
+  }
   return null;
 }

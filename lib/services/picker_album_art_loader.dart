@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../audio/album_art_resolver.dart';
 import '../audio/player_controller.dart';
@@ -19,8 +20,21 @@ abstract final class PickerAlbumArtLoader {
   /// How many paths are waiting for a thumbnail (for UI feedback).
   static final ValueNotifier<int> queueDepth = ValueNotifier(0);
 
+  static int? _pendingQueueDepth;
+  static bool _queueDepthNotifyScheduled = false;
+
+  /// Notifies [queueDepth] after the current frame — safe when called from
+  /// [State.didUpdateWidget] while a [ValueListenableBuilder] is building.
   static void _setQueueDepth(int n) {
-    if (queueDepth.value != n) queueDepth.value = n;
+    _pendingQueueDepth = n;
+    if (_queueDepthNotifyScheduled) return;
+    _queueDepthNotifyScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _queueDepthNotifyScheduled = false;
+      final depth = _pendingQueueDepth;
+      if (depth == null) return;
+      if (queueDepth.value != depth) queueDepth.value = depth;
+    });
   }
 
   /// Art already in hot LRU / path memory / embedded tags (no disk read).

@@ -425,10 +425,13 @@ class _CoverPickerThumbState extends State<_CoverPickerThumb> {
   void _maybeStartLoad() {
     if (_loadStarted || _display == _ThumbDisplay.art) return;
     _loadStarted = true;
-    if (_display == _ThumbDisplay.placeholder) {
-      setState(() => _display = _ThumbDisplay.loading);
-    }
-    unawaited(_loadThumb());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_display == _ThumbDisplay.placeholder) {
+        setState(() => _display = _ThumbDisplay.loading);
+      }
+      unawaited(_loadThumb());
+    });
   }
 
   Future<void> _loadThumb() async {

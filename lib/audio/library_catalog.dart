@@ -12,6 +12,7 @@ class LibraryCatalog {
   List<String> _paths = const [];
   final Map<String, TrackItem> _byKey = {};
   final Map<String, TrackItem> _artHot = {};
+  final Map<String, int> _artHotPixelSize = {};
   static const int _artHotMax = 512;
 
   bool get isEmpty => _paths.isEmpty;
@@ -60,7 +61,12 @@ class LibraryCatalog {
     _byKey
       ..clear()
       ..addAll(byKey);
-    _artHot.removeWhere((k, _) => !newKeys.contains(k));
+    for (final k in _artHot.keys.toList(growable: false)) {
+      if (!newKeys.contains(k)) {
+        _artHot.remove(k);
+        _artHotPixelSize.remove(k);
+      }
+    }
   }
 
   TrackItem? trackForPath(String path) {
@@ -103,6 +109,7 @@ class LibraryCatalog {
         .toList(growable: false);
 
     final hot = _artHot.remove(oldKey);
+    final hotPx = _artHotPixelSize.remove(oldKey);
     _byKey.remove(oldKey);
 
     if (newKey.isEmpty) return found;
@@ -111,7 +118,7 @@ class LibraryCatalog {
     if (updated.albumArtBytes != null && updated.albumArtBytes!.isNotEmpty) {
       _putArtHot(newKey, updated);
     } else if (hot != null) {
-      _putArtHot(newKey, hot);
+      _putArtHot(newKey, hot, pixelSize: hotPx ?? 0);
     }
     return true;
   }
@@ -125,6 +132,7 @@ class LibraryCatalog {
         .toList(growable: false);
     _byKey.remove(key);
     _artHot.remove(key);
+    _artHotPixelSize.remove(key);
     return _paths.length != before;
   }
 
@@ -133,6 +141,7 @@ class LibraryCatalog {
     final key = canonicalMusicLibraryPathKey(path.trim());
     if (key.isEmpty) return;
     _artHot.remove(key);
+    _artHotPixelSize.remove(key);
   }
 
   TrackItem _resolve(String path) {
@@ -151,24 +160,42 @@ class LibraryCatalog {
     return base;
   }
 
-  void _putArtHot(String key, TrackItem withArt) {
+  void _putArtHot(String key, TrackItem withArt, {int pixelSize = 0}) {
     _artHot.remove(key);
+    _artHotPixelSize.remove(key);
     _artHot[key] = withArt;
+    if (pixelSize > 0) _artHotPixelSize[key] = pixelSize;
     while (_artHot.length > _artHotMax) {
-      _artHot.remove(_artHot.keys.first);
+      final oldest = _artHot.keys.first;
+      _artHot.remove(oldest);
+      _artHotPixelSize.remove(oldest);
     }
   }
 
   /// Recently displayed list art (PNG bytes), keyed by canonical path key.
-  Uint8List? hotArtBytesForPathKey(String pathKey) {
+  ///
+  /// When [minPixelSize] > 0, skips entries known to be smaller (avoids upscaling
+  /// a list thumbnail on Now Playing).
+  Uint8List? hotArtBytesForPathKey(
+    String pathKey, {
+    int minPixelSize = 0,
+  }) {
     if (pathKey.isEmpty) return null;
+    if (minPixelSize > 0) {
+      final stored = _artHotPixelSize[pathKey] ?? 0;
+      if (stored > 0 && stored < minPixelSize) return null;
+    }
     final art = _artHot[pathKey]?.albumArtBytes;
     if (art == null || art.isEmpty) return null;
     return art;
   }
 
   /// Promotes decoded list art into the catalog hot LRU for instant re-display.
-  void promoteArtBytes(String pathKey, Uint8List art) {
+  void promoteArtBytes(
+    String pathKey,
+    Uint8List art, {
+    int pixelSize = 0,
+  }) {
     if (pathKey.isEmpty || art.isEmpty) return;
     final base = _byKey[pathKey];
     if (base == null) return;
@@ -178,6 +205,7 @@ class LibraryCatalog {
         albumArtBytes: art,
         replaceAlbumArtFromFile: true,
       ),
+      pixelSize: pixelSize,
     );
   }
 }

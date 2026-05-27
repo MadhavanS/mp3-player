@@ -120,18 +120,28 @@ Uint8List? cachedAlbumArtForPathSync(
   return _memory[key];
 }
 
-/// Synchronous path art: any cached dimension (no resize; UI scales).
+/// Synchronous path art: best cached dimension for [targetDimension] (no resize).
 Uint8List? cachedAlbumArtForPathAnyDimensionSync(
   String filePath, {
   int targetDimension = 512,
 }) {
   final path = filePath.trim();
   if (path.isEmpty) return null;
+  final target = clampAlbumArtDimension(targetDimension);
+
+  Uint8List? largest;
+  var largestDim = 0;
+
   for (final dim in kPathAlbumArtDiskDimensions) {
     final bytes = cachedAlbumArtForPathSync(path, maxDimension: dim);
-    if (bytes != null && bytes.isNotEmpty) return bytes;
+    if (bytes == null || bytes.isEmpty) continue;
+    if (dim >= target) return bytes;
+    if (dim > largestDim) {
+      largestDim = dim;
+      largest = bytes;
+    }
   }
-  return null;
+  return largest;
 }
 
 /// Path-keyed disk art: largest cached/on-disk bytes, then resize to [targetDimension].
@@ -414,18 +424,30 @@ Future<Uint8List?> _loadOrCreate(
 
 Future<Uint8List?> _resizeToPng(Uint8List raw, int maxDimension) async {
   try {
-    final codec = await ui.instantiateImageCodec(
+    final codec = await ui.instantiateImageCodec(raw);
+    final frame = await codec.getNextFrame();
+    try {
+      final w = frame.image.width;
+      final h = frame.image.height;
+      if (w <= maxDimension && h <= maxDimension) {
+        return raw;
+      }
+    } finally {
+      frame.image.dispose();
+    }
+
+    final codec2 = await ui.instantiateImageCodec(
       raw,
       targetWidth: maxDimension,
       targetHeight: maxDimension,
     );
-    final frame = await codec.getNextFrame();
+    final frame2 = await codec2.getNextFrame();
     try {
       final byteData =
-          await frame.image.toByteData(format: ui.ImageByteFormat.png);
+          await frame2.image.toByteData(format: ui.ImageByteFormat.png);
       return byteData?.buffer.asUint8List();
     } finally {
-      frame.image.dispose();
+      frame2.image.dispose();
     }
   } catch (e, st) {
     debugPrint('album art resize failed: $e\n$st');

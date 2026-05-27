@@ -2127,9 +2127,7 @@ class LibraryScreenState extends State<LibraryScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  track.genres.isEmpty
-                                      ? track.metaLine
-                                      : '${track.metaLine} · ${track.genres}',
+                                  track.cardSubtitle,
                                   style: theme.textTheme.labelSmall?.copyWith(
                                     color: pal.textMuted.withValues(alpha: 0.9),
                                     fontSize: 10,
@@ -2348,9 +2346,7 @@ class LibraryScreenState extends State<LibraryScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  track.genres.isEmpty
-                                      ? track.metaLine
-                                      : '${track.metaLine} · ${track.genres}',
+                                  track.cardSubtitle,
                                   style: theme.textTheme.labelSmall?.copyWith(
                                     color: pal.textMuted.withValues(alpha: 0.9),
                                     fontSize: 10,
@@ -2534,9 +2530,7 @@ class LibraryScreenState extends State<LibraryScreen>
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  track.genres.isEmpty
-                                      ? track.metaLine
-                                      : '${track.metaLine} · ${track.genres}',
+                                  track.cardSubtitle,
                                   style: theme.textTheme.labelSmall?.copyWith(
                                     color: pal.textMuted.withValues(alpha: 0.9),
                                     fontSize: 10,
@@ -3030,9 +3024,7 @@ class _TrackTileBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                track.genres.isEmpty
-                    ? track.metaLine
-                    : '${track.metaLine} · ${track.genres}',
+                track.cardSubtitle,
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: isIvy 
                       ? const Color(0xFF1C1C1E)

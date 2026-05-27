@@ -18,6 +18,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 import '../models/library_tab_id.dart';
 import '../models/track_item.dart';
 import '../services/album_art_cache.dart';
+import '../services/album_art_dimensions.dart';
 import '../services/library_path_migration.dart';
 import '../services/music_library_path_key.dart';
 import '../services/song_metadata_cache.dart';
@@ -221,11 +222,14 @@ class PlayerController {
       // Ignore pauses caused by [_loadCurrent]'s stop() or manual skip seeks — those
       // emit playing=false after load and used to set [_playbackPausedByUser], so
       // [_resumePlaybackAfterLoad] never called [play] (songs appeared "stuck").
+      // Natural track end reports playing=false + completed; must not look like a
+      // user pause or repeat-one / skipNext will not call [play].
       if (!playing &&
           _lastDispatchedPlaying &&
           !_isLoadingSource &&
           !_manualQueueAdvance &&
-          !_ignoreSpuriousTransportPause) {
+          !_ignoreSpuriousTransportPause &&
+          proc != ProcessingState.completed) {
         _invalidatePlayResumeRetries();
         _playbackPausedByUser = true;
         if (!kIsWeb &&
@@ -371,6 +375,11 @@ class PlayerController {
   DateTime? _postLoadConcatGuardUntil;
   int? _postLoadExpectedConcatIndex;
   bool _sourceNeedsReload = false;
+
+  /// Windows uses a single [AudioSource] for the current row only. After a successful
+  /// [setAudioSource], this holds that file’s key so queue-only edits (reorder, play
+  /// next, append) can skip reloading the same URI and avoid a multi-second gap.
+  String? _loadedWindowsSingleTrackPathKey;
 
   /// After an on-disk rename, maps pre-rename [canonicalMusicLibraryPathKey] → new path.
   final Map<String, String> _libraryPathMigrations = {};
@@ -576,17 +585,27 @@ class PlayerController {
   List<TrackItem> get libraryCatalog => _libraryCatalog.tracks;
 
   /// In-memory list art from [LibraryCatalog] hot LRU (no disk read).
-  Uint8List? hotArtBytesForPath(String filePath) {
+  Uint8List? hotArtBytesForPath(
+    String filePath, {
+    int minPixelSize = 0,
+  }) {
     final key = canonicalMusicLibraryPathKey(filePath.trim());
     if (key.isEmpty) return null;
-    return _libraryCatalog.hotArtBytesForPathKey(key);
+    return _libraryCatalog.hotArtBytesForPathKey(
+      key,
+      minPixelSize: minPixelSize,
+    );
   }
 
-  void promoteArtBytesForPath(String filePath, Uint8List art) {
+  void promoteArtBytesForPath(
+    String filePath,
+    Uint8List art, {
+    int pixelSize = 0,
+  }) {
     final key = canonicalMusicLibraryPathKey(filePath.trim());
     if (key.isEmpty) return;
     evictPathAlbumArtMemory(filePath);
-    _libraryCatalog.promoteArtBytes(key, art);
+    _libraryCatalog.promoteArtBytes(key, art, pixelSize: pixelSize);
     markAlbumArtAvailable(filePath);
   }
 
@@ -1021,6 +1040,36 @@ class PlayerController {
         .clamp(0, _playlistPaths.isEmpty ? 0 : _playlistPaths.length - 1);
   }
 
+  /// When the native player is still serving the same file as [currentTrack], queue
+  /// mutations do not need [setAudioSource] on Windows (single-track workaround).
+  bool _windowsSingleTrackReloadWouldBeNoOp() {
+    if (!_useSingleTrackAudioSourceForPlatform()) return false;
+    if (_loadCurrentPathOverride != null) return false;
+    final loaded = _loadedWindowsSingleTrackPathKey;
+    if (loaded == null || loaded.isEmpty) return false;
+    final cur = currentTrack;
+    final fp = cur?.filePath?.trim();
+    if (fp == null || fp.isEmpty) return false;
+    final resolved = _resolveMigratedFilePath(fp);
+    return canonicalMusicLibraryPathKey(resolved) == loaded;
+  }
+
+  /// Syncs in-memory concat bookkeeping with the queue without touching the decoder.
+  /// Returns `true` when the reload was skipped.
+  bool _skipWindowsSingleTrackReloadIfCurrentUnchanged() {
+    if (!_windowsSingleTrackReloadWouldBeNoOp()) return false;
+    final logical = _logicalPlaylistIndex();
+    if (_playlistPaths.isEmpty || logical < 0 || logical >= _playlistPaths.length) {
+      return false;
+    }
+    _concatExpandGeneration++;
+    _activeSourceOrder = [logical];
+    _sourceNeedsReload = false;
+    _notifyTrackPlaybackQueue();
+    positionNotifier.flush();
+    return true;
+  }
+
   bool _applyConcatIndexChanged(int concatIdx) {
     if (_playlistPaths.isEmpty) return false;
     final order = _activeSourceOrder.isNotEmpty
@@ -1259,9 +1308,12 @@ class PlayerController {
     if (_playlistPaths.isEmpty || _repeat != PlaylistRepeatMode.one) return;
     if (_stopAtTrackEndForSleepTimer) return;
 
+    _playbackPausedByUser = false;
     final idx = concatIndex ?? _concatIndexForLogical(_logicalPlaylistIndex());
+    final useConcatIndex =
+        idx != null && _concatSource != null && !_useSingleTrackAudioSourceForPlatform();
     try {
-      if (idx != null) {
+      if (useConcatIndex) {
         await _player.seek(Duration.zero, index: idx);
       } else {
         await _player.seek(Duration.zero);
@@ -1271,9 +1323,7 @@ class PlayerController {
       _previousProcessing = proc == ProcessingState.completed
           ? ProcessingState.ready
           : proc;
-      if (!_playbackPausedByUser) {
-        await _playSafely(context: context);
-      }
+      await _playSafely(context: context);
       positionNotifier.flush();
       _notifyTrackAndPlayback();
     } catch (e, st) {
@@ -1399,7 +1449,11 @@ class PlayerController {
       if (upcomingTrack != null) upcomingTrack!,
     ];
     if (tracks.isEmpty) return;
-    prewarmAlbumArtCache(tracks, maxCount: tracks.length);
+    prewarmAlbumArtCache(
+      tracks,
+      maxCount: tracks.length,
+      maxDimension: kAlbumArtPrimeDimension,
+    );
   }
 
   /// During [setAudioSource] with lazy preparation, [currentIndexStream] can briefly
@@ -1678,7 +1732,11 @@ class PlayerController {
     if (await _appendPlaylistIndicesToConcat(toAppend)) {
       return;
     }
-    await _loadCurrent(initialPosition: resumePos);
+    if (_skipWindowsSingleTrackReloadIfCurrentUnchanged()) return;
+    await _loadCurrent(
+      initialPosition: resumePos,
+      stopBeforeLoad: false,
+    );
   }
 
   /// Sets the queue from [paths] (tags resolved from [LibraryCatalog]) and loads audio.
@@ -1818,6 +1876,7 @@ class PlayerController {
     bool stopBeforeLoad = false,
   }) async {
     if (_playlistPaths.isEmpty) return;
+    if (_skipWindowsSingleTrackReloadIfCurrentUnchanged()) return;
     _concatExpandGeneration++;
     final pos = _player.position;
     final resumeAfterStop =
@@ -2391,7 +2450,11 @@ class PlayerController {
     } else if (removedViaConcat) {
       return;
     } else {
-      await _loadCurrent(initialPosition: _player.position);
+      if (_skipWindowsSingleTrackReloadIfCurrentUnchanged()) return;
+      await _loadCurrent(
+        initialPosition: _player.position,
+        stopBeforeLoad: false,
+      );
     }
   }
 
@@ -2478,6 +2541,7 @@ class PlayerController {
       }
       _concatSource = null;
       _activeSourceOrder = <int>[];
+      _loadedWindowsSingleTrackPathKey = null;
       _notifyTrackPlaybackQueue();
       return;
     }
@@ -2507,6 +2571,7 @@ class PlayerController {
         } catch (_) {}
         _concatSource = null;
         _activeSourceOrder = <int>[];
+        _loadedWindowsSingleTrackPathKey = null;
         _notifyTrackPlaybackQueue();
         return;
       }
@@ -2580,6 +2645,7 @@ class PlayerController {
       if (children.isEmpty) {
         _concatSource = null;
         _activeSourceOrder = <int>[];
+        _loadedWindowsSingleTrackPathKey = null;
         _notifyTrackPlaybackQueue();
         return;
       }
@@ -2595,7 +2661,13 @@ class PlayerController {
           context: '_loadCurrent.single',
           stopBeforeLoad: false,
         );
+        final fp = _trackAt(logical).filePath?.trim() ?? '';
+        final resolved = fp.isEmpty ? '' : _resolveMigratedFilePath(fp);
+        _loadedWindowsSingleTrackPathKey = resolved.isEmpty
+            ? null
+            : canonicalMusicLibraryPathKey(resolved);
       } else {
+        _loadedWindowsSingleTrackPathKey = null;
         final concat = ConcatenatingAudioSource(
           useLazyPreparation: _concatUseLazyPreparationForPlatform(),
           children: children,
@@ -2617,6 +2689,7 @@ class PlayerController {
       _sourceNeedsReload = false;
       } // !useFastStart
     } catch (e, st) {
+      _loadedWindowsSingleTrackPathKey = null;
       debugPrint('Playback load error: $e\n$st');
       if (retryAfterMissingPath) {
         final missingPath = _extractMissingPathFromLoadError(e);
@@ -2781,6 +2854,13 @@ class PlayerController {
         stopBeforeLoad: stopBeforeLoad,
       );
       await _applyPreferredVolume();
+      if (_useSingleTrackAudioSourceForPlatform()) {
+        final fp = _trackAt(logical).filePath?.trim() ?? '';
+        final resolved = fp.isEmpty ? '' : _resolveMigratedFilePath(fp);
+        _loadedWindowsSingleTrackPathKey = resolved.isEmpty
+            ? null
+            : canonicalMusicLibraryPathKey(resolved);
+      }
       _postLoadExpectedConcatIndex = 0;
       _postLoadConcatGuardUntil = DateTime.now().add(
         const Duration(milliseconds: 650),
@@ -2880,6 +2960,7 @@ class PlayerController {
     );
     _concatExpandGeneration++;
     _concatSource = null;
+    _loadedWindowsSingleTrackPathKey = null;
     try {
       await _player.stop();
     } catch (_) {}

@@ -524,6 +524,7 @@ ResolvedTagsForWrite resolveTagsForWrite({
   String? embeddedArtist,
   String? embeddedAlbum,
   String? embeddedGenre,
+  bool clearGenre = false,
 }) {
   final fileTitle = (embeddedTitle ?? '').trim();
   final fileArtist = (embeddedArtist ?? '').trim();
@@ -606,8 +607,12 @@ ResolvedTagsForWrite resolveTagsForWrite({
   if (!clearedArtist && artist.isEmpty && fileArtist.isNotEmpty) {
     artist = fileArtist;
   }
-  if (!clearedGenre && genre.isEmpty && fileGenre.isNotEmpty) {
+  if (!clearGenre && !clearedGenre && genre.isEmpty && fileGenre.isNotEmpty) {
     genre = fileGenre;
+  }
+
+  if (clearGenre) {
+    genre = '';
   }
 
   return ResolvedTagsForWrite(

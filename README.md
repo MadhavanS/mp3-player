@@ -21,7 +21,21 @@ A Flutter Android app that scans user-chosen music folders, plays local `.mp3` f
 | **Persistence** | SharedPreferences (`*Store`), Isar (`SongMetadataCache`) |
 | **State** | `PlayerController` + split notifiers (`positionNotifier`, `track`, `playback`, `queue`) — see architecture doc |
 
-### `metadata_god` build fails on Windows (os error 4551)
+### `metadata_god` on Windows
+
+Pins `flutter_rust_bridge: 2.11.1` in `pubspec.yaml` to match `metadata_god` 1.1.0.
+
+**`Get-Item : Could not find item ...\AppData` (resolve_symlinks.ps1)**
+
+Cargokit resolves paths segment-by-segment; `Get-Item` without `-Force` fails on the hidden `AppData` folder under your user profile. After `flutter pub get`, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tool\patch_cargokit_resolve_symlinks.ps1
+```
+
+Then `flutter run -d windows` again. Re-run the patch after `flutter pub get` or `flutter clean` if the error returns.
+
+**os error 4551 — Application Control policy blocked**
 
 If Cargokit logs **“An Application Control policy has blocked this file”** while compiling crates under `build\metadata_god\`, Windows is blocking Rust **build scripts**.
 
@@ -31,8 +45,6 @@ If Cargokit logs **“An Application Control policy has blocked this file”** w
 2. **Skip Rust:** Remove `metadata_god` from `pubspec.yaml`. `--dart-define=USE_METADATA_GOD=false` only disables runtime use; the native plugin still builds while the dependency remains.
 
 After policy changes: `flutter clean`, delete `build\metadata_god`, then `flutter run`.
-
-Pins `flutter_rust_bridge: 2.11.1` in `pubspec.yaml` to match `metadata_god` 1.1.0.
 
 ## Android storage and permissions
 

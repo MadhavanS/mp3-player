@@ -21,6 +21,9 @@ class TrackItem {
   final String genres;
   final List<Color> artColors;
 
+  /// Album line for library / queue rows (genre is not shown in list UI).
+  String get cardSubtitle => metaLine;
+
   /// Absolute path when this track came from device storage.
   final String? filePath;
 

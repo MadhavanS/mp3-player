@@ -114,8 +114,10 @@ Future<void> showStandaloneSiteRenameDialog(
             const SizedBox(height: 8),
             Text('Genre (tag)', style: Theme.of(ctx).textTheme.labelSmall),
             Text(
-              suggestion.suggestedGenre,
-              style: Theme.of(ctx).textTheme.bodyMedium,
+              '(removed)',
+              style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                    fontStyle: FontStyle.italic,
+                  ),
             ),
           ],
         ),
@@ -212,6 +214,7 @@ Future<void> _applySiteRenameStandalone(
           .replaceAll('#', ' ')
           .trim()
           .replaceAll(RegExp(r'\s+'), ' '),
+      clearGenre: true,
     );
     await writeEmbeddedAudioTags(
       filePath: newPath,

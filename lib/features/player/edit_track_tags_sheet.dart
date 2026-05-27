@@ -523,12 +523,23 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                   suggestion.suggestedTitle,
                   style: Theme.of(ctx).textTheme.bodyMedium,
                 ),
-                const SizedBox(height: 8),
-                Text('Genre (tag)', style: Theme.of(ctx).textTheme.labelSmall),
-                Text(
-                  suggestion.suggestedGenre,
-                  style: Theme.of(ctx).textTheme.bodyMedium,
-                ),
+                if (tagOnlyFlow) ...[
+                  const SizedBox(height: 8),
+                  Text('Genre (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+                  Text(
+                    suggestion.suggestedGenre,
+                    style: Theme.of(ctx).textTheme.bodyMedium,
+                  ),
+                ] else ...[
+                  const SizedBox(height: 8),
+                  Text('Genre (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+                  Text(
+                    '(removed)',
+                    style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                          fontStyle: FontStyle.italic,
+                        ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -547,7 +558,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                 _title.text = suggestion.suggestedTitle;
                 _artist.text = suggestion.suggestedArtist;
                 _album.text = suggestion.suggestedAlbum;
-                _genre.text = suggestion.suggestedGenre;
+                _genre.text = '';
                 _fileName.text = suggestion.newBasenameWithoutExt;
                 Navigator.pop(ctx);
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -649,6 +660,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         embeddedArtist: artistBefore,
         embeddedAlbum: albumBefore,
         embeddedGenre: _genreTextFromTrack(snapBeforeWrite),
+        clearGenre: !tagOnlyFlow,
       );
       await writeEmbeddedAudioTags(
         filePath: newPath,
