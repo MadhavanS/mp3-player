@@ -12,6 +12,10 @@ enum LibraryTrackSortMode {
   titleAZ,
   titleZA,
 
+  /// Album tag ([TrackItem.metaLine]); unknown/placeholder sorts last.
+  albumAZ,
+  albumZA,
+
   /// All tracks from the first Settings music folder, then the second, etc.
   /// Within each root, ordered by relative path (folder structure).
   folderOrder,
@@ -23,6 +27,8 @@ extension LibraryTrackSortModeStorage on LibraryTrackSortMode {
         LibraryTrackSortMode.modifiedOldest => 'modified_oldest',
         LibraryTrackSortMode.titleAZ => 'title_az',
         LibraryTrackSortMode.titleZA => 'title_za',
+        LibraryTrackSortMode.albumAZ => 'album_az',
+        LibraryTrackSortMode.albumZA => 'album_za',
         LibraryTrackSortMode.folderOrder => 'folder_order',
       };
 
@@ -31,6 +37,8 @@ extension LibraryTrackSortModeStorage on LibraryTrackSortMode {
         LibraryTrackSortMode.modifiedOldest => 'Date modified (oldest first)',
         LibraryTrackSortMode.titleAZ => 'Title (A–Z)',
         LibraryTrackSortMode.titleZA => 'Title (Z–A)',
+        LibraryTrackSortMode.albumAZ => 'Album (A–Z)',
+        LibraryTrackSortMode.albumZA => 'Album (Z–A)',
         LibraryTrackSortMode.folderOrder => 'Folder order (library folders)',
       };
 }
@@ -42,6 +50,8 @@ LibraryTrackSortMode? _parseSortMode(String? raw) {
     'modified_oldest' => LibraryTrackSortMode.modifiedOldest,
     'title_az' => LibraryTrackSortMode.titleAZ,
     'title_za' => LibraryTrackSortMode.titleZA,
+    'album_az' => LibraryTrackSortMode.albumAZ,
+    'album_za' => LibraryTrackSortMode.albumZA,
     'folder_order' => LibraryTrackSortMode.folderOrder,
     _ => null,
   };
@@ -115,6 +125,17 @@ void _sortPathsByFolderOrder(List<String> paths, List<String> roots) {
   );
 }
 
+/// Normalized album tag for sort; empty or placeholder sorts last in A–Z.
+String _albumTagKey(TrackItem t) {
+  final m = t.metaLine.trim();
+  if (m.isEmpty || m.toLowerCase() == 'mp3') return '';
+  return m.toLowerCase();
+}
+
+/// Files explorer: no tag read — parent folder name, then title from filename.
+String _parentFolderSortKey(String path) =>
+    p.basename(p.dirname(p.normalize(path))).toLowerCase();
+
 /// Orders filtered catalog indices; catalog order is modified-newest-first from scan.
 List<int> sortFilteredTrackIndices(
   List<int> indices,
@@ -134,6 +155,19 @@ List<int> sortFilteredTrackIndices(
     return pa.compareTo(pb);
   }
 
+  int albumCmp(int ia, int ib) {
+    final aa = _albumTagKey(tracks[ia]);
+    final bb = _albumTagKey(tracks[ib]);
+    final hasA = aa.isNotEmpty;
+    final hasB = bb.isNotEmpty;
+    if (hasA != hasB) {
+      return hasA ? -1 : 1;
+    }
+    final c = aa.compareTo(bb);
+    if (c != 0) return c;
+    return titleCmp(ia, ib);
+  }
+
   switch (mode) {
     case LibraryTrackSortMode.modifiedNewest:
       out.sort((a, b) => a.compareTo(b));
@@ -146,6 +180,12 @@ List<int> sortFilteredTrackIndices(
       break;
     case LibraryTrackSortMode.titleZA:
       out.sort((a, b) => titleCmp(b, a));
+      break;
+    case LibraryTrackSortMode.albumAZ:
+      out.sort(albumCmp);
+      break;
+    case LibraryTrackSortMode.albumZA:
+      out.sort((a, b) => albumCmp(b, a));
       break;
     case LibraryTrackSortMode.folderOrder:
       out.sort((a, b) {
@@ -191,6 +231,22 @@ Future<List<String>> sortMp3PathsForFilesExplorer(
         (a, b) => _basenameTitleKey(b).compareTo(_basenameTitleKey(a)),
       );
       return out;
+    case LibraryTrackSortMode.albumAZ:
+      final outAlbum = List<String>.from(paths);
+      outAlbum.sort((a, b) {
+        final d = _parentFolderSortKey(a).compareTo(_parentFolderSortKey(b));
+        if (d != 0) return d;
+        return _basenameTitleKey(a).compareTo(_basenameTitleKey(b));
+      });
+      return outAlbum;
+    case LibraryTrackSortMode.albumZA:
+      final outAlbumZ = List<String>.from(paths);
+      outAlbumZ.sort((a, b) {
+        final d = _parentFolderSortKey(b).compareTo(_parentFolderSortKey(a));
+        if (d != 0) return d;
+        return _basenameTitleKey(b).compareTo(_basenameTitleKey(a));
+      });
+      return outAlbumZ;
     case LibraryTrackSortMode.folderOrder:
       final out = List<String>.from(paths);
       _sortPathsByFolderOrder(out, libraryRoots);
