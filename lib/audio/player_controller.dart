@@ -135,10 +135,7 @@ class PlayerController {
     // One event-loop turn; helps desktop embedders finish native load callbacks.
     await Future<void>.delayed(Duration.zero);
     if (_playbackPausedByUser || _playControlGeneration != generation) return;
-    await _ensurePlayingWithRetries(
-      context: context,
-      generation: generation,
-    );
+    await _ensurePlayingWithRetries(context: context, generation: generation);
   }
 
   Future<void> _waitForPlayerPreparedAfterSourceChange() async {
@@ -268,8 +265,7 @@ class PlayerController {
   final ArtAvailabilityNotifier artAvailability = ArtAvailabilityNotifier();
 
   /// Track + playback + queue updates only (excludes [position] ticks).
-  Listenable get uiListenable =>
-      Listenable.merge([track, playback, queue]);
+  Listenable get uiListenable => Listenable.merge([track, playback, queue]);
 
   /// Play/pause and processing UI only.
   Listenable get playbackListenable => playback;
@@ -278,8 +274,7 @@ class PlayerController {
   Listenable get queueListenable => queue;
 
   /// [canSkipNext] / [canSkipPrevious] depend on queue boundaries and current index.
-  Listenable get trackAndQueueListenable =>
-      Listenable.merge([track, queue]);
+  Listenable get trackAndQueueListenable => Listenable.merge([track, queue]);
   late final StreamSubscription<PlayerState> _playerStateSub;
   StreamSubscription<int?>? _concatIndexSub;
   StreamSubscription<AudioInterruptionEvent>? _audioInterruptionSub;
@@ -307,8 +302,7 @@ class PlayerController {
 
   TrackItem _trackAt(int playlistIndex) {
     final path = _playlistPaths[playlistIndex];
-    return _libraryCatalog.trackForPath(path) ??
-        TrackItem.fromFilePath(path);
+    return _libraryCatalog.trackForPath(path) ?? TrackItem.fromFilePath(path);
   }
 
   void _setPlaylistPaths(List<String> paths) {
@@ -342,9 +336,9 @@ class PlayerController {
   }
 
   List<String> _pathsForTracks(List<TrackItem> tracks) => [
-        for (final t in tracks)
-          if (_pathForTrack(t) != null) _pathForTrack(t)!,
-      ];
+    for (final t in tracks)
+      if (_pathForTrack(t) != null) _pathForTrack(t)!,
+  ];
 
   static bool _sameQueuePaths(String a, String b) {
     final ka = canonicalMusicLibraryPathKey(a);
@@ -585,10 +579,7 @@ class PlayerController {
   List<TrackItem> get libraryCatalog => _libraryCatalog.tracks;
 
   /// In-memory list art from [LibraryCatalog] hot LRU (no disk read).
-  Uint8List? hotArtBytesForPath(
-    String filePath, {
-    int minPixelSize = 0,
-  }) {
+  Uint8List? hotArtBytesForPath(String filePath, {int minPixelSize = 0}) {
     final key = canonicalMusicLibraryPathKey(filePath.trim());
     if (key.isEmpty) return null;
     return _libraryCatalog.hotArtBytesForPathKey(
@@ -662,10 +653,7 @@ class PlayerController {
     for (final t in tracks) {
       final art = t.albumArtBytes;
       final path = t.filePath?.trim();
-      if (path != null &&
-          path.isNotEmpty &&
-          art != null &&
-          art.isNotEmpty) {
+      if (path != null && path.isNotEmpty && art != null && art.isNotEmpty) {
         markAlbumArtAvailable(path);
       }
     }
@@ -752,10 +740,18 @@ class PlayerController {
   /// Playlist indices in the order the player will play them (respects shuffle and folder scope).
   List<int> get playbackOrderIndices => List<int>.from(_effectiveQueueOrder());
 
-  /// Whether the queue tab may reorder rows (folder filter + non-shuffle uses a non-contiguous subset).
+  /// Whether the queue tab may reorder rows.
+  ///
+  /// When a path-key scope is active but the queue contains tracks outside that
+  /// scope, reorder is disabled — [reorderPlaybackQueue] only permutes the scoped
+  /// playback order, which would not match the full playlist layout.
   bool get canReorderPlaybackQueue {
     if (_playlistPaths.length < 2) return false;
-    if (_playbackPathKeysScope != null && !_shuffle) return false;
+    if (_playbackPathKeysScope != null && !_shuffle) {
+      for (var i = 0; i < _playlistPaths.length; i++) {
+        if (!_playlistIndexMatchesScope(i)) return false;
+      }
+    }
     return true;
   }
 
@@ -861,14 +857,14 @@ class PlayerController {
       final notifier = _sleepTimerTrackEndNotifier;
       _sleepTimerTrackEndNotifier = null;
       notifier?.call();
-      
+
       try {
         _invalidatePlayResumeRetries();
         await _player.pause();
       } catch (e) {
         debugPrint('Sleep timer natural stop failed: $e');
       }
-      
+
       _notifyTrackAndPlayback();
       return;
     }
@@ -1034,10 +1030,15 @@ class PlayerController {
 
   int _logicalPlaylistIndex() {
     if (!_shuffle || _shuffleOrder.isEmpty) {
-      return _index.clamp(0, _playlistPaths.isEmpty ? 0 : _playlistPaths.length - 1);
+      return _index.clamp(
+        0,
+        _playlistPaths.isEmpty ? 0 : _playlistPaths.length - 1,
+      );
     }
-    return _shuffleOrder[_shufflePos.clamp(0, _shuffleOrder.length - 1)]
-        .clamp(0, _playlistPaths.isEmpty ? 0 : _playlistPaths.length - 1);
+    return _shuffleOrder[_shufflePos.clamp(0, _shuffleOrder.length - 1)].clamp(
+      0,
+      _playlistPaths.isEmpty ? 0 : _playlistPaths.length - 1,
+    );
   }
 
   /// When the native player is still serving the same file as [currentTrack], queue
@@ -1059,7 +1060,9 @@ class PlayerController {
   bool _skipWindowsSingleTrackReloadIfCurrentUnchanged() {
     if (!_windowsSingleTrackReloadWouldBeNoOp()) return false;
     final logical = _logicalPlaylistIndex();
-    if (_playlistPaths.isEmpty || logical < 0 || logical >= _playlistPaths.length) {
+    if (_playlistPaths.isEmpty ||
+        logical < 0 ||
+        logical >= _playlistPaths.length) {
       return false;
     }
     _concatExpandGeneration++;
@@ -1106,7 +1109,8 @@ class PlayerController {
     Map<int, Uri?>? notificationArtUris,
     bool resolveArtUri = true,
   }) async {
-    if (playlistIndex < 0 || playlistIndex >= _playlistPaths.length) return null;
+    if (playlistIndex < 0 || playlistIndex >= _playlistPaths.length)
+      return null;
     final logical = _logicalPlaylistIndex();
     final t = playlistIndex == logical && _loadCurrentPathOverride != null
         ? _loadCurrentPathOverride!
@@ -1253,7 +1257,9 @@ class PlayerController {
       resolveArtUri: false,
     );
     if (source == null) {
-      debugPrint('_loadCurrentFastStart: no AudioSource for playlist index $logical');
+      debugPrint(
+        '_loadCurrentFastStart: no AudioSource for playlist index $logical',
+      );
       return;
     }
     final concat = ConcatenatingAudioSource(
@@ -1293,10 +1299,12 @@ class PlayerController {
     _repeatOneReplayScheduled = true;
     Future.delayed(const Duration(milliseconds: 20), () {
       _repeatOneReplayScheduled = false;
-      unawaited(_replayCurrentTrackAtStart(
-        context: 'repeat-one replay',
-        concatIndex: concatIndex,
-      ));
+      unawaited(
+        _replayCurrentTrackAtStart(
+          context: 'repeat-one replay',
+          concatIndex: concatIndex,
+        ),
+      );
     });
   }
 
@@ -1311,7 +1319,9 @@ class PlayerController {
     _playbackPausedByUser = false;
     final idx = concatIndex ?? _concatIndexForLogical(_logicalPlaylistIndex());
     final useConcatIndex =
-        idx != null && _concatSource != null && !_useSingleTrackAudioSourceForPlatform();
+        idx != null &&
+        _concatSource != null &&
+        !_useSingleTrackAudioSourceForPlatform();
     try {
       if (useConcatIndex) {
         await _player.seek(Duration.zero, index: idx);
@@ -1363,8 +1373,10 @@ class PlayerController {
       final isAutoAdvance =
           currentConcatIdx >= 0 && concatIdx != currentConcatIdx;
       if (isAutoAdvance) {
-        debugPrint('Sleep timer (end of song) intercepting auto-advance: '
-            'from $currentConcatIdx to $concatIdx');
+        debugPrint(
+          'Sleep timer (end of song) intercepting auto-advance: '
+          'from $currentConcatIdx to $concatIdx',
+        );
         _stopAtTrackEndForSleepTimer = false;
         final notifier = _sleepTimerTrackEndNotifier;
         _sleepTimerTrackEndNotifier = null;
@@ -1372,17 +1384,17 @@ class PlayerController {
 
         // Authoritative pause and seek back to the end of the previous track
         // so we don't start playing the next one in the background.
-        // We use a delay to exit the current stream listener context and avoid 
+        // We use a delay to exit the current stream listener context and avoid
         // "Bad state: Cannot fire new event" while ensure player state has settled.
         Future.delayed(const Duration(milliseconds: 20), () async {
           try {
             _invalidatePlayResumeRetries();
             // Force pause at the platform level bypassing the transport lock.
             await _player.pause();
-            
+
             // Re-sync logical index if the auto-advance had already moved it
             _applyConcatIndexChanged(currentConcatIdx);
-            
+
             // Seek to the end of the finish song to ensure we aren't at the
             // beginning of the NEXT song. We seek to the actual duration instead
             // of a placeholder like '1 day' to avoid '1440:00' timer display issues.
@@ -1391,9 +1403,12 @@ class PlayerController {
               await _player.seek(trackDur, index: currentConcatIdx);
             } else {
               // Fallback if duration isn't available yet
-              await _player.seek(const Duration(seconds: 1), index: currentConcatIdx);
+              await _player.seek(
+                const Duration(seconds: 1),
+                index: currentConcatIdx,
+              );
             }
-            
+
             // Final safety pause.
             await _player.pause();
             _notifyTrackAndPlayback();
@@ -1440,7 +1455,7 @@ class PlayerController {
     await _waitForPlayerPreparedAfterSourceChange();
     _prewarmPlaybackAlbumArt();
     _scheduleNotificationArtRefresh();
-    _notifyTrack();
+    _notifyTrackPlaybackQueue();
   }
 
   void _prewarmPlaybackAlbumArt() {
@@ -1497,14 +1512,16 @@ class PlayerController {
         : startIndex.clamp(0, _playlistPaths.length - 1);
     if (preserveShuffle) {
       final cur = _index;
-      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)
+        ..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
       _shuffle = true;
     } else if (enableShuffle && tracks.length > 1) {
       final cur = _index;
-      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)
+        ..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
@@ -1672,7 +1689,8 @@ class PlayerController {
 
     if (keepShuffle) {
       final cur = newIndex;
-      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)
+        ..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
@@ -1720,9 +1738,7 @@ class PlayerController {
       _index = 0;
       await _guardedTransport(() async {
         await _loadCurrent();
-        await _resumePlaybackAfterLoad(
-          context: 'appendToPlaylist.play',
-        );
+        await _resumePlaybackAfterLoad(context: 'appendToPlaylist.play');
       });
       return;
     }
@@ -1733,10 +1749,16 @@ class PlayerController {
       return;
     }
     if (_skipWindowsSingleTrackReloadIfCurrentUnchanged()) return;
-    await _loadCurrent(
-      initialPosition: resumePos,
-      stopBeforeLoad: false,
-    );
+    final resumeAfterReload = _player.playing && !_playbackPausedByUser;
+    await _guardedTransport(() async {
+      await _loadCurrent(initialPosition: resumePos, stopBeforeLoad: false);
+      if (resumeAfterReload) {
+        _playbackPausedByUser = false;
+        await _resumePlaybackAfterLoad(
+          context: 'appendToPlaylist.resumeAfterReload',
+        );
+      }
+    });
   }
 
   /// Sets the queue from [paths] (tags resolved from [LibraryCatalog]) and loads audio.
@@ -1762,14 +1784,16 @@ class PlayerController {
         : startIndex.clamp(0, _playlistPaths.length - 1);
     if (preserveShuffle) {
       final cur = _index;
-      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)
+        ..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
       _shuffle = true;
     } else if (enableShuffle && trackCount > 1) {
       final cur = _index;
-      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)
+        ..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
@@ -1803,9 +1827,7 @@ class PlayerController {
       );
       // Lazy [ConcatenatingAudioSource] may still be loading when [_loadCurrent]
       // returns; [play] can no-op until [ProcessingState.ready].
-      await _resumePlaybackAfterLoad(
-        context: 'setPlaylistAndPlay.play',
-      );
+      await _resumePlaybackAfterLoad(context: 'setPlaylistAndPlay.play');
     });
   }
 
@@ -1828,9 +1850,7 @@ class PlayerController {
         keepShuffleMode: keepShuffleMode,
         enableShuffle: enableShuffle,
       );
-      await _resumePlaybackAfterLoad(
-        context: 'setPlaylistPathsAndPlay.play',
-      );
+      await _resumePlaybackAfterLoad(context: 'setPlaylistPathsAndPlay.play');
     });
   }
 
@@ -1879,14 +1899,10 @@ class PlayerController {
     if (_skipWindowsSingleTrackReloadIfCurrentUnchanged()) return;
     _concatExpandGeneration++;
     final pos = _player.position;
-    final resumeAfterStop =
-        stopBeforeLoad && _player.playing && !_playbackPausedByUser;
+    final resumeAfterReload = _player.playing && !_playbackPausedByUser;
     await _guardedTransport(() async {
-      await _loadCurrent(
-        initialPosition: pos,
-        stopBeforeLoad: stopBeforeLoad,
-      );
-      if (resumeAfterStop) {
+      await _loadCurrent(initialPosition: pos, stopBeforeLoad: stopBeforeLoad);
+      if (resumeAfterReload) {
         _playbackPausedByUser = false;
         await _resumePlaybackAfterLoad(context: 'queueMutation.play');
       }
@@ -2014,8 +2030,11 @@ class PlayerController {
         trackPath,
       );
       _invalidatePlaylistCache();
-      await _rebuildAudioSourceForQueueMutation();
+      _sourceNeedsReload = true;
       _notifyTrackPlaybackQueue();
+      if (!await _tryResyncConcatAfterQueueReorder()) {
+        await _rebuildAudioSourceForQueueMutation();
+      }
       return true;
     }
 
@@ -2031,8 +2050,11 @@ class PlayerController {
     final insertPos = (_shufflePos + 1).clamp(0, _shuffleOrder.length);
     _shuffleOrder.insert(insertPos, newIx);
 
-    await _rebuildAudioSourceForQueueMutation();
+    _sourceNeedsReload = true;
     _notifyTrackPlaybackQueue();
+    if (!await _tryResyncConcatAfterQueueReorder()) {
+      await _rebuildAudioSourceForQueueMutation();
+    }
     return true;
   }
 
@@ -2118,7 +2140,8 @@ class PlayerController {
     final curKey = cur?.filePath != null
         ? canonicalMusicLibraryPathKey(cur!.filePath!.trim())
         : '';
-    final shouldRefreshNotificationArt = curKey == key &&
+    final shouldRefreshNotificationArt =
+        curKey == key &&
         cur != null &&
         updated.albumArtBytes != null &&
         updated.albumArtBytes!.isNotEmpty &&
@@ -2146,8 +2169,8 @@ class PlayerController {
     }
     if (changed) {
       _notifyCatalogListeners(notify);
-      final artArrived = updated.albumArtBytes != null &&
-          updated.albumArtBytes!.isNotEmpty;
+      final artArrived =
+          updated.albumArtBytes != null && updated.albumArtBytes!.isNotEmpty;
       if (curKey == key && artArrived) {
         _notifyTrack();
         _scheduleNotificationArtRefresh(retryIfLoading: true);
@@ -2285,8 +2308,9 @@ class PlayerController {
   }) async {
     final oldKey = canonicalMusicLibraryPathKey(oldPath);
     final newPath = updated.filePath?.trim() ?? '';
-    final newKey =
-        newPath.isNotEmpty ? canonicalMusicLibraryPathKey(newPath) : '';
+    final newKey = newPath.isNotEmpty
+        ? canonicalMusicLibraryPathKey(newPath)
+        : '';
     if (oldKey.isEmpty) return;
     if (newKey.isNotEmpty && newKey != oldKey) {
       _registerLibraryPathMigration(oldPath, newPath);
@@ -2331,7 +2355,8 @@ class PlayerController {
       }());
     }
 
-    final shouldReloadPlayer = isCurrentTrackPathBeingReplaced ||
+    final shouldReloadPlayer =
+        isCurrentTrackPathBeingReplaced ||
         await shouldRewirePlaybackForRenamedFile(oldPath, newPath);
     if (!changed && !shouldReloadPlayer) {
       _notifyTrackPlaybackQueue();
@@ -2480,9 +2505,7 @@ class PlayerController {
     if (autoPlay) {
       await _guardedTransport(() async {
         await _loadCurrent();
-        await _resumePlaybackAfterLoad(
-          context: 'jumpToIndex.play',
-        );
+        await _resumePlaybackAfterLoad(context: 'jumpToIndex.play');
       });
     } else {
       await _loadCurrent();
@@ -2490,7 +2513,10 @@ class PlayerController {
   }
 
   /// Reorders [playbackOrderIndices] and rebuilds the native concat to match.
-  Future<void> reorderPlaybackQueue(int oldOrderIndex, int newOrderIndex) async {
+  Future<void> reorderPlaybackQueue(
+    int oldOrderIndex,
+    int newOrderIndex,
+  ) async {
     if (!canReorderPlaybackQueue) return;
     final order = _effectiveQueueOrder();
     if (order.isEmpty) return;
@@ -2515,7 +2541,9 @@ class PlayerController {
       _playlistPaths = perm.map((i) => paths[i]).toList(growable: false);
       _invalidatePlaylistCache();
       final newPos = perm.indexOf(curPl);
-      _index = newPos >= 0 ? newPos : _index.clamp(0, _playlistPaths.length - 1);
+      _index = newPos >= 0
+          ? newPos
+          : _index.clamp(0, _playlistPaths.length - 1);
     }
 
     _sourceNeedsReload = true;
@@ -2605,7 +2633,8 @@ class PlayerController {
           ? <int>[logical]
           : order;
 
-      final useFastStart = !_useSingleTrackAudioSourceForPlatform() &&
+      final useFastStart =
+          !_useSingleTrackAudioSourceForPlatform() &&
           sourceOrder.length > _fastStartConcatThreshold &&
           !_shuffle;
       if (useFastStart) {
@@ -2615,78 +2644,78 @@ class PlayerController {
           initialPosition: initialPosition,
         );
       } else {
-      final children = <AudioSource>[];
-      final loadedOrder = <int>[];
-      var initialConcatIndex = 0;
-      var concatPos = 0;
+        final children = <AudioSource>[];
+        final loadedOrder = <int>[];
+        var initialConcatIndex = 0;
+        var concatPos = 0;
 
-      var built = 0;
-      for (final pi in sourceOrder) {
-        if (pi < 0 || pi >= _playlistPaths.length) continue;
-        final source = await _audioSourceForPlaylistIndex(
-          pi,
-          resolveArtUri: false,
-        );
-        if (source == null) continue;
+        var built = 0;
+        for (final pi in sourceOrder) {
+          if (pi < 0 || pi >= _playlistPaths.length) continue;
+          final source = await _audioSourceForPlaylistIndex(
+            pi,
+            resolveArtUri: false,
+          );
+          if (source == null) continue;
 
-        children.add(source);
-        loadedOrder.add(pi);
-        if (pi == logical) {
-          initialConcatIndex = concatPos;
+          children.add(source);
+          loadedOrder.add(pi);
+          if (pi == logical) {
+            initialConcatIndex = concatPos;
+          }
+          concatPos++;
+          built++;
+          // Yield so very large queues do not freeze the UI isolate.
+          if (built % 64 == 0) {
+            await Future<void>.delayed(Duration.zero);
+          }
         }
-        concatPos++;
-        built++;
-        // Yield so very large queues do not freeze the UI isolate.
-        if (built % 64 == 0) {
-          await Future<void>.delayed(Duration.zero);
+
+        if (children.isEmpty) {
+          _concatSource = null;
+          _activeSourceOrder = <int>[];
+          _loadedWindowsSingleTrackPathKey = null;
+          _notifyTrackPlaybackQueue();
+          return;
         }
-      }
+        initialConcatIndex = initialConcatIndex.clamp(0, children.length - 1);
+        _activeSourceOrder = loadedOrder;
 
-      if (children.isEmpty) {
-        _concatSource = null;
-        _activeSourceOrder = <int>[];
-        _loadedWindowsSingleTrackPathKey = null;
-        _notifyTrackPlaybackQueue();
-        return;
-      }
-      initialConcatIndex = initialConcatIndex.clamp(0, children.length - 1);
-      _activeSourceOrder = loadedOrder;
-
-      await _prepareAudioSourceLoad();
-      if (_useSingleTrackAudioSourceForPlatform()) {
-        _concatSource = null;
-        await _setPlayerAudioSource(
-          children.single,
-          initialPosition: initialPosition,
-          context: '_loadCurrent.single',
-          stopBeforeLoad: false,
+        await _prepareAudioSourceLoad();
+        if (_useSingleTrackAudioSourceForPlatform()) {
+          _concatSource = null;
+          await _setPlayerAudioSource(
+            children.single,
+            initialPosition: initialPosition,
+            context: '_loadCurrent.single',
+            stopBeforeLoad: false,
+          );
+          final fp = _trackAt(logical).filePath?.trim() ?? '';
+          final resolved = fp.isEmpty ? '' : _resolveMigratedFilePath(fp);
+          _loadedWindowsSingleTrackPathKey = resolved.isEmpty
+              ? null
+              : canonicalMusicLibraryPathKey(resolved);
+        } else {
+          _loadedWindowsSingleTrackPathKey = null;
+          final concat = ConcatenatingAudioSource(
+            useLazyPreparation: _concatUseLazyPreparationForPlatform(),
+            children: children,
+          );
+          await _setPlayerAudioSource(
+            concat,
+            initialIndex: initialConcatIndex,
+            initialPosition: initialPosition,
+            context: '_loadCurrent.concat',
+            stopBeforeLoad: false,
+          );
+          _concatSource = concat;
+        }
+        await _applyPreferredVolume();
+        _postLoadExpectedConcatIndex = initialConcatIndex;
+        _postLoadConcatGuardUntil = DateTime.now().add(
+          const Duration(milliseconds: 650),
         );
-        final fp = _trackAt(logical).filePath?.trim() ?? '';
-        final resolved = fp.isEmpty ? '' : _resolveMigratedFilePath(fp);
-        _loadedWindowsSingleTrackPathKey = resolved.isEmpty
-            ? null
-            : canonicalMusicLibraryPathKey(resolved);
-      } else {
-        _loadedWindowsSingleTrackPathKey = null;
-        final concat = ConcatenatingAudioSource(
-          useLazyPreparation: _concatUseLazyPreparationForPlatform(),
-          children: children,
-        );
-        await _setPlayerAudioSource(
-          concat,
-          initialIndex: initialConcatIndex,
-          initialPosition: initialPosition,
-          context: '_loadCurrent.concat',
-          stopBeforeLoad: false,
-        );
-        _concatSource = concat;
-      }
-      await _applyPreferredVolume();
-      _postLoadExpectedConcatIndex = initialConcatIndex;
-      _postLoadConcatGuardUntil = DateTime.now().add(
-        const Duration(milliseconds: 650),
-      );
-      _sourceNeedsReload = false;
+        _sourceNeedsReload = false;
       } // !useFastStart
     } catch (e, st) {
       _loadedWindowsSingleTrackPathKey = null;
@@ -2743,7 +2772,8 @@ class PlayerController {
   bool _removeMissingTrackPath(String path) {
     final beforePlaylist = _playlistPaths.length;
     _playlistPaths.removeWhere(
-      (p) => canonicalMusicLibraryPathKey(p) == canonicalMusicLibraryPathKey(path),
+      (p) =>
+          canonicalMusicLibraryPathKey(p) == canonicalMusicLibraryPathKey(path),
     );
     _invalidatePlaylistCache();
     final beforeCatalog = _libraryCatalog.length;
@@ -2817,9 +2847,7 @@ class PlayerController {
     await _loadCurrent(initialPosition: pos, stopBeforeLoad: stopBeforeLoad);
     if (resumePlaying) {
       _playbackPausedByUser = false;
-      await _resumePlaybackAfterLoad(
-        context: 'reloadCurrentSource.play',
-      );
+      await _resumePlaybackAfterLoad(context: 'reloadCurrentSource.play');
     }
   }
 
@@ -2902,12 +2930,11 @@ class PlayerController {
   Future<void> reloadCurrentSourceAfterTagWrite({
     required Duration resumePosition,
     required bool resumePlaying,
-  }) =>
-      _reloadPlayingTrackOnly(
-        initialPosition: resumePosition,
-        resumePlaying: resumePlaying,
-        context: 'reloadCurrentSourceAfterTagWrite',
-      );
+  }) => _reloadPlayingTrackOnly(
+    initialPosition: resumePosition,
+    resumePlaying: resumePlaying,
+    context: 'reloadCurrentSourceAfterTagWrite',
+  );
 
   /// Tag sheets must not [await] reload — [setAudioSource] can wait on the audio
   /// lock or native prep and strand the save spinner even though the file is written.
@@ -3048,10 +3075,10 @@ class PlayerController {
     required String playContext,
   }) async {
     Future<void> reloadAndPlay() => _guardedTransport(() async {
-          await _loadCurrent();
-          _sourceNeedsReload = false;
-          await _resumePlaybackAfterLoad(context: playContext);
-        });
+      await _loadCurrent();
+      _sourceNeedsReload = false;
+      await _resumePlaybackAfterLoad(context: playContext);
+    });
 
     if (_sourceNeedsReload || _useSingleTrackAudioSourceForPlatform()) {
       await reloadAndPlay();
@@ -3088,7 +3115,7 @@ class PlayerController {
       await _skipNextImpl();
     } finally {
       _manualQueueAdvance = false;
-      _notifyTrack();
+      _notifyTrackPlaybackQueue();
       positionNotifier.flush();
     }
   }
@@ -3152,7 +3179,7 @@ class PlayerController {
       await _skipPreviousImpl();
     } finally {
       _manualQueueAdvance = false;
-      _notifyTrack();
+      _notifyTrackPlaybackQueue();
       positionNotifier.flush();
     }
   }
@@ -3220,7 +3247,8 @@ class PlayerController {
         _playbackPathKeysScope = null;
       }
       final cur = _index;
-      final order = List<int>.generate(_playlistPaths.length, (j) => j)..shuffle();
+      final order = List<int>.generate(_playlistPaths.length, (j) => j)
+        ..shuffle();
       order.remove(cur);
       _shuffleOrder = [cur, ...order];
       _shufflePos = 0;
@@ -3397,8 +3425,7 @@ class PlayerControllerScope extends InheritedWidget {
   QueueNotifier get queue => controller.queue;
 
   static PlayerControllerScope? maybeOf(BuildContext context) {
-    return context
-        .dependOnInheritedWidgetOfExactType<PlayerControllerScope>();
+    return context.dependOnInheritedWidgetOfExactType<PlayerControllerScope>();
   }
 
   /// Playback coordinator; prefer [trackOf], [playbackOf], [queueOf] in UI.
@@ -3416,8 +3443,7 @@ class PlayerControllerScope extends InheritedWidget {
   static PlaybackNotifier playbackOf(BuildContext context) =>
       of(context).playback;
 
-  static QueueNotifier queueOf(BuildContext context) =>
-      of(context).queue;
+  static QueueNotifier queueOf(BuildContext context) => of(context).queue;
 
   @override
   bool updateShouldNotify(PlayerControllerScope oldWidget) =>

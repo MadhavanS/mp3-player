@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show Random;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -592,7 +593,9 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
           .map(TrackItem.fromFilePath)
           .toList(growable: false);
       final startIndex = startFilePath == null
-          ? 0
+          ? (shuffle && tracks.length > 1
+              ? Random().nextInt(tracks.length)
+              : 0)
           : scanned
                 .indexWhere((p0) => p0 == startFilePath)
                 .clamp(0, tracks.length - 1);
@@ -613,15 +616,20 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
     player.setPlaybackPathKeyScope(keys, reloadQueue: false);
     if (cb != null) await cb(keys);
 
-    final startIndex = startFilePath == null
-        ? 0
+    final anchorInFull = startFilePath == null
+        ? (shuffle && scanned.length > 1
+            ? Random().nextInt(scanned.length)
+            : 0)
         : scanned
               .indexWhere((p0) => p0 == startFilePath)
               .clamp(0, scanned.length - 1);
-    final slicePaths = scanned.sublist(startIndex);
+    final pathsToPlay = startFilePath == null
+        ? scanned
+        : scanned.sublist(anchorInFull);
+    final playlistStartIndex = startFilePath == null ? anchorInFull : 0;
     await player.setPlaylistPathsAndPlay(
-      slicePaths,
-      startIndex: 0,
+      pathsToPlay,
+      startIndex: playlistStartIndex,
       playbackOriginTab: LibraryTabId.songs,
       keepShuffleMode: keepShuffleMode,
       enableShuffle: shuffle,
