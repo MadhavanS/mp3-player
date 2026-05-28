@@ -62,6 +62,26 @@ bool _concatUseLazyPreparationForPlatform() {
 /// Local playback coordinator. UI listens to [position], [track], [playback], [queue]
 /// notifiers — not this class — to avoid whole-tree rebuilds.
 class PlayerController {
+  /// One native [AudioPlayer] per process. Hot restart creates a new
+  /// [PlayerController] before the old [State.dispose] finishes; reusing the
+  /// player avoids duplicate ExoPlayer / "platform player already exists" on Android.
+  static AudioPlayer? _sharedNativePlayer;
+
+  /// Latest coordinator; superseded instance is [dispose]d from the constructor.
+  static PlayerController? _activeCoordinator;
+
+  /// Releases the native decoder (app process exit / explicit shutdown).
+  static Future<void> shutdownNativePlayer() async {
+    final player = _sharedNativePlayer;
+    _sharedNativePlayer = null;
+    if (player == null) return;
+    try {
+      await player.dispose();
+    } catch (e, st) {
+      debugPrint('PlayerController.shutdownNativePlayer: $e\n$st');
+    }
+  }
+
   bool _isInterruptedAbort(Object error) {
     if (error is! PlatformException) return false;
     final code = error.code.toLowerCase();
@@ -203,6 +223,14 @@ class PlayerController {
   }
 
   PlayerController() {
+    final previous = _activeCoordinator;
+    _activeCoordinator = this;
+    if (previous != null && !identical(previous, this)) {
+      debugPrint(
+        'PlayerController: superseding previous coordinator (hot restart)',
+      );
+      previous.dispose();
+    }
     positionNotifier.attach();
     unawaited(_loadPersistedVolume());
     _audioSessionInit = _initAudioSessionInterruptions();
@@ -255,7 +283,9 @@ class PlayerController {
   /// [just_audio] can subscribe to [AudioSession] interruptions internally, but
   /// we disable that and handle focus here so phone calls / mic use reliably pause
   /// and transient focus loss can resume after the call.
-  final AudioPlayer _player = AudioPlayer(handleInterruptions: false);
+  late final AudioPlayer _player = _sharedNativePlayer ??= AudioPlayer(
+    handleInterruptions: false,
+  );
   late final PositionNotifier positionNotifier = PositionNotifier(_player);
   final TrackNotifier track = TrackNotifier();
   final PlaybackNotifier playback = PlaybackNotifier();
@@ -300,23 +330,136 @@ class PlayerController {
 
   void _invalidatePlaylistCache() => _playlistCache = null;
 
+  void _onPlaylistPathsMutated() {
+    _invalidatePlaylistCache();
+    _playlistPathsMutatedSinceConcatSync = true;
+  }
+
+  void _remapActiveOrderForPlaylistRemoval(int removedPlaylistIndex) {
+    if (_activeSourceOrder.isEmpty) return;
+    final next = <int>[];
+    for (final pi in _activeSourceOrder) {
+      if (pi == removedPlaylistIndex) continue;
+      next.add(pi > removedPlaylistIndex ? pi - 1 : pi);
+    }
+    _activeSourceOrder = next;
+  }
+
+  void _remapActiveOrderForPlaylistInsertion(int insertedPlaylistIndex) {
+    if (_activeSourceOrder.isEmpty) return;
+    _activeSourceOrder = [
+      for (final pi in _activeSourceOrder)
+        pi >= insertedPlaylistIndex ? pi + 1 : pi,
+    ];
+  }
+
+  void _remapActiveOrderForPlaylistMove(
+    int fromPlaylistIndex,
+    int toPlaylistIndex,
+  ) {
+    if (_activeSourceOrder.isEmpty || fromPlaylistIndex == toPlaylistIndex) {
+      return;
+    }
+    _activeSourceOrder = [
+      for (final pi in _activeSourceOrder)
+        if (pi == fromPlaylistIndex)
+          toPlaylistIndex
+        else if (fromPlaylistIndex < toPlaylistIndex &&
+            pi > fromPlaylistIndex &&
+            pi <= toPlaylistIndex)
+          pi - 1
+        else if (fromPlaylistIndex > toPlaylistIndex &&
+            pi >= toPlaylistIndex &&
+            pi < fromPlaylistIndex)
+          pi + 1
+        else
+          pi,
+    ];
+  }
+
   TrackItem _trackAt(int playlistIndex) {
     final path = _playlistPaths[playlistIndex];
     return _libraryCatalog.trackForPath(path) ?? TrackItem.fromFilePath(path);
   }
 
-  void _setPlaylistPaths(List<String> paths) {
+  void _setPlaylistPaths(
+    List<String> paths, {
+    bool validateIndexNow = true,
+  }) {
     _playlistPaths = List<String>.from(paths);
-    _invalidatePlaylistCache();
+    _onPlaylistPathsMutated();
+    _debugValidateQueueConsistency(
+      'setPlaylistPaths',
+      checkIndexRange: validateIndexNow,
+    );
   }
 
   void _assignPlaylistFromTracks(List<TrackItem> tracks) {
-    _playlistPaths = [
+    _setPlaylistPaths([
       for (final t in tracks)
         if (t.filePath != null && t.filePath!.trim().isNotEmpty)
           t.filePath!.trim(),
-    ];
-    _invalidatePlaylistCache();
+    ]);
+  }
+
+  /// Debug-only queue invariants after mutations (not on position ticks).
+  void _debugValidateQueueConsistency(
+    String context, {
+    bool checkIndexRange = true,
+  }) {
+    assert(() {
+      try {
+        _playlistPaths.add('__test__');
+        _playlistPaths.removeLast();
+      } catch (e) {
+        debugPrint('[$context] _playlistPaths fixed-length: $e');
+        return false;
+      }
+
+      if (checkIndexRange &&
+          _playlistPaths.isNotEmpty &&
+          (_index < 0 || _index >= _playlistPaths.length)) {
+        debugPrint(
+          '[$context] _index=$_index out of range '
+          '(len=${_playlistPaths.length})',
+        );
+        return false;
+      }
+
+      if (_shuffle && _shuffleOrder.length != _playlistPaths.length) {
+        debugPrint(
+          '[$context] shuffleOrder.length=${_shuffleOrder.length} '
+          '!= paths.length=${_playlistPaths.length}',
+        );
+        return false;
+      }
+
+      if (_shuffle &&
+          _shuffleOrder.isNotEmpty &&
+          (_shufflePos < 0 || _shufflePos >= _shuffleOrder.length)) {
+        debugPrint(
+          '[$context] _shufflePos=$_shufflePos out of range '
+          '(shuffleLen=${_shuffleOrder.length})',
+        );
+        return false;
+      }
+
+      debugPrint(
+        '[$context] ok len=${_playlistPaths.length} '
+        '_index=$_index shuffle=$_shuffle',
+      );
+      return true;
+    }());
+  }
+
+  void _deferArtEnrichForCurrentAndNextInQueue() {
+    final logical = _logicalPlaylistIndex();
+    _deferMetadataEnrichForPlaylistIndex(logical);
+    final order = _effectiveQueueOrder();
+    final pos = order.indexOf(logical);
+    if (pos >= 0 && pos + 1 < order.length) {
+      _deferMetadataEnrichForPlaylistIndex(order[pos + 1]);
+    }
   }
 
   String? _pathAt(int playlistIndex) {
@@ -369,6 +512,11 @@ class PlayerController {
   DateTime? _postLoadConcatGuardUntil;
   int? _postLoadExpectedConcatIndex;
   bool _sourceNeedsReload = false;
+  int _queueMutationDepth = 0;
+
+  /// True after [_playlistPaths] content/order changes while concat index order
+  /// may still be `[0,1,2,…]` — must not skip concat resync on list equality alone.
+  bool _playlistPathsMutatedSinceConcatSync = false;
 
   /// Windows uses a single [AudioSource] for the current row only. After a successful
   /// [setAudioSource], this holds that file’s key so queue-only edits (reorder, play
@@ -414,11 +562,15 @@ class PlayerController {
 
   /// Dedupes [repeat-one] replay when both [currentIndexStream] and completion fire.
   bool _repeatOneReplayScheduled = false;
+  bool _repeatOneReplayInFlight = false;
 
   /// Load the current track first, then [add]/[insert] the rest in the background.
   static const int _fastStartConcatThreshold = 2;
 
   int _concatExpandGeneration = 0;
+
+  /// Playlist indices already added to concat during fast-start expand (play-next).
+  final Set<int> _expandSkipPlaylistIndices = <int>{};
 
   /// Avoid rebuilding the whole app (Library lists, etc.) on every [playerStateStream]
   /// tick — only notify when play/pause or processing state actually changes.
@@ -823,6 +975,7 @@ class PlayerController {
         state == ProcessingState.completed;
     final ignoreCompleted =
         _suppressTrackCompletedAdvance ||
+        _queueMutationDepth > 0 ||
         (_ignoreSpuriousPlaybackCompletedUntil != null &&
             DateTime.now().isBefore(_ignoreSpuriousPlaybackCompletedUntil!));
     if (enteredComplete && ignoreCompleted) {
@@ -850,6 +1003,8 @@ class PlayerController {
 
   Future<void> _handleTrackCompleted() async {
     if (_suppressTrackCompletedAdvance || _isLoadingSource) return;
+    if (_queueMutationDepth > 0) return;
+    if (_repeatOneReplayInFlight) return;
     if (_playlistPaths.isEmpty) return;
     if (_stopAtTrackEndForSleepTimer) {
       debugPrint('Sleep timer (end of song) triggered by natural completion');
@@ -869,12 +1024,7 @@ class PlayerController {
       return;
     }
     if (_repeat == PlaylistRepeatMode.one) {
-      final concatIndex = _concatIndexForLogical(_logicalPlaylistIndex());
-      if (concatIndex != null) {
-        _scheduleRepeatOneReplay(concatIndex);
-      } else {
-        unawaited(_replayCurrentTrackAtStart(context: 'repeat-one play'));
-      }
+      // Native LoopMode.one replays the current item without advancing.
       return;
     }
     if (_sourceNeedsReload) {
@@ -1058,18 +1208,31 @@ class PlayerController {
   /// Syncs in-memory concat bookkeeping with the queue without touching the decoder.
   /// Returns `true` when the reload was skipped.
   bool _skipWindowsSingleTrackReloadIfCurrentUnchanged() {
-    if (!_windowsSingleTrackReloadWouldBeNoOp()) return false;
+    if (!_useSingleTrackAudioSourceForPlatform()) {
+      return false;
+    }
+    if (!_windowsSingleTrackReloadWouldBeNoOp()) {
+      debugPrint(
+        '[windowsSkipReload] decoder path differs from current track → reload',
+      );
+      return false;
+    }
     final logical = _logicalPlaylistIndex();
     if (_playlistPaths.isEmpty ||
         logical < 0 ||
         logical >= _playlistPaths.length) {
+      debugPrint('[windowsSkipReload] invalid logical index → reload');
       return false;
     }
     _concatExpandGeneration++;
+    _expandSkipPlaylistIndices.clear();
     _activeSourceOrder = [logical];
     _sourceNeedsReload = false;
     _notifyTrackPlaybackQueue();
     positionNotifier.flush();
+    debugPrint(
+      '[windowsSkipReload] same file still playing → skip setAudioSource',
+    );
     return true;
   }
 
@@ -1211,6 +1374,7 @@ class PlayerController {
     for (var i = pos - 1; i >= 0; i--) {
       if (gen != _concatExpandGeneration || _concatSource != concat) return;
       final pi = fullOrder[i];
+      if (_expandSkipPlaylistIndices.contains(pi)) continue;
       final source = await _audioSourceForPlaylistIndex(
         pi,
         resolveArtUri: false,
@@ -1229,6 +1393,7 @@ class PlayerController {
     for (var i = pos + 1; i < fullOrder.length; i++) {
       if (gen != _concatExpandGeneration || _concatSource != concat) return;
       final pi = fullOrder[i];
+      if (_expandSkipPlaylistIndices.contains(pi)) continue;
       final source = await _audioSourceForPlaylistIndex(
         pi,
         resolveArtUri: false,
@@ -1282,6 +1447,7 @@ class PlayerController {
       const Duration(milliseconds: 650),
     );
     _sourceNeedsReload = false;
+    _playlistPathsMutatedSinceConcatSync = false;
     debugPrint(
       '_loadCurrentFastStart: playing index $logical, expanding '
       '${sourceOrder.length - 1} more tracks in background',
@@ -1294,18 +1460,44 @@ class PlayerController {
     return currentConcatIdx != null && concatIdx != currentConcatIdx;
   }
 
+  // Legacy repeat-one fallback kept for quick rollback during testing.
+  // ignore: unused_element
   void _scheduleRepeatOneReplay(int concatIndex) {
-    if (_repeatOneReplayScheduled) return;
+    if (_repeatOneReplayScheduled || _repeatOneReplayInFlight) return;
     _repeatOneReplayScheduled = true;
+    // Prevent an audible "next-track leak" between native auto-advance and replay.
+    unawaited(() async {
+      try {
+        _invalidatePlayResumeRetries();
+        await _player.pause();
+      } catch (_) {}
+    }());
     Future.delayed(const Duration(milliseconds: 20), () {
       _repeatOneReplayScheduled = false;
+      _repeatOneReplayInFlight = true;
       unawaited(
-        _replayCurrentTrackAtStart(
-          context: 'repeat-one replay',
-          concatIndex: concatIndex,
-        ),
+        () async {
+          try {
+            await _replayCurrentTrackAtStart(
+              context: 'repeat-one replay',
+              concatIndex: concatIndex,
+            );
+          } finally {
+            _repeatOneReplayInFlight = false;
+          }
+        }(),
       );
     });
+  }
+
+  Future<void> _applyNativeRepeatMode() async {
+    try {
+      await _player.setLoopMode(
+        _repeat == PlaylistRepeatMode.one ? LoopMode.one : LoopMode.off,
+      );
+    } catch (e, st) {
+      debugPrint('_applyNativeRepeatMode: $e\n$st');
+    }
   }
 
   Future<void> _replayCurrentTrackAtStart({
@@ -1344,6 +1536,7 @@ class PlayerController {
   void _onConcatIndexChanged(int? concatIdx) {
     if (concatIdx == null) return;
     if (_manualQueueAdvance) return;
+    if (_queueMutationDepth > 0) return;
 
     if (_postLoadConcatGuardUntil != null &&
         !DateTime.now().isBefore(_postLoadConcatGuardUntil!)) {
@@ -1424,12 +1617,11 @@ class PlayerController {
 
     // Repeat-one: concat auto-advances before [ProcessingState.completed]. Must run
     // before the [_sourceNeedsReload] guard — auto-advance changes concatIdx.
-    if (_repeat == PlaylistRepeatMode.one && _isConcatAutoAdvance(concatIdx)) {
-      final currentConcatIdx = _concatIndexForLogical(_logicalPlaylistIndex());
-      if (currentConcatIdx != null) {
-        _scheduleRepeatOneReplay(currentConcatIdx);
-        return;
-      }
+    if (_queueMutationDepth <= 0 &&
+        _repeat == PlaylistRepeatMode.one &&
+        _isConcatAutoAdvance(concatIdx)) {
+      // Ignore transient native index events; LoopMode.one should keep same item.
+      return;
     }
 
     // Queue was edited (play next, reorder) but native children are stale until reload.
@@ -1529,6 +1721,7 @@ class PlayerController {
     } else {
       _resetShuffleState();
     }
+    _debugValidateQueueConsistency('setPlaylistPaths.postIndex');
     _notifyTrackPlaybackQueue();
     await _loadCurrent();
     _sourceNeedsReload = false;
@@ -1731,8 +1924,7 @@ class PlayerController {
       _shufflePos = 0;
     }
     final oldLen = _playlistPaths.length;
-    _playlistPaths = [..._playlistPaths, ..._pathsForTracks(items)];
-    _invalidatePlaylistCache();
+    _setPlaylistPaths([..._playlistPaths, ..._pathsForTracks(items)]);
     _notifyTrackPlaybackQueue();
     if (wasEmpty) {
       _index = 0;
@@ -1778,7 +1970,7 @@ class PlayerController {
     }
     final trackCount = paths.length;
     final preserveShuffle = keepShuffleMode && _shuffle && trackCount > 1;
-    _setPlaylistPaths(paths);
+    _setPlaylistPaths(paths, validateIndexNow: false);
     _index = _playlistPaths.isEmpty
         ? 0
         : startIndex.clamp(0, _playlistPaths.length - 1);
@@ -1922,9 +2114,17 @@ class PlayerController {
       return false;
     }
     if (_activeSourceOrder.length != target.length) return false;
-    if (listEquals(_activeSourceOrder, target)) {
+    if (listEquals(_activeSourceOrder, target) &&
+        !_playlistPathsMutatedSinceConcatSync) {
       _sourceNeedsReload = false;
       return true;
+    }
+    if (listEquals(_activeSourceOrder, target) &&
+        _playlistPathsMutatedSinceConcatSync) {
+      debugPrint(
+        '_tryResyncConcatAfterQueueReorder: paths permuted, rebuilding concat '
+        'children for same index order',
+      );
     }
 
     final curPl = _logicalPlaylistIndex();
@@ -1935,6 +2135,8 @@ class PlayerController {
     if (newCurConcat < 0 || newCurConcat != curConcat) return false;
 
     _concatExpandGeneration++;
+    _expandSkipPlaylistIndices.clear();
+    _queueMutationDepth++;
     try {
       final concat = _concatSource!;
 
@@ -1976,11 +2178,117 @@ class PlayerController {
       if (!listEquals(_activeSourceOrder, target)) return false;
 
       _sourceNeedsReload = false;
+      _playlistPathsMutatedSinceConcatSync = false;
       return true;
     } catch (e, st) {
       debugPrint('_tryResyncConcatAfterQueueReorder: $e\n$st');
       return false;
+    } finally {
+      _queueMutationDepth--;
     }
+  }
+
+  /// Inserts [newPlaylistIndex] into the live concat immediately after the current
+  /// track when it is next in playback order (play-next without full reload).
+  Future<bool> _tryInsertAfterCurrentInConcat(int newPlaylistIndex) async {
+    if (!_canMutateConcatInPlace) return false;
+    if (newPlaylistIndex < 0 || newPlaylistIndex >= _playlistPaths.length) {
+      return false;
+    }
+
+    final target = _effectiveQueueOrder();
+    final curPl = _logicalPlaylistIndex();
+    final curPos = target.indexOf(curPl);
+    if (curPos < 0 || curPos + 1 >= target.length) return false;
+    if (target[curPos + 1] != newPlaylistIndex) return false;
+
+    if (_activeSourceOrder.contains(newPlaylistIndex)) return false;
+
+    final curConcat = _activeSourceOrder.indexOf(curPl);
+    if (curConcat < 0) {
+      debugPrint('[playNextInsert] current not in concat');
+      return false;
+    }
+
+    final source = await _audioSourceForPlaylistIndex(
+      newPlaylistIndex,
+      resolveArtUri: false,
+    );
+    if (source == null) return false;
+
+    final concat = _concatSource!;
+
+    _queueMutationDepth++;
+    try {
+      // Fast-start: only the current track is loaded; append the next item.
+      if (_activeSourceOrder.length == 1 && _activeSourceOrder.first == curPl) {
+        await concat.add(source);
+        _activeSourceOrder.add(newPlaylistIndex);
+        _expandSkipPlaylistIndices.add(newPlaylistIndex);
+        _sourceNeedsReload = false;
+        _playlistPathsMutatedSinceConcatSync = false;
+        debugPrint(
+          '[playNextInsert] fast-start append playlistIdx=$newPlaylistIndex',
+        );
+        return true;
+      }
+
+      final insertConcatIndex = curConcat + 1;
+      await concat.insert(insertConcatIndex, source);
+      _activeSourceOrder.insert(insertConcatIndex, newPlaylistIndex);
+      _sourceNeedsReload = false;
+      _playlistPathsMutatedSinceConcatSync = false;
+      debugPrint(
+        '[playNextInsert] in-place insert concatIdx=$insertConcatIndex '
+        'playlistIdx=$newPlaylistIndex activeLen=${_activeSourceOrder.length}',
+      );
+      return true;
+    } catch (e, st) {
+      debugPrint('[playNextInsert] failed: $e\n$st');
+      return false;
+    } finally {
+      _queueMutationDepth--;
+    }
+  }
+
+  Future<void> _applyPlayTrackNextNative(int newPlaylistIndex) async {
+    final sw = Stopwatch()..start();
+
+    _suppressTrackCompletedAdvance = true;
+    _ignoreSpuriousPlaybackCompletedUntil = DateTime.now().add(
+      const Duration(milliseconds: 1200),
+    );
+    try {
+      final inserted = await _tryInsertAfterCurrentInConcat(newPlaylistIndex);
+      debugPrint('[playTrackNext] surgicalInsert=$inserted');
+
+      if (!inserted) {
+        if (await _tryResyncConcatAfterQueueReorder()) {
+          debugPrint('[playTrackNext] concat resync ok');
+          _sourceNeedsReload = false;
+        } else {
+          final skipped = _skipWindowsSingleTrackReloadIfCurrentUnchanged();
+          debugPrint('[playTrackNext] windowsSkipReload=$skipped');
+          if (!skipped) {
+            _sourceNeedsReload = true;
+            if (_player.playing) {
+              // Avoid an audible hiccup while adding "play next" during active playback.
+              // We defer the heavy reload to the next transition/skip.
+              debugPrint('[playTrackNext] defer reload until next transition');
+            } else {
+              debugPrint('[playTrackNext] → full reload');
+              await _rebuildAudioSourceForQueueMutation();
+            }
+          }
+        }
+      }
+    } finally {
+      _suppressTrackCompletedAdvance = false;
+    }
+
+    sw.stop();
+    debugPrint('[playTrackNext] native END ${sw.elapsedMilliseconds}ms');
+    _debugValidateQueueConsistency('afterPlayNext');
   }
 
   /// Inserts [track] so it plays immediately after the current song.
@@ -2000,6 +2308,13 @@ class PlayerController {
     final trackPath = _pathForTrack(track);
     if (trackPath == null) return false;
 
+    debugPrint(
+      '[playTrackNext] START platform=${defaultTargetPlatform.name} '
+      'shuffle=$_shuffle concatReady=${_concatSource != null} '
+      'activeLen=${_activeSourceOrder.length} '
+      'targetLen=${_effectiveQueueOrder().length}',
+    );
+
     int? existingIx;
     for (var i = 0; i < _playlistPaths.length; i++) {
       if (_sameQueuePathAndTrack(_playlistPaths[i], track)) {
@@ -2009,6 +2324,7 @@ class PlayerController {
     }
 
     final curPl = _logicalPlaylistIndex();
+    late final int newPlaylistIndex;
 
     if (!_shuffle) {
       if (existingIx == curPl) {
@@ -2016,45 +2332,33 @@ class PlayerController {
       }
       if (existingIx != null) {
         _playlistPaths.removeAt(existingIx);
-        _invalidatePlaylistCache();
+        _remapActiveOrderForPlaylistRemoval(existingIx);
+        _onPlaylistPathsMutated();
         if (existingIx < _index) {
           _index--;
         }
       }
       var insertAt = _insertPlaylistIndexAfterCurrent();
-      if (existingIx != null && existingIx < insertAt) {
-        insertAt--;
+      newPlaylistIndex = insertAt.clamp(0, _playlistPaths.length);
+      _remapActiveOrderForPlaylistInsertion(newPlaylistIndex);
+      _playlistPaths.insert(newPlaylistIndex, trackPath);
+      _onPlaylistPathsMutated();
+    } else {
+      if (existingIx != null && existingIx == curPl) {
+        return false;
       }
-      _playlistPaths.insert(
-        insertAt.clamp(0, _playlistPaths.length),
-        trackPath,
-      );
-      _invalidatePlaylistCache();
-      _sourceNeedsReload = true;
-      _notifyTrackPlaybackQueue();
-      if (!await _tryResyncConcatAfterQueueReorder()) {
-        await _rebuildAudioSourceForQueueMutation();
+      if (existingIx != null) {
+        _removePlaylistIndexWhileShuffling(existingIx);
       }
-      return true;
+      _playlistPaths.add(trackPath);
+      _onPlaylistPathsMutated();
+      newPlaylistIndex = _playlistPaths.length - 1;
+      final insertPos = (_shufflePos + 1).clamp(0, _shuffleOrder.length);
+      _shuffleOrder.insert(insertPos, newPlaylistIndex);
     }
 
-    if (existingIx != null && existingIx == curPl) {
-      return false;
-    }
-    if (existingIx != null) {
-      _removePlaylistIndexWhileShuffling(existingIx);
-    }
-    _playlistPaths.add(trackPath);
-    _invalidatePlaylistCache();
-    final newIx = _playlistPaths.length - 1;
-    final insertPos = (_shufflePos + 1).clamp(0, _shuffleOrder.length);
-    _shuffleOrder.insert(insertPos, newIx);
-
-    _sourceNeedsReload = true;
     _notifyTrackPlaybackQueue();
-    if (!await _tryResyncConcatAfterQueueReorder()) {
-      await _rebuildAudioSourceForQueueMutation();
-    }
+    await _applyPlayTrackNextNative(newPlaylistIndex);
     return true;
   }
 
@@ -2063,7 +2367,8 @@ class PlayerController {
       (currentTrack?.filePath ?? '').trim(),
     );
     _playlistPaths.removeAt(rm);
-    _invalidatePlaylistCache();
+    _remapActiveOrderForPlaylistRemoval(rm);
+    _onPlaylistPathsMutated();
     final nextOrder = <int>[];
     for (final oi in _shuffleOrder) {
       if (oi == rm) continue;
@@ -2398,13 +2703,15 @@ class PlayerController {
     if (validKeys.isEmpty) return false;
 
     final before = _playlistPaths.length;
-    _playlistPaths.removeWhere((path) {
+    final pruned = <String>[];
+    for (final path in _playlistPaths) {
       final k = canonicalMusicLibraryPathKey(path);
-      if (k.isEmpty) return true;
-      return !validKeys.contains(k);
-    });
-    if (_playlistPaths.length == before) return false;
-    _invalidatePlaylistCache();
+      if (k.isNotEmpty && validKeys.contains(k)) {
+        pruned.add(path);
+      }
+    }
+    if (pruned.length == before) return false;
+    _setPlaylistPaths(pruned);
 
     if (_playlistPaths.isEmpty) {
       _index = 0;
@@ -2445,7 +2752,7 @@ class PlayerController {
         !isCurrent && await _removeConcatChildAtPlaylistIndex(i);
 
     _playlistPaths.removeAt(i);
-    _invalidatePlaylistCache();
+    _onPlaylistPathsMutated();
 
     final len = _playlistPaths.length;
     if (len == 0) {
@@ -2525,6 +2832,7 @@ class PlayerController {
     if (oldOrderIndex == newOrderIndex) return;
 
     final curPl = _logicalPlaylistIndex();
+    final curOrderPos = order.indexOf(curPl);
 
     if (_shuffle) {
       final perm = List<int>.from(_shuffleOrder);
@@ -2538,19 +2846,42 @@ class PlayerController {
       final perm = List<int>.from(order);
       final movedPl = perm.removeAt(oldOrderIndex);
       perm.insert(newOrderIndex, movedPl);
-      _playlistPaths = perm.map((i) => paths[i]).toList(growable: false);
-      _invalidatePlaylistCache();
+      _setPlaylistPaths([for (final i in perm) paths[i]]);
       final newPos = perm.indexOf(curPl);
       _index = newPos >= 0
           ? newPos
           : _index.clamp(0, _playlistPaths.length - 1);
     }
 
-    _sourceNeedsReload = true;
     _notifyTrackPlaybackQueue();
-    if (!await _tryResyncConcatAfterQueueReorder()) {
+    final crossesCurrent = curOrderPos >= 0 &&
+        ((oldOrderIndex < curOrderPos && newOrderIndex >= curOrderPos) ||
+            (oldOrderIndex > curOrderPos && newOrderIndex <= curOrderPos));
+    if (crossesCurrent && _player.playing) {
+      // Crossing the currently playing row can force decoder churn on Android.
+      // Keep playback stable now; rebuild lazily on next transition.
+      // Native concat remains in old order for now, so remap logical indices.
+      _remapActiveOrderForPlaylistMove(oldOrderIndex, newOrderIndex);
+      _sourceNeedsReload = true;
+      _debugValidateQueueConsistency('afterReorder.deferCrossCurrent');
+      return;
+    }
+    if (await _tryResyncConcatAfterQueueReorder()) {
+      _sourceNeedsReload = false;
+    } else {
+      if (_player.playing) {
+        // Concat resync can fail while fast-start/partial concat is active.
+        // Avoid an immediate decoder rebuild mid-play; keep mappings coherent
+        // and lazily rebuild on the next transition.
+        _remapActiveOrderForPlaylistMove(oldOrderIndex, newOrderIndex);
+        _sourceNeedsReload = true;
+        _debugValidateQueueConsistency('afterReorder.deferResyncFailWhilePlaying');
+        return;
+      }
+      _sourceNeedsReload = true;
       await _rebuildAudioSourceForQueueMutation();
     }
+    _debugValidateQueueConsistency('afterReorder');
   }
 
   Future<void> _loadCurrent({
@@ -2716,6 +3047,7 @@ class PlayerController {
           const Duration(milliseconds: 650),
         );
         _sourceNeedsReload = false;
+        _playlistPathsMutatedSinceConcatSync = false;
       } // !useFastStart
     } catch (e, st) {
       _loadedWindowsSingleTrackPathKey = null;
@@ -2775,7 +3107,7 @@ class PlayerController {
       (p) =>
           canonicalMusicLibraryPathKey(p) == canonicalMusicLibraryPathKey(path),
     );
-    _invalidatePlaylistCache();
+    _onPlaylistPathsMutated();
     final beforeCatalog = _libraryCatalog.length;
     _libraryCatalog.removeAtPath(path);
 
@@ -3080,27 +3412,87 @@ class PlayerController {
       await _resumePlaybackAfterLoad(context: playContext);
     });
 
+    final currentLogical = _logicalPlaylistIndex();
+    final nativeConcat = _player.currentIndex;
+    final nativeLogical = (nativeConcat != null &&
+            nativeConcat >= 0 &&
+            nativeConcat < _activeSourceOrder.length)
+        ? _activeSourceOrder[nativeConcat]
+        : null;
+    if (_sourceNeedsReload &&
+        _player.playing &&
+        currentLogical == playlistIndex &&
+        nativeLogical == playlistIndex &&
+        !_useSingleTrackAudioSourceForPlatform()) {
+      // Deferred queue rebuild is pending, but caller is "seeking" to the same
+      // currently playing track. Avoid tearing down codec mid-play.
+      debugPrint(
+        '[seekFast] defer pending reload for current track '
+        'target=$playlistIndex nativeLogical=$nativeLogical',
+      );
+      return;
+    }
+
     if (_sourceNeedsReload || _useSingleTrackAudioSourceForPlatform()) {
       await reloadAndPlay();
       return;
     }
-    final order = _activeSourceOrder.isNotEmpty
-        ? _activeSourceOrder
-        : _effectiveQueueOrder();
-    final concatIndex = order.indexOf(playlistIndex);
-    if (concatIndex < 0) {
+
+    final targetOrder = _effectiveQueueOrder();
+    final activeLen = _activeSourceOrder.length;
+    final concatIndex = _activeSourceOrder.indexOf(playlistIndex);
+    final partialConcat =
+        activeLen > 0 && activeLen != targetOrder.length;
+    final orderStale = activeLen > 0 &&
+        !partialConcat &&
+        !listEquals(_activeSourceOrder, targetOrder);
+
+    debugPrint(
+      '[seekFast] '
+      'target=$playlistIndex '
+      'concatIdx=$concatIndex '
+      'effectiveLen=${targetOrder.length} '
+      'activeLen=$activeLen '
+      'partial=$partialConcat '
+      'stale=$orderStale '
+      'sourceNeedsReload=$_sourceNeedsReload '
+      'path=${_playlistPaths.elementAtOrNull(playlistIndex)}',
+    );
+
+    // Full concat out of sync with Dart queue (e.g. reorder without resync).
+    if (orderStale) {
+      debugPrint('[seekFast] stale full concat — reloading');
       await reloadAndPlay();
       return;
     }
+
+    // Target not loaded in concat yet (fast-start expand or play-next pending).
+    if (concatIndex < 0) {
+      debugPrint('[seekFast] target not in concat — reloading');
+      await reloadAndPlay();
+      return;
+    }
+
     try {
       await _player.seek(Duration.zero, index: concatIndex);
       await _waitForPlayerPreparedAfterSourceChange();
       final actual = _player.currentIndex;
       if (actual != null && actual != concatIndex) {
+        debugPrint(
+          '[seekFast] index mismatch actual=$actual expected=$concatIndex — reloading',
+        );
         await reloadAndPlay();
         return;
       }
-      await _playSafely(context: playContext);
+      _applyConcatIndexChanged(concatIndex);
+      _sourceNeedsReload = false;
+      _deferArtEnrichForCurrentAndNextInQueue();
+      if (!_player.playing) {
+        await _playSafely(context: playContext);
+      }
+      _prewarmPlaybackAlbumArt();
+      _scheduleNotificationArtRefresh();
+      _notifyTrackAndPlayback();
     } catch (_) {
       await reloadAndPlay();
     }
@@ -3264,6 +3656,7 @@ class PlayerController {
       PlaylistRepeatMode.all => PlaylistRepeatMode.one,
       PlaylistRepeatMode.one => PlaylistRepeatMode.off,
     };
+    unawaited(_applyNativeRepeatMode());
     _notifyTrackPlaybackQueue();
   }
 
@@ -3315,6 +3708,7 @@ class PlayerController {
         : Set<String>.from(pathScopeKeys);
 
     _repeat = repeat;
+    await _applyNativeRepeatMode();
 
     _assignPlaylistFromTracks(queue);
 
@@ -3380,7 +3774,12 @@ class PlayerController {
     return true;
   }
 
+  /// Drops Dart listeners/notifiers. Does not dispose the native player (see
+  /// [shutdownNativePlayer]) so hot restart does not orphan a second ExoPlayer.
   void dispose() {
+    if (identical(_activeCoordinator, this)) {
+      _activeCoordinator = null;
+    }
     artAvailability.dispose();
     queue.cancelThrottle();
     _notificationArtRefreshDebounce?.cancel();
@@ -3394,18 +3793,12 @@ class PlayerController {
     _devicesChangedSub?.cancel();
     _devicesChangedSub = null;
     _concatIndexSub?.cancel();
+    _concatIndexSub = null;
     _playerStateSub.cancel();
     positionNotifier.dispose();
     track.dispose();
     playback.dispose();
     queue.dispose();
-    unawaited(() async {
-      try {
-        await _player.dispose();
-      } catch (e, st) {
-        debugPrint('AudioPlayer dispose error: $e\n$st');
-      }
-    }());
   }
 }
 

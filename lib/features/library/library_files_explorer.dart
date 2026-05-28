@@ -623,10 +623,8 @@ class LibraryFilesExplorerState extends State<LibraryFilesExplorer> {
         : scanned
               .indexWhere((p0) => p0 == startFilePath)
               .clamp(0, scanned.length - 1);
-    final pathsToPlay = startFilePath == null
-        ? scanned
-        : scanned.sublist(anchorInFull);
-    final playlistStartIndex = startFilePath == null ? anchorInFull : 0;
+    final pathsToPlay = scanned;
+    final playlistStartIndex = anchorInFull;
     await player.setPlaylistPathsAndPlay(
       pathsToPlay,
       startIndex: playlistStartIndex,
