@@ -18,6 +18,7 @@ import '../../services/recent_list_limits_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/song_metadata_cache.dart';
+import '../../services/songs_alpha_index_store.dart';
 import '../../services/user_playlists_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/daisy_background.dart';
@@ -138,10 +139,41 @@ class LibraryScreen extends StatefulWidget {
 
 class LibraryScreenState extends State<LibraryScreen>
     with TickerProviderStateMixin {
+  static const List<String> _songsAlphabetIndexLetters = <String>[
+    'A',
+    'B',
+    'C',
+    'D',
+    'E',
+    'F',
+    'G',
+    'H',
+    'I',
+    'J',
+    'K',
+    'L',
+    'M',
+    'N',
+    'O',
+    'P',
+    'Q',
+    'R',
+    'S',
+    'T',
+    'U',
+    'V',
+    'W',
+    'X',
+    'Y',
+    'Z',
+    '#',
+  ];
   final TextEditingController _searchController = TextEditingController();
   LibrarySearchQuery _appliedSearchQuery = LibrarySearchQuery.parse('');
   Timer? _searchFilterDebounce;
-  static const Duration _searchFilterDebounceDelay = Duration(milliseconds: 200);
+  static const Duration _searchFilterDebounceDelay = Duration(
+    milliseconds: 200,
+  );
 
   List<int>? _songsTabIndicesCache;
   int _songsTabIndicesCacheKey = 0;
@@ -241,6 +273,12 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   LibraryTrackSortMode _songSortMode = LibraryTrackSortMode.folderOrder;
+  bool _songsAlphabetExperimentEnabled = false;
+  bool _songsAlphabetIndexEnabled = false;
+
+  bool get _songsAlphabetQuickIndexVisible =>
+      _songsAlphabetExperimentEnabled && _songsAlphabetIndexEnabled;
+  String? _songsScrollSectionLetter;
 
   bool _songsMultiSelectMode = false;
   final Set<String> _songsSelectedPathKeys = {};
@@ -306,10 +344,12 @@ class LibraryScreenState extends State<LibraryScreen>
     _tabController.addListener(_onTabChanged);
     LibraryTabsStore.revision.addListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.addListener(_onSongSortStoreRevision);
+    SongsAlphaIndexStore.revision.addListener(_onSongsAlphaIndexStoreRevision);
     RecentListLimitsStore.revision.addListener(_onRecentLimitsRevision);
     UserPlaylistsStore.revision.addListener(_onUserPlaylistsRevision);
     unawaited(FavoriteSongsStore.ensureLoaded());
     unawaited(_reloadSongSortMode());
+    unawaited(_reloadSongsAlphabetIndexEnabled());
     unawaited(_syncTabsFromStore());
     unawaited(_reloadUserPlaylists());
   }
@@ -360,6 +400,21 @@ class LibraryScreenState extends State<LibraryScreen>
 
   void _onSongSortStoreRevision() {
     unawaited(_reloadSongSortMode());
+  }
+
+  Future<void> _reloadSongsAlphabetIndexEnabled() async {
+    final experiment = await SongsAlphaIndexStore.loadExperimentEnabled();
+    final enabled = await SongsAlphaIndexStore.loadEnabled();
+    if (mounted) {
+      setState(() {
+        _songsAlphabetExperimentEnabled = experiment;
+        _songsAlphabetIndexEnabled = enabled;
+      });
+    }
+  }
+
+  void _onSongsAlphaIndexStoreRevision() {
+    unawaited(_reloadSongsAlphabetIndexEnabled());
   }
 
   void _onRecentLimitsRevision() {
@@ -436,9 +491,7 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   List<String> _orderedSelectedPaths(List<String> orderedPaths) {
-    return orderedPaths
-        .where((p) => _isSongPathSelected(p))
-        .toList();
+    return orderedPaths.where((p) => _isSongPathSelected(p)).toList();
   }
 
   void _selectAllVisibleSongs(List<String> orderedPaths) {
@@ -573,6 +626,9 @@ class LibraryScreenState extends State<LibraryScreen>
     _nowPlayingListScrollController.dispose();
     LibraryTabsStore.revision.removeListener(_onLibraryTabsRevision);
     LibraryTrackSortStore.revision.removeListener(_onSongSortStoreRevision);
+    SongsAlphaIndexStore.revision.removeListener(
+      _onSongsAlphaIndexStoreRevision,
+    );
     RecentListLimitsStore.revision.removeListener(_onRecentLimitsRevision);
     UserPlaylistsStore.revision.removeListener(_onUserPlaylistsRevision);
     super.dispose();
@@ -630,9 +686,11 @@ class LibraryScreenState extends State<LibraryScreen>
   void _prewarmSongsListArt(List<TrackItem> tracks, List<int> filteredIndices) {
     if (filteredIndices.isEmpty) return;
     final paths = <String>[];
-    for (var i = 0;
-        i < filteredIndices.length && paths.length < _kSongsArtPrewarmRows;
-        i++) {
+    for (
+      var i = 0;
+      i < filteredIndices.length && paths.length < _kSongsArtPrewarmRows;
+      i++
+    ) {
       final p = tracks[filteredIndices[i]].filePath?.trim();
       if (p != null && p.isNotEmpty) paths.add(p);
     }
@@ -648,9 +706,7 @@ class LibraryScreenState extends State<LibraryScreen>
     _songsArtEnrichDebounce?.cancel();
     _songsArtEnrichDebounce = Timer(const Duration(milliseconds: 400), () {
       if (!mounted) return;
-      unawaited(
-        _enrichVisibleSongsArt(tracks, filteredIndices, player),
-      );
+      unawaited(_enrichVisibleSongsArt(tracks, filteredIndices, player));
     });
   }
 
@@ -663,11 +719,11 @@ class LibraryScreenState extends State<LibraryScreen>
       return;
     }
     final position = _songsScrollController.position;
-    final first = (position.pixels / _kSongsRowStride)
-        .floor()
-        .clamp(0, filteredIndices.length - 1);
-    final visible =
-        (position.viewportDimension / _kSongsRowStride).ceil() + 4;
+    final first = (position.pixels / _kSongsRowStride).floor().clamp(
+      0,
+      filteredIndices.length - 1,
+    );
+    final visible = (position.viewportDimension / _kSongsRowStride).ceil() + 4;
     final end = min(first + visible, filteredIndices.length);
 
     for (var i = first; i < end; i++) {
@@ -961,8 +1017,7 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabId.recentlyAdded ||
     LibraryTabId.favourites ||
     LibraryTabId.recentlyPlayed ||
-    LibraryTabId.nowPlayingList =>
-      SearchHelpText.libraryTrackFieldHint,
+    LibraryTabId.nowPlayingList => SearchHelpText.libraryTrackFieldHint,
     LibraryTabId.playlist => SearchHelpText.playlistTabFieldHint,
   };
 
@@ -989,9 +1044,10 @@ class LibraryScreenState extends State<LibraryScreen>
       if (query.matchesTrack(t)) return true;
       // For title/default searches also fall back to filename matching.
       if (query.field == LibrarySearchField.title) {
-        return p.basenameWithoutExtension(path).toLowerCase().contains(
-              query.term,
-            ) ||
+        return p
+                .basenameWithoutExtension(path)
+                .toLowerCase()
+                .contains(query.term) ||
             path.toLowerCase().contains(query.term);
       }
       return false;
@@ -1002,8 +1058,7 @@ class LibraryScreenState extends State<LibraryScreen>
   static TrackItem _trackForPath(
     String path,
     Map<String, TrackItem> libraryByPathKey,
-  ) =>
-      trackForPathKey(path, libraryByPathKey);
+  ) => trackForPathKey(path, libraryByPathKey);
 
   int _playlistIndexForPath(
     String path,
@@ -1025,17 +1080,14 @@ class LibraryScreenState extends State<LibraryScreen>
     if (orderedPaths.isEmpty) return;
     final player = PlayerController.of(context);
     final safeStart = startIndex.clamp(0, orderedPaths.length - 1);
-    // Queue from the tapped song forward so ExoPlayer does not build thousands of
-    // [AudioSource] children before the first [play] (see [_loadCurrentFastStart]).
-    final slicePaths = orderedPaths.sublist(safeStart);
     if (pathKeyScope != null) {
       player.setPlaybackPathKeyScope(pathKeyScope, reloadQueue: false);
     } else {
       player.setPlaybackPathKeyScope(null, reloadQueue: false);
     }
     await player.setPlaylistPathsAndPlay(
-      slicePaths,
-      startIndex: 0,
+      orderedPaths,
+      startIndex: safeStart,
       playbackOriginTab: playbackOriginTab,
       playbackOriginUserPlaylistId: playbackOriginUserPlaylistId,
       keepShuffleMode: true,
@@ -1123,9 +1175,7 @@ class LibraryScreenState extends State<LibraryScreen>
     LibrarySearchQuery query,
   ) {
     if (query.isEmpty) return all;
-    return all
-        .where((e) => query.matchesText(e.name))
-        .toList();
+    return all.where((e) => query.matchesText(e.name)).toList();
   }
 
   Future<void> _showUserPlaylistSheet(
@@ -1327,7 +1377,9 @@ class LibraryScreenState extends State<LibraryScreen>
                                               horizontal: 12,
                                               vertical: 4,
                                             ),
-                                        leading: TrackListAlbumArt(track: track),
+                                        leading: TrackListAlbumArt(
+                                          track: track,
+                                        ),
                                         title: Text(
                                           track.title,
                                           maxLines: 1,
@@ -1679,11 +1731,11 @@ class LibraryScreenState extends State<LibraryScreen>
     final inSongsSelect = onSongsTab && _songsMultiSelectMode;
 
     return PopScope(
-              canPop: !inSongsSelect,
-              onPopInvokedWithResult: (didPop, _) {
-                if (didPop) return;
-                _exitSongsMultiSelectMode();
-              },
+      canPop: !inSongsSelect,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _exitSongsMultiSelectMode();
+      },
       child: DaisyBackground(
         baseColor: pal.scaffoldBackground,
         child: SafeArea(
@@ -1700,230 +1752,280 @@ class LibraryScreenState extends State<LibraryScreen>
                     browsePathKeys,
                   );
                   final libraryByPathKey = libraryTracksByPathKey(tracks);
-                  final queueIndexByPathKey =
-                      playlistIndexByPathKey(player.playlistPaths);
+                  final queueIndexByPathKey = playlistIndexByPathKey(
+                    player.playlistPaths,
+                  );
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          if (inSongsSelect)
-                            IconButton(
-                              icon: const Icon(Icons.close_rounded),
-                              color: pal.onScaffold,
-                              tooltip: 'Cancel selection',
-                              onPressed: _exitSongsMultiSelectMode,
-                            )
-                          else
-                            IconButton(
-                              icon: const Icon(Icons.menu_rounded),
-                              color: pal.onScaffold,
-                              tooltip: 'Open menu',
-                              onPressed: widget.onOpenDrawer,
-                            ),
-                          Expanded(
-                            child: inSongsSelect
-                                ? Text(
-                                    _songsSelectedPathKeys.isEmpty
-                                        ? 'Select songs'
-                                        : '${_songsSelectedPathKeys.length} selected',
-                                    style: theme.textTheme.titleMedium?.copyWith(
-                                      color: pal.onScaffold,
-                                      fontWeight: FontWeight.w600,
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            if (inSongsSelect)
+                              IconButton(
+                                icon: const Icon(Icons.close_rounded),
+                                color: pal.onScaffold,
+                                tooltip: 'Cancel selection',
+                                onPressed: _exitSongsMultiSelectMode,
+                              )
+                            else
+                              IconButton(
+                                icon: const Icon(Icons.menu_rounded),
+                                color: pal.onScaffold,
+                                tooltip: 'Open menu',
+                                onPressed: widget.onOpenDrawer,
+                              ),
+                            Expanded(
+                              child: inSongsSelect
+                                  ? Text(
+                                      _songsSelectedPathKeys.isEmpty
+                                          ? 'Select songs'
+                                          : '${_songsSelectedPathKeys.length} selected',
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                            color: pal.onScaffold,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    )
+                                  : AnimatedBuilder(
+                                      animation: _searchController,
+                                      builder: (context, _) {
+                                        return TextField(
+                                          key: librarySearchFieldKey,
+                                          controller: _searchController,
+                                          textInputAction:
+                                              TextInputAction.search,
+                                          keyboardType: TextInputType.text,
+                                          onSubmitted: (_) => FocusManager
+                                              .instance
+                                              .primaryFocus
+                                              ?.unfocus(),
+                                          onTapOutside: (_) => FocusManager
+                                              .instance
+                                              .primaryFocus
+                                              ?.unfocus(),
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                                color: pal.onScaffold,
+                                                fontSize: 15,
+                                              ),
+                                          decoration: _searchDecoration(
+                                            pal,
+                                            theme,
+                                            hintText: hint,
+                                          ),
+                                        );
+                                      },
                                     ),
-                                  )
-                                : AnimatedBuilder(
-                                    animation: _searchController,
-                                    builder: (context, _) {
-                                      return TextField(
-                                        key: librarySearchFieldKey,
-                                        controller: _searchController,
-                                        textInputAction: TextInputAction.search,
-                                        keyboardType: TextInputType.text,
-                                        onSubmitted: (_) =>
-                                            FocusManager.instance.primaryFocus
-                                                ?.unfocus(),
-                                        onTapOutside: (_) =>
-                                            FocusManager.instance.primaryFocus
-                                                ?.unfocus(),
-                                        style: theme.textTheme.bodyMedium
-                                            ?.copyWith(
-                                          color: pal.onScaffold,
-                                          fontSize: 15,
-                                        ),
-                                        decoration: _searchDecoration(
-                                          pal,
-                                          theme,
-                                          hintText: hint,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                          ),
-                          if (inSongsSelect) ...[
-                            TextButton(
-                              onPressed: songsTabIndices.isEmpty
-                                  ? null
-                                  : () {
-                                      final paths = songsTabIndices
-                                          .map((i) => tracks[i].filePath)
-                                          .whereType<String>()
-                                          .toList();
-                                      final allSelected = paths.isNotEmpty &&
-                                          paths.every(_isSongPathSelected);
-                                      setState(() {
-                                        if (allSelected) {
-                                          _songsSelectedPathKeys.clear();
-                                        } else {
-                                          _selectAllVisibleSongs(paths);
-                                        }
-                                      });
-                                    },
-                              child: Text(
-                                songsTabIndices.isEmpty
-                                    ? 'All'
+                            ),
+                            if (inSongsSelect) ...[
+                              TextButton(
+                                onPressed: songsTabIndices.isEmpty
+                                    ? null
                                     : () {
                                         final paths = songsTabIndices
                                             .map((i) => tracks[i].filePath)
                                             .whereType<String>()
                                             .toList();
-                                        final allSelected = paths.isNotEmpty &&
+                                        final allSelected =
+                                            paths.isNotEmpty &&
                                             paths.every(_isSongPathSelected);
-                                        return allSelected ? 'None' : 'All';
-                                      }(),
-                                style: TextStyle(
-                                  color: context.controlAccent,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ] else ...[
-                            IconButton(
-                              icon: const Icon(Icons.refresh_rounded),
-                              color: pal.onScaffold,
-                              tooltip: 'Refresh library',
-                              onPressed: widget.onRefreshLibrary,
-                            ),
-                            if (onSongsTab) ...[
-                              IconButton(
-                                icon: const Icon(Icons.checklist_rounded),
-                                color: pal.onScaffold,
-                                tooltip: 'Select songs',
-                                onPressed: _enterSongsMultiSelectMode,
-                              ),
-                              PopupMenuButton<LibraryTrackSortMode>(
-                                tooltip: 'Sort songs',
-                                icon: Icon(
-                                  Icons.sort_rounded,
-                                  color: context.appliedThemePalette ==
-                                          AppThemePalette.ivy
-                                      ? const Color(0xFF1C1C1E)
-                                      : pal.onScaffold,
-                                ),
-                                padding: EdgeInsets.zero,
-                                onSelected: (mode) async {
-                                  await LibraryTrackSortStore.save(mode);
-                                },
-                                itemBuilder: (context) {
-                                  final isIvy = context.appliedThemePalette ==
-                                      AppThemePalette.ivy;
-                                  return [
-                                    for (final mode
-                                        in LibraryTrackSortMode.values)
-                                      CheckedPopupMenuItem<
-                                          LibraryTrackSortMode>(
-                                        value: mode,
-                                        checked: mode == _songSortMode,
-                                        child: Text(
-                                          mode.menuLabel,
-                                          style: isIvy
-                                              ? const TextStyle(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w600,
-                                                )
-                                              : null,
-                                        ),
-                                      ),
-                                  ];
-                                },
-                              ),
-                            ] else
-                              const SizedBox(width: 48),
-                          ],
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: context.appliedThemePalette == AppThemePalette.ivy
-                          ? _IvyLibrarySegmentedTabBar(
-                              controller: _tabController,
-                              tabs: _visibleTabs,
-                            )
-                          : TabBar(
-                              key: ObjectKey(_tabController),
-                              controller: _tabController,
-                              isScrollable: true,
-                              padding: const EdgeInsets.only(left: 2, right: 8),
-                              labelPadding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                              ),
-                              tabAlignment: TabAlignment.start,
-                              indicatorColor: pal.onScaffold,
-                              indicatorWeight: 2.8,
-                              indicatorSize: TabBarIndicatorSize.label,
-                              labelColor: pal.onScaffold,
-                              unselectedLabelColor: pal.textMuted.withValues(
-                                alpha: 0.76,
-                              ),
-                              dividerColor: pal.onScaffold.withValues(alpha: 0.14),
-                              dividerHeight: 1,
-                              labelStyle: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.2,
-                                fontSize: 15,
-                              ),
-                              unselectedLabelStyle: theme.textTheme.titleSmall
-                                  ?.copyWith(
-                                    fontWeight: FontWeight.w500,
-                                    letterSpacing: -0.2,
-                                    fontSize: 15,
+                                        setState(() {
+                                          if (allSelected) {
+                                            _songsSelectedPathKeys.clear();
+                                          } else {
+                                            _selectAllVisibleSongs(paths);
+                                          }
+                                        });
+                                      },
+                                child: Text(
+                                  songsTabIndices.isEmpty
+                                      ? 'All'
+                                      : () {
+                                          final paths = songsTabIndices
+                                              .map((i) => tracks[i].filePath)
+                                              .whereType<String>()
+                                              .toList();
+                                          final allSelected =
+                                              paths.isNotEmpty &&
+                                              paths.every(_isSongPathSelected);
+                                          return allSelected ? 'None' : 'All';
+                                        }(),
+                                  style: TextStyle(
+                                    color: context.controlAccent,
+                                    fontWeight: FontWeight.w600,
                                   ),
-                              splashFactory: NoSplash.splashFactory,
-                              overlayColor: WidgetStateProperty.all<Color>(
-                                Colors.transparent,
+                                ),
                               ),
-                              tabs: [
-                                for (final id in _visibleTabs)
-                                  Tab(text: id.shortTitle),
-                              ],
-                            ),
-                    ),
-                    Expanded(
-                      child: TabBarView(
-                        key: ObjectKey(_tabController),
-                        controller: _tabController,
-                        children: [
-                          for (final id in _visibleTabs)
-                            _libraryTabPage(
-                              id,
-                              theme,
-                              context,
-                              pal,
-                              tracks,
-                              libraryByPathKey,
-                              queueIndexByPathKey,
-                              songsTabIndices,
-                              player,
-                              browsePathKeys,
-                              searchQuery,
-                            ),
-                        ],
+                            ] else ...[
+                              IconButton(
+                                icon: const Icon(Icons.refresh_rounded),
+                                color: pal.onScaffold,
+                                tooltip:
+                                    browsePathKeys != null &&
+                                        browsePathKeys.isNotEmpty
+                                    ? 'Refresh songs in this folder'
+                                    : 'Refresh library',
+                                onPressed: widget.onRefreshLibrary,
+                              ),
+                              if (onSongsTab) ...[
+                                IconButton(
+                                  icon: const Icon(Icons.checklist_rounded),
+                                  color: pal.onScaffold,
+                                  tooltip: 'Select songs',
+                                  onPressed: _enterSongsMultiSelectMode,
+                                ),
+                                PopupMenuButton<Object>(
+                                  tooltip: 'Sort songs',
+                                  icon: Icon(
+                                    Icons.sort_rounded,
+                                    color:
+                                        context.appliedThemePalette ==
+                                            AppThemePalette.ivy
+                                        ? const Color(0xFF1C1C1E)
+                                        : pal.onScaffold,
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                  onSelected: (value) async {
+                                    if (value is LibraryTrackSortMode) {
+                                      await LibraryTrackSortStore.save(value);
+                                      return;
+                                    }
+                                    if (value ==
+                                        _SongsMenuAction.toggleAlphaIndex) {
+                                      await SongsAlphaIndexStore.saveEnabled(
+                                        !_songsAlphabetIndexEnabled,
+                                      );
+                                    }
+                                  },
+                                  itemBuilder: (context) {
+                                    final isIvy =
+                                        context.appliedThemePalette ==
+                                        AppThemePalette.ivy;
+                                    final items = <PopupMenuEntry<Object>>[
+                                      for (final mode
+                                          in LibraryTrackSortMode.values)
+                                        CheckedPopupMenuItem<
+                                          LibraryTrackSortMode
+                                        >(
+                                          value: mode,
+                                          checked: mode == _songSortMode,
+                                          child: Text(
+                                            mode.menuLabel,
+                                            style: isIvy
+                                                ? const TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.w600,
+                                                  )
+                                                : null,
+                                          ),
+                                        ),
+                                    ];
+                                    if (_songsAlphabetExperimentEnabled) {
+                                      items.add(const PopupMenuDivider());
+                                      items.add(
+                                        CheckedPopupMenuItem<Object>(
+                                          value:
+                                              _SongsMenuAction.toggleAlphaIndex,
+                                          checked: _songsAlphabetIndexEnabled,
+                                          child: Text(
+                                            'Alphabet quick index',
+                                            style: isIvy
+                                                ? const TextStyle(
+                                                    color: Colors.white,
+                                                    fontWeight: FontWeight.w600,
+                                                  )
+                                                : null,
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                    return items;
+                                  },
+                                ),
+                              ] else
+                                const SizedBox(width: 48),
+                            ],
+                          ],
+                        ),
                       ),
-                    ),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child:
+                            context.appliedThemePalette == AppThemePalette.ivy
+                            ? _IvyLibrarySegmentedTabBar(
+                                controller: _tabController,
+                                tabs: _visibleTabs,
+                              )
+                            : TabBar(
+                                key: ObjectKey(_tabController),
+                                controller: _tabController,
+                                isScrollable: true,
+                                padding: const EdgeInsets.only(
+                                  left: 2,
+                                  right: 8,
+                                ),
+                                labelPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                ),
+                                tabAlignment: TabAlignment.start,
+                                indicatorColor: pal.onScaffold,
+                                indicatorWeight: 2.8,
+                                indicatorSize: TabBarIndicatorSize.label,
+                                labelColor: pal.onScaffold,
+                                unselectedLabelColor: pal.textMuted.withValues(
+                                  alpha: 0.76,
+                                ),
+                                dividerColor: pal.onScaffold.withValues(
+                                  alpha: 0.14,
+                                ),
+                                dividerHeight: 1,
+                                labelStyle: theme.textTheme.titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.2,
+                                      fontSize: 15,
+                                    ),
+                                unselectedLabelStyle: theme.textTheme.titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: -0.2,
+                                      fontSize: 15,
+                                    ),
+                                splashFactory: NoSplash.splashFactory,
+                                overlayColor: WidgetStateProperty.all<Color>(
+                                  Colors.transparent,
+                                ),
+                                tabs: [
+                                  for (final id in _visibleTabs)
+                                    Tab(text: id.shortTitle),
+                                ],
+                              ),
+                      ),
+                      Expanded(
+                        child: TabBarView(
+                          key: ObjectKey(_tabController),
+                          controller: _tabController,
+                          children: [
+                            for (final id in _visibleTabs)
+                              _libraryTabPage(
+                                id,
+                                theme,
+                                context,
+                                pal,
+                                tracks,
+                                libraryByPathKey,
+                                queueIndexByPathKey,
+                                songsTabIndices,
+                                player,
+                                browsePathKeys,
+                                searchQuery,
+                              ),
+                          ],
+                        ),
+                      ),
                     ],
                   );
                 },
@@ -2102,7 +2204,10 @@ class LibraryScreenState extends State<LibraryScreen>
               itemBuilder: (context, i) {
                 final path = paths[i];
                 final track = _trackForPath(path, libraryByPathKey);
-                final plIndex = _playlistIndexForPath(path, playlistIndexByPathKey);
+                final plIndex = _playlistIndexForPath(
+                  path,
+                  playlistIndexByPathKey,
+                );
                 return Material(
                   color: Colors.transparent,
                   child: InkWell(
@@ -2321,7 +2426,10 @@ class LibraryScreenState extends State<LibraryScreen>
               itemBuilder: (context, i) {
                 final path = paths[i];
                 final track = _trackForPath(path, libraryByPathKey);
-                final plIndex = _playlistIndexForPath(path, playlistIndexByPathKey);
+                final plIndex = _playlistIndexForPath(
+                  path,
+                  playlistIndexByPathKey,
+                );
                 return Material(
                   color: Colors.transparent,
                   child: InkWell(
@@ -2505,7 +2613,10 @@ class LibraryScreenState extends State<LibraryScreen>
               itemBuilder: (context, i) {
                 final path = paths[i];
                 final track = _trackForPath(path, libraryByPathKey);
-                final plIndex = _playlistIndexForPath(path, playlistIndexByPathKey);
+                final plIndex = _playlistIndexForPath(
+                  path,
+                  playlistIndexByPathKey,
+                );
                 return Material(
                   color: Colors.transparent,
                   child: InkWell(
@@ -2798,14 +2909,13 @@ class LibraryScreenState extends State<LibraryScreen>
       },
     );
 
-    var scrollList = NotificationListener<ScrollNotification>(
+    Widget scrollList = NotificationListener<ScrollNotification>(
       onNotification: (n) {
         if (n.metrics.axis == Axis.vertical) {
-          _scheduleSongsVisibleArtEnrichment(
-            tracks,
-            filteredIndices,
-            player,
-          );
+          if (_songsAlphabetQuickIndexVisible) {
+            _updateSongsScrollSectionLetter(filteredIndices, tracks);
+          }
+          _scheduleSongsVisibleArtEnrichment(tracks, filteredIndices, player);
         }
         return false;
       },
@@ -2815,7 +2925,34 @@ class LibraryScreenState extends State<LibraryScreen>
       if (!mounted) return;
       _prewarmSongsListArt(tracks, filteredIndices);
       _scheduleSongsVisibleArtEnrichment(tracks, filteredIndices, player);
+      if (_songsAlphabetQuickIndexVisible) {
+        _updateSongsScrollSectionLetter(filteredIndices, tracks);
+      }
     });
+
+    if (_songsAlphabetQuickIndexVisible && !inSelect) {
+      final jumpMap = _songsAlphabetJumpMap(filteredIndices, tracks);
+      scrollList = Stack(
+        children: [
+          scrollList,
+          Positioned(
+            top: 10,
+            right: 0,
+            bottom: 10,
+            child: _SongsAlphabetIndexBar(
+              letters: _songsAlphabetIndexLetters,
+              activeLetters: jumpMap.keys.toSet(),
+              scrollLetter: _songsScrollSectionLetter,
+              onLetterSelected: (letter) {
+                final row = jumpMap[letter];
+                if (row == null) return;
+                _scrollSongsToRow(row, filteredIndices.length);
+              },
+            ),
+          ),
+        ],
+      );
+    }
 
     if (!inSelect) return scrollList;
 
@@ -2832,12 +2969,178 @@ class LibraryScreenState extends State<LibraryScreen>
               pathKeyScope: browsePathKeys,
             ),
           ),
-          onAddToPlaylist: () => unawaited(
-            _addSelectedSongsToPlaylist(context, orderedPaths),
-          ),
+          onAddToPlaylist: () =>
+              unawaited(_addSelectedSongsToPlaylist(context, orderedPaths)),
         ),
       ],
     );
+  }
+
+  static String _songsLetterForTitle(String title) {
+    final trimmed = title.trim();
+    final first = trimmed.isEmpty ? '#' : trimmed[0].toUpperCase();
+    return RegExp(r'^[A-Z]$').hasMatch(first) ? first : '#';
+  }
+
+  Map<String, int> _songsAlphabetJumpMap(
+    List<int> filteredIndices,
+    List<TrackItem> tracks,
+  ) {
+    final out = <String, int>{};
+    for (var row = 0; row < filteredIndices.length; row++) {
+      final track = tracks[filteredIndices[row]];
+      final key = _songsLetterForTitle(track.title);
+      out.putIfAbsent(key, () => row);
+    }
+    return out;
+  }
+
+  void _updateSongsScrollSectionLetter(
+    List<int> filteredIndices,
+    List<TrackItem> tracks,
+  ) {
+    if (!_songsAlphabetQuickIndexVisible ||
+        filteredIndices.isEmpty ||
+        !_songsScrollController.hasClients) {
+      return;
+    }
+    final row = (_songsScrollController.offset / _kSongsRowStride)
+        .floor()
+        .clamp(0, filteredIndices.length - 1);
+    final letter = _songsLetterForTitle(tracks[filteredIndices[row]].title);
+    if (_songsScrollSectionLetter == letter) return;
+    setState(() => _songsScrollSectionLetter = letter);
+  }
+
+  void _scrollSongsToRow(int row, int totalRows) {
+    if (!_songsScrollController.hasClients || totalRows <= 0) return;
+    final raw = row * _kSongsRowStride;
+    final pos = _songsScrollController.position;
+    final target = raw.clamp(0.0, pos.maxScrollExtent);
+    _songsScrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+}
+
+enum _SongsMenuAction { toggleAlphaIndex }
+
+class _SongsAlphabetIndexBar extends StatefulWidget {
+  const _SongsAlphabetIndexBar({
+    required this.letters,
+    required this.activeLetters,
+    this.scrollLetter,
+    required this.onLetterSelected,
+  });
+
+  final List<String> letters;
+  final Set<String> activeLetters;
+  final String? scrollLetter;
+  final ValueChanged<String> onLetterSelected;
+
+  @override
+  State<_SongsAlphabetIndexBar> createState() => _SongsAlphabetIndexBarState();
+}
+
+class _SongsAlphabetIndexBarState extends State<_SongsAlphabetIndexBar> {
+  String? _touchLetter;
+
+  @override
+  Widget build(BuildContext context) {
+    final pal = context.palette;
+    final activeColor = context.controlAccent;
+    final inactiveColor = pal.textMuted.withValues(alpha: 0.7);
+    final borderColor = pal.dividerOnHero.withValues(alpha: 0.65);
+    final fill = pal.surface.withValues(alpha: 0.55);
+    final highlightLetter = _touchLetter ?? widget.scrollLetter;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: (d) => _emitAtOffset(d.localPosition.dy, context),
+      onTapUp: (_) => _clearTouchLetter(),
+      onTapCancel: _clearTouchLetter,
+      onVerticalDragDown: (d) => _emitAtOffset(d.localPosition.dy, context),
+      onVerticalDragUpdate: (d) => _emitAtOffset(d.localPosition.dy, context),
+      onVerticalDragEnd: (_) => _clearTouchLetter(),
+      onVerticalDragCancel: _clearTouchLetter,
+      child: Container(
+        width: 26,
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          color: fill,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: borderColor),
+        ),
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final each = c.maxHeight / widget.letters.length;
+            return Column(
+              children: [
+                for (final l in widget.letters)
+                  SizedBox(
+                    height: each,
+                    child: Center(
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 90),
+                        curve: Curves.easeOut,
+                        width: highlightLetter == l ? 16 : 13,
+                        height: highlightLetter == l ? 16 : 13,
+                        decoration: BoxDecoration(
+                          color: highlightLetter == l
+                              ? activeColor.withValues(alpha: 0.2)
+                              : null,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Center(
+                          child: Text(
+                            l,
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  fontSize: highlightLetter == l ? 10.5 : 10,
+                                  height: 1,
+                                  color: widget.activeLetters.contains(l)
+                                      ? activeColor
+                                      : inactiveColor,
+                                  fontWeight: highlightLetter == l
+                                      ? FontWeight.w800
+                                      : (widget.activeLetters.contains(l)
+                                            ? FontWeight.w700
+                                            : FontWeight.w500),
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _emitAtOffset(double dy, BuildContext context) {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || widget.letters.isEmpty) return;
+    final h = box.size.height;
+    if (h <= 0) return;
+    final idx = (dy / h * widget.letters.length).floor().clamp(
+      0,
+      widget.letters.length - 1,
+    );
+    final letter = widget.letters[idx];
+    if (_touchLetter != letter) {
+      setState(() => _touchLetter = letter);
+    }
+    widget.onLetterSelected(letter);
+  }
+
+  void _clearTouchLetter() {
+    if (_touchLetter == null) return;
+    setState(() => _touchLetter = null);
   }
 }
 
@@ -3026,7 +3329,7 @@ class _TrackTileBody extends StatelessWidget {
               Text(
                 track.cardSubtitle,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  color: isIvy 
+                  color: isIvy
                       ? const Color(0xFF1C1C1E)
                       : pal.textMuted.withValues(alpha: 0.9),
                   fontSize: 10,
@@ -3051,9 +3354,7 @@ class _TrackTileBody extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleMedium?.copyWith(
-                        color: isIvy
-                            ? const Color(0xFF1C1C1E)
-                            : pal.onScaffold,
+                        color: isIvy ? const Color(0xFF1C1C1E) : pal.onScaffold,
                         fontSize: 15,
                         fontWeight: isIvy ? FontWeight.w600 : null,
                       ),
@@ -3176,11 +3477,7 @@ class _IvyLibrarySegmentedTabBar extends StatelessWidget {
         splashFactory: NoSplash.splashFactory,
         overlayColor: WidgetStateProperty.all<Color>(Colors.transparent),
         tabs: [
-          for (final id in tabs)
-            Tab(
-              height: 34,
-              child: Text(id.shortTitle),
-            ),
+          for (final id in tabs) Tab(height: 34, child: Text(id.shortTitle)),
         ],
       ),
     );
