@@ -11,6 +11,7 @@ import '../../models/track_item.dart';
 import '../../services/favorite_songs_store.dart';
 import '../../services/music_library_path_key.dart';
 import '../../services/song_metadata_cache.dart';
+import '../../services/song_file_info.dart';
 import '../../services/storage_access.dart';
 import '../../services/track_file_delete.dart';
 import '../../services/user_playlists_store.dart';
@@ -27,6 +28,7 @@ enum TrackOverflowAction {
   playNext,
   playFromHere,
   playOnlyThis,
+  info,
   addToPlaylist,
   removeFromPlaylist,
   toggleFavorite,
@@ -143,6 +145,14 @@ List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
         ),
       ),
     ],
+    const PopupMenuDivider(),
+    PopupMenuItem(
+      value: TrackOverflowAction.info,
+      child: _compactOverflowMenuRow(
+        icon: Icons.info_outline_rounded,
+        label: 'Info',
+      ),
+    ),
     if (enableDeleteFromDevice) ...[
       const PopupMenuDivider(),
       PopupMenuItem(
@@ -578,6 +588,92 @@ Future<void> applyTrackOverflowAction(
 
   final tab = playbackOriginTab ?? outsideQueue?.playbackOriginTab;
 
+  String _formatBytes(int? bytes) {
+    if (bytes == null || bytes < 0) return 'Unknown';
+    const units = <String>['B', 'KB', 'MB', 'GB', 'TB'];
+    var value = bytes.toDouble();
+    var unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    final precision = value >= 100 || unit == 0 ? 0 : (value >= 10 ? 1 : 2);
+    return '${value.toStringAsFixed(precision)} ${units[unit]}';
+  }
+
+  Future<void> showTrackInfoDialog(TrackItem track) async {
+    if (!context.mounted) return;
+    final info = await readSongFileInfo(track.filePath);
+    if (!context.mounted) return;
+    final pal = context.palette;
+    final theme = Theme.of(context);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: pal.surface,
+          title: Text(
+            'Song info',
+            style: theme.textTheme.titleLarge?.copyWith(color: pal.textPrimary),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'File name',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: pal.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                info.fileName,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Size',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: pal.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _formatBytes(info.sizeBytes),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Folder',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: pal.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                info.folderPath,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   switch (action) {
     case TrackOverflowAction.playNext:
       final t = tracks[ix];
@@ -619,6 +715,9 @@ Future<void> applyTrackOverflowAction(
         playbackOriginTab: tab ?? LibraryTabId.songs,
         keepShuffleMode: true,
       );
+
+    case TrackOverflowAction.info:
+      await showTrackInfoDialog(tracks[ix]);
 
     case TrackOverflowAction.addToPlaylist:
       final t = tracks[ix];
