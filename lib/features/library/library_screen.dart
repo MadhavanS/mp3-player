@@ -2330,27 +2330,40 @@ class LibraryScreenState extends State<LibraryScreen>
     Set<String>? browsePathKeys,
   ) {
     if (libraryByPathKey.isEmpty) {
+      final hasConfiguredFolders = widget.folderPaths.isNotEmpty;
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.library_music_outlined,
-                size: 56,
-                color: pal.onScaffold.withValues(alpha: 0.5),
-              ),
+              if (hasConfiguredFolders)
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.8,
+                    color: context.controlAccent,
+                  ),
+                )
+              else
+                Icon(
+                  Icons.library_music_outlined,
+                  size: 56,
+                  color: pal.onScaffold.withValues(alpha: 0.5),
+                ),
               const SizedBox(height: 16),
               Text(
-                'No tracks yet',
+                hasConfiguredFolders ? 'Loading songs...' : 'No tracks yet',
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: pal.onScaffold,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Open the menu and go to Settings to add folders.',
+                hasConfiguredFolders
+                    ? 'Scanning your folders and building the library.'
+                    : 'Open the menu and go to Settings to add folders.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: pal.textSecondary.withValues(alpha: 0.9),
@@ -2746,27 +2759,40 @@ class LibraryScreenState extends State<LibraryScreen>
     final hasBrowseFilter = browsePathKeys != null;
 
     if (tracks.isEmpty) {
+      final hasConfiguredFolders = widget.folderPaths.isNotEmpty;
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.library_music_outlined,
-                size: 56,
-                color: pal.onScaffold.withValues(alpha: 0.5),
-              ),
+              if (hasConfiguredFolders)
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.8,
+                    color: context.controlAccent,
+                  ),
+                )
+              else
+                Icon(
+                  Icons.library_music_outlined,
+                  size: 56,
+                  color: pal.onScaffold.withValues(alpha: 0.5),
+                ),
               const SizedBox(height: 16),
               Text(
-                'No tracks yet',
+                hasConfiguredFolders ? 'Loading songs...' : 'No tracks yet',
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: pal.onScaffold,
                 ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Open the menu and go to Settings to add folders. MP3 files are scanned recursively.',
+                hasConfiguredFolders
+                    ? 'Songs are being loaded from your configured folders.'
+                    : 'Open the menu and go to Settings to add folders. MP3 files are scanned recursively.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: pal.textSecondary.withValues(alpha: 0.9),

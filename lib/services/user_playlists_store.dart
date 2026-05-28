@@ -17,11 +17,7 @@ class UserPlaylistEntry {
   final String name;
   final List<String> paths;
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'paths': paths,
-      };
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'paths': paths};
 
   factory UserPlaylistEntry.fromJson(Map<String, dynamic> m) {
     return UserPlaylistEntry(
@@ -68,7 +64,9 @@ class UserPlaylistsStore {
     if (n.isEmpty) return null;
     final list = await loadAll();
     final normalized = _normalizePlaylistName(n);
-    final exists = list.any((e) => _normalizePlaylistName(e.name) == normalized);
+    final exists = list.any(
+      (e) => _normalizePlaylistName(e.name) == normalized,
+    );
     if (exists) return null;
     final id = 'pl_${DateTime.now().millisecondsSinceEpoch}';
     list.insert(0, UserPlaylistEntry(id: id, name: n, paths: []));
@@ -156,11 +154,7 @@ class UserPlaylistsStore {
       newPaths.add(existing);
     }
     if (!removed) return false;
-    list[idx] = UserPlaylistEntry(
-      id: pl.id,
-      name: pl.name,
-      paths: newPaths,
-    );
+    list[idx] = UserPlaylistEntry(id: pl.id, name: pl.name, paths: newPaths);
     await _save(list);
     return true;
   }
@@ -202,6 +196,30 @@ class UserPlaylistsStore {
       if (!replaced) continue;
       final at = (replacedIndex ?? 0).clamp(0, next.length);
       next.insert(at, newPath);
+      list[i] = UserPlaylistEntry(id: pl.id, name: pl.name, paths: next);
+      changed = true;
+    }
+    if (changed) await _save(list);
+  }
+
+  /// Removes [path] from all saved playlists (canonical path comparison).
+  static Future<void> removePathFromAllPlaylists(String path) async {
+    final removeKey = canonicalMusicLibraryPathKey(path);
+    if (removeKey.isEmpty && path.trim().isEmpty) return;
+    final raw = path.trim();
+    final list = await loadAll();
+    var changed = false;
+    for (var i = 0; i < list.length; i++) {
+      final pl = list[i];
+      final next = pl.paths
+          .where((p) {
+            if (removeKey.isNotEmpty) {
+              return canonicalMusicLibraryPathKey(p) != removeKey;
+            }
+            return p != raw;
+          })
+          .toList(growable: false);
+      if (next.length == pl.paths.length) continue;
       list[i] = UserPlaylistEntry(id: pl.id, name: pl.name, paths: next);
       changed = true;
     }

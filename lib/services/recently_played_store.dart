@@ -103,9 +103,27 @@ class RecentlyPlayedStore {
     }
 
     final limit = await RecentListLimitsStore.loadRecentlyPlayedLimit();
-    final trimmed =
-        next.length > limit ? next.sublist(0, limit) : next;
+    final trimmed = next.length > limit ? next.sublist(0, limit) : next;
     await prefs.setString(_key, jsonEncode(trimmed));
+    revision.value++;
+  }
+
+  /// Removes [path] from recently played (canonical path comparison).
+  static Future<void> removePath(String path) async {
+    if (path.isEmpty) return;
+    final removeKey = canonicalMusicLibraryPathKey(path);
+    final prefs = await SharedPreferences.getInstance();
+    final list = await loadPaths();
+    final next = list
+        .where((p) {
+          if (removeKey.isNotEmpty) {
+            return canonicalMusicLibraryPathKey(p) != removeKey;
+          }
+          return p != path;
+        })
+        .toList(growable: false);
+    if (next.length == list.length) return;
+    await prefs.setString(_key, jsonEncode(next));
     revision.value++;
   }
 }

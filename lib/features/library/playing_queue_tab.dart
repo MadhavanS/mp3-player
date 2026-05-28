@@ -139,7 +139,7 @@ class PlayingQueueTab extends StatelessWidget {
                       : null;
                   return _QueueListRow(
                     key: ValueKey(
-                      'pq_${r.plIndex}_${r.orderPos}_${r.track.filePath ?? r.track.title}',
+                      'pq_${r.plIndex}_${r.track.filePath ?? r.track.title}',
                     ),
                     displayIndex: index + 1,
                     track: r.track,
@@ -167,7 +167,7 @@ class PlayingQueueTab extends StatelessWidget {
                       : null;
                   return _QueueListRow(
                     key: ValueKey(
-                      'pq_${r.plIndex}_${r.orderPos}_${r.track.filePath ?? r.track.title}',
+                      'pq_${r.plIndex}_${r.track.filePath ?? r.track.title}',
                     ),
                     displayIndex: index + 1,
                     track: r.track,

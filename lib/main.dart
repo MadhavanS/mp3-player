@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+    show TargetPlatform, debugPrint, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/widgets.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
@@ -8,11 +8,13 @@ import 'platform/windows_window.dart';
 import 'services/metadata_god_init_stub.dart'
     if (dart.library.io) 'services/metadata_god_init_io.dart';
 
+bool _justAudioBackgroundInitialized = false;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initMetadataGodIfEnabled();
   await initWindowsWindowOnLaunch();
-  if (_mediaNotificationSupported) {
+  if (_mediaNotificationSupported && !_justAudioBackgroundInitialized) {
     await JustAudioBackground.init(
       androidNotificationChannelId: 'com.example.mp3_player.audio',
       androidNotificationChannelName: 'Now playing',
@@ -26,6 +28,11 @@ Future<void> main() async {
       // Large embedded movie-poster art can fail or OOM in the Android notification pipeline.
       artDownscaleWidth: 512,
       artDownscaleHeight: 512,
+    );
+    _justAudioBackgroundInitialized = true;
+  } else if (_mediaNotificationSupported && _justAudioBackgroundInitialized) {
+    debugPrint(
+      'main: JustAudioBackground already initialized (hot restart) — skipping',
     );
   }
   runApp(const MadPlayerApp());

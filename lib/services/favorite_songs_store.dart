@@ -116,6 +116,18 @@ class FavoriteSongsStore {
     revision.value++;
   }
 
+  /// Removes [path] from favourites (canonical path comparison).
+  static Future<void> removePath(String path) async {
+    if (path.isEmpty) return;
+    await ensureLoaded();
+    final had = _paths.any((p) => _samePath(p, path));
+    if (!had) return;
+    _paths.removeWhere((p) => _samePath(p, path));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, jsonEncode(_paths));
+    revision.value++;
+  }
+
   static Future<void> pruneMissingPaths() async {
     await ensureLoaded();
     final kept = _paths.where(localFileStillPresent).toList();

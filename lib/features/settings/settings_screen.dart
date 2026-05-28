@@ -11,6 +11,7 @@ import '../../services/library_tabs_store.dart';
 import '../../services/recent_list_limits_store.dart';
 import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
+import '../../services/songs_alpha_index_store.dart';
 import '../../services/storage_access.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
@@ -54,7 +55,7 @@ class SettingsScreen extends StatefulWidget {
   final PlayerChromeBackgroundKind playerChromeBackgroundKind;
   final Color? playerChromeCustomBackground;
   final ValueChanged<PlayerChromeBackgroundKind>
-      onPlayerChromeBackgroundKindChanged;
+  onPlayerChromeBackgroundKindChanged;
   final ValueChanged<Color> onPlayerChromeCustomBackgroundChanged;
 
   @override
@@ -66,6 +67,7 @@ enum _SettingsSection {
   appearance,
   musicFolders,
   recentLists,
+  experiments,
   help,
   windows,
 }
@@ -80,6 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _recentlyPlayedLimit = RecentListLimitsStore.defaultLimit;
   bool _windowsAlwaysOnTop = false;
   bool _windowsWindowPrefsLoaded = false;
+  bool _songsAlphaIndexExperiment = false;
 
   static bool get _isWindowsDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -92,6 +95,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     unawaited(_loadLibraryTabRows());
     unawaited(_loadRecentListLimits());
     unawaited(_loadWindowsWindowPrefs());
+    unawaited(_loadSongsAlphaExperiment());
+  }
+
+  Future<void> _loadSongsAlphaExperiment() async {
+    final on = await SongsAlphaIndexStore.loadExperimentEnabled();
+    if (mounted) setState(() => _songsAlphaIndexExperiment = on);
   }
 
   Future<void> _loadWindowsWindowPrefs() async {
@@ -321,10 +330,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onReorder: _busy
             ? (_, __) {}
             : (oldIndex, newIndex) => _onLibraryTabsReorder(
-                  oldIndex,
-                  newIndex,
-                  onUpdated: onUpdated,
-                ),
+                oldIndex,
+                newIndex,
+                onUpdated: onUpdated,
+              ),
         itemBuilder: (ctx, i) {
           final row = rows[i];
           final enabledCount = rows.where((r) => r.enabled).length;
@@ -355,11 +364,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: row.enabled,
                 onChanged: _busy || lastEnabled
                     ? null
-                    : (v) => _setLibraryTabEnabled(
-                          i,
-                          v,
-                          onUpdated: onUpdated,
-                        ),
+                    : (v) => _setLibraryTabEnabled(i, v, onUpdated: onUpdated),
                 activeColor: context.controlAccent,
               ),
             ),
@@ -523,7 +528,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _openPlayerChromeBackgroundColorDialog() async {
     if (!mounted || _busy) return;
     final pal = context.palette;
-    var selected = widget.playerChromeCustomBackground ?? pal.scaffoldBackground;
+    var selected =
+        widget.playerChromeCustomBackground ?? pal.scaffoldBackground;
     await showDialog<void>(
       context: context,
       builder: (ctx) {
@@ -703,6 +709,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: pal.textMuted.withValues(alpha: 0.75),
           ),
           onTap: () => _goToSection(_SettingsSection.recentLists),
+        ),
+        Divider(height: 1, color: pal.dividerOnHero),
+        ListTile(
+          contentPadding: const EdgeInsets.symmetric(vertical: 6),
+          leading: Icon(
+            Icons.science_outlined,
+            color: pal.onScaffold.withValues(alpha: 0.88),
+            size: 28,
+          ),
+          title: Text(
+            'Experiments',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: pal.onScaffold,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            'Optional library features in development',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.textMuted.withValues(alpha: 0.95),
+            ),
+          ),
+          trailing: Icon(
+            Icons.chevron_right_rounded,
+            color: pal.textMuted.withValues(alpha: 0.75),
+          ),
+          onTap: () => _goToSection(_SettingsSection.experiments),
         ),
         Divider(height: 1, color: pal.dividerOnHero),
         ListTile(
@@ -1060,12 +1093,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: _busy ? null : _openPlayerChromeBackgroundColorDialog,
+                onPressed: _busy
+                    ? null
+                    : _openPlayerChromeBackgroundColorDialog,
                 icon: Container(
                   width: 22,
                   height: 22,
                   decoration: BoxDecoration(
-                    color: widget.playerChromeCustomBackground ??
+                    color:
+                        widget.playerChromeCustomBackground ??
                         pal.scaffoldBackground,
                     borderRadius: BorderRadius.circular(4),
                     border: Border.all(
@@ -1364,6 +1400,51 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildExperimentsDetail(ThemeData theme, AppPalette pal) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      children: [
+        Text(
+          'These options are off by default and may change or be removed later.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: pal.textSecondary.withValues(alpha: 0.95),
+          ),
+        ),
+        const SizedBox(height: 16),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: Text(
+            'Songs tab: alphabet quick index',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: pal.onScaffold,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            _songsAlphaIndexExperiment
+                ? 'The A–Z rail and toggle appear under Library › Songs (sort menu).'
+                : 'When enabled, you can turn on the A–Z side index from the Songs sort menu.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: pal.textMuted.withValues(alpha: 0.95),
+            ),
+          ),
+          value: _songsAlphaIndexExperiment,
+          onChanged: _busy
+              ? null
+              : (v) async {
+                  setState(() => _busy = true);
+                  try {
+                    await SongsAlphaIndexStore.saveExperimentEnabled(v);
+                    if (mounted) setState(() => _songsAlphaIndexExperiment = v);
+                  } finally {
+                    if (mounted) setState(() => _busy = false);
+                  }
+                },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1373,6 +1454,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.appearance => 'Appearance',
       _SettingsSection.musicFolders => 'Music folders',
       _SettingsSection.recentLists => 'Recent lists',
+      _SettingsSection.experiments => 'Experiments',
       _SettingsSection.help => 'Help',
       _SettingsSection.windows => 'Windows',
     };
@@ -1398,6 +1480,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       pal,
                     ),
                     _SettingsSection.recentLists => _buildRecentListsDetail(
+                      theme,
+                      pal,
+                    ),
+                    _SettingsSection.experiments => _buildExperimentsDetail(
                       theme,
                       pal,
                     ),

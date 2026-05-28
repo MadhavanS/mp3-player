@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p_path;
 
 import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
@@ -653,7 +655,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         ? player.currentTrack?.filePath
         : null;
     // Capture before any await — reload paths can make [isPlaying] flicker false.
-    final wasPlaying = preservePlaybackAfterRescan &&
+    final wasPlaying =
+        preservePlaybackAfterRescan &&
         (player.isPlaying || player.audioPlayer.playing);
     final playbackPosition = preservePlaybackAfterRescan
         ? player.position
@@ -709,7 +712,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           .map((path) => cachedByPath[path] ?? TrackItem.fromFilePath(path))
           .toList(growable: false);
       final scannedByPath = {for (final f in scanned) f.path: f};
-      final snapshotsByPath = await SongMetadataCache.loadSnapshotsForRoots(paths);
+      final snapshotsByPath = await SongMetadataCache.loadSnapshotsForRoots(
+        paths,
+      );
       unawaited(SongMetadataCache.deleteMissingPaths(files.toSet()));
       unawaited(SongMetadataCache.saveTracks(tracks));
       player.setLibraryCatalog(tracks);
@@ -885,18 +890,39 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     FolderCountCache.instance.clear();
     try {
       final player = PlayerController.of(context);
-      // Refresh should reflect full library changes immediately (not a stale Files scope).
-      _songsBrowsePathKeysNotifier.value = null;
-      player.setPlaybackPathKeyScope(null, reloadQueue: false);
-      unawaited(PlaybackSessionStore.saveBrowsePathKeys(null));
-      await _scanFoldersAndSetPlaylist(
-        _folderPaths,
-        playAfter: false,
-        preservePlaybackAfterRescan: true,
-        keepCurrentQueue: true,
-        showProgressOverlay: false,
-        backgroundSyncPending: true,
-      );
+      final browseKeys = _songsBrowsePathKeysNotifier.value;
+      final hasBrowse = !kIsWeb && browseKeys != null && browseKeys.isNotEmpty;
+
+      if (hasBrowse) {
+        final subtree = _inferBrowseSubtreeRoot(
+          browseKeys,
+          player.metadataLibrary,
+        );
+        if (subtree != null && subtree.trim().isNotEmpty) {
+          await _mergeRescanBrowseSubtree(player, subtree);
+        } else {
+          await _scanFoldersAndSetPlaylist(
+            _folderPaths,
+            playAfter: false,
+            preservePlaybackAfterRescan: true,
+            keepCurrentQueue: true,
+            showProgressOverlay: false,
+            backgroundSyncPending: true,
+          );
+        }
+      } else {
+        _songsBrowsePathKeysNotifier.value = null;
+        player.setPlaybackPathKeyScope(null, reloadQueue: false);
+        unawaited(PlaybackSessionStore.saveBrowsePathKeys(null));
+        await _scanFoldersAndSetPlaylist(
+          _folderPaths,
+          playAfter: false,
+          preservePlaybackAfterRescan: true,
+          keepCurrentQueue: true,
+          showProgressOverlay: false,
+          backgroundSyncPending: true,
+        );
+      }
       if (!mounted) return;
       await _runBackgroundSyncGuarded(player, List<String>.from(_folderPaths));
       if (!mounted) return;
@@ -910,6 +936,235 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         setState(() => _refreshInProgress = false);
       }
     }
+  }
+
+  bool _pathWithinSubtree(String filePath, String normalizedSubtreeRoot) {
+    if (kIsWeb) return false;
+    final raw = filePath.trim();
+    if (raw.isEmpty) return false;
+    final fp = p_path.normalize(File(raw).absolute.path);
+    final root = normalizedSubtreeRoot;
+    if (fp == root) return true;
+    final sep = p_path.separator;
+    final prefix = root.endsWith(sep) ? root : '$root$sep';
+    if (Platform.isWindows) {
+      return fp.toLowerCase().startsWith(prefix.toLowerCase());
+    }
+    return fp.startsWith(prefix);
+  }
+
+  String? _longestCommonDirectoryForFiles(List<String> filePaths) {
+    if (filePaths.isEmpty) return null;
+    if (filePaths.length == 1) {
+      return p_path.dirname(
+        p_path.normalize(File(filePaths.first.trim()).absolute.path),
+      );
+    }
+    final splitSegs = filePaths
+        .map(
+          (e) => p_path.split(p_path.normalize(File(e.trim()).absolute.path)),
+        )
+        .toList(growable: false);
+    final minSegCount = splitSegs.map((s) => s.length).reduce(math.min);
+    final common = <String>[];
+    for (var i = 0; i < minSegCount - 1; i++) {
+      final seg = splitSegs.first[i];
+      var allMatch = true;
+      for (final segs in splitSegs.skip(1)) {
+        final other = segs[i];
+        if (Platform.isWindows) {
+          if (seg.toLowerCase() != other.toLowerCase()) {
+            allMatch = false;
+            break;
+          }
+        } else if (seg != other) {
+          allMatch = false;
+          break;
+        }
+      }
+      if (!allMatch) break;
+      common.add(seg);
+    }
+    if (common.isEmpty) return null;
+    return p_path.joinAll(common);
+  }
+
+  String? _inferBrowseSubtreeRoot(
+    Set<String> browseKeys,
+    List<TrackItem> tracks,
+  ) {
+    final paths = <String>[];
+    for (final t in tracks) {
+      final fp = t.filePath?.trim();
+      if (fp == null || fp.isEmpty) continue;
+      if (!browseKeys.contains(canonicalMusicLibraryPathKey(fp))) continue;
+      paths.add(fp);
+    }
+    if (paths.isEmpty) return null;
+    try {
+      return _longestCommonDirectoryForFiles(paths);
+    } catch (e, st) {
+      debugPrint('_inferBrowseSubtreeRoot: $e\n$st');
+      return null;
+    }
+  }
+
+  Future<void> _mergeRescanBrowseSubtree(
+    PlayerController player,
+    String subtreeRoot,
+  ) async {
+    final normRoot = p_path.normalize(File(subtreeRoot.trim()).absolute.path);
+    final scanned = await collectMp3FilesMerged([normRoot]);
+    final scannedPaths = scanned.map((f) => f.path).toSet();
+    final scannedByPath = {for (final f in scanned) f.path: f};
+
+    final existing = player.metadataLibrary.toList(growable: false);
+    final kept = <TrackItem>[];
+    final removedUnderTree = <String>[];
+    for (final t in existing) {
+      final fp = t.filePath?.trim();
+      if (fp == null || fp.isEmpty) continue;
+      if (_pathWithinSubtree(fp, normRoot)) {
+        if (!scannedPaths.contains(fp)) {
+          removedUnderTree.add(fp);
+        }
+        continue;
+      }
+      kept.add(t);
+    }
+
+    if (removedUnderTree.isNotEmpty) {
+      await SongMetadataCache.deletePaths(removedUnderTree);
+    }
+
+    final subtreeCached = await SongMetadataCache.loadSnapshotsForRoots([
+      normRoot,
+    ]);
+    final changed = <ScannedMp3File>[];
+    final repairSnapshots = <CachedTrackSnapshot>[];
+
+    for (final f in scanned) {
+      final snap = subtreeCached[f.path];
+      if (snap == null) {
+        changed.add(f);
+      } else if (snap.fileModifiedMs != f.lastModifiedMs ||
+          snap.fileSizeBytes != f.fileSizeBytes) {
+        changed.add(f);
+      } else if (snap.fileSizeBytes == 0) {
+        repairSnapshots.add(
+          CachedTrackSnapshot(
+            track: snap.track,
+            fileModifiedMs: f.lastModifiedMs,
+            fileSizeBytes: f.fileSizeBytes,
+          ),
+        );
+      }
+    }
+
+    if (repairSnapshots.isNotEmpty) {
+      await SongMetadataCache.saveTrackSnapshots(repairSnapshots);
+    }
+
+    final newByPath = <String, TrackItem>{};
+    const batchSize = 6;
+    for (var i = 0; i < changed.length; i += batchSize) {
+      final batch = changed.skip(i).take(batchSize).toList(growable: false);
+      final batchRows = await Future.wait(
+        batch.map((f) async {
+          final base = TrackItem.fromFilePath(f.path);
+          try {
+            final parsed = await readAudioMetadata(base);
+            return CachedTrackSnapshot(
+              track: parsed,
+              fileModifiedMs: f.lastModifiedMs,
+              fileSizeBytes: f.fileSizeBytes,
+            );
+          } catch (e, st) {
+            debugPrint('browse subtree rescan metadata ${f.path}: $e\n$st');
+            return CachedTrackSnapshot(
+              track: base,
+              fileModifiedMs: f.lastModifiedMs,
+              fileSizeBytes: f.fileSizeBytes,
+            );
+          }
+        }),
+      );
+      await SongMetadataCache.saveTrackSnapshots(batchRows);
+      for (final row in batchRows) {
+        final p = row.track.filePath?.trim();
+        if (p != null && p.isNotEmpty) {
+          newByPath[p] = row.track;
+        }
+      }
+    }
+
+    final subtreeTracksOrdered = <TrackItem>[];
+    for (final f in scanned) {
+      final p = f.path;
+      if (newByPath.containsKey(p)) {
+        subtreeTracksOrdered.add(newByPath[p]!);
+      } else {
+        final snap = subtreeCached[p];
+        subtreeTracksOrdered.add(snap?.track ?? TrackItem.fromFilePath(p));
+      }
+    }
+
+    final merged = <TrackItem>[...kept, ...subtreeTracksOrdered];
+    final mergedPaths = merged
+        .map((t) => t.filePath)
+        .whereType<String>()
+        .toSet();
+
+    await RecentlyAddedStore.mergeScanPaths(mergedPaths);
+    if (!mounted) return;
+    unawaited(SongMetadataCache.deleteMissingPaths(mergedPaths));
+    unawaited(SongMetadataCache.saveTracks(merged));
+
+    player.setLibraryCatalog(merged);
+    FolderCountCache.instance.clear();
+    unawaited(
+      player.prefillArtAvailabilityFromDiskCache(
+        subtreeTracksOrdered.map((t) => t.filePath).whereType<String>(),
+      ),
+    );
+    _scheduleAlbumArtWarmup(player);
+
+    final wasPlaying = player.isPlaying || player.audioPlayer.playing;
+    final playbackPosition = player.position;
+    if (player.playlist.isNotEmpty) {
+      if (player.refreshLibraryDuringPlayback(merged)) {
+        // ok
+      } else {
+        await player.tryResyncQueueWithLibraryScan(
+          merged,
+          resumePosition: playbackPosition,
+          resumePlaying: wasPlaying,
+        );
+      }
+    }
+
+    final enrichPlaying = player.isPlaying || player.audioPlayer.playing;
+    unawaited(
+      enrichPlaylistTracks(
+        tracks: subtreeTracksOrdered,
+        onTrackUpdated: (path, updated) {
+          player.updateTrackByPath(
+            path,
+            updated,
+            notify: CatalogNotifyMode.throttled,
+            refreshNotificationArt: false,
+          );
+          unawaited(SongMetadataCache.saveTracks([updated]));
+        },
+        scannedByPath: scannedByPath,
+        snapshotsByPath: subtreeCached,
+        backgroundSyncPending: true,
+        isPlaying: enrichPlaying,
+        libraryLength: merged.length,
+      ).catchError((Object e, StackTrace st) {
+        debugPrint('enrichPlaylistTracks (browse subtree): $e\n$st');
+      }),
+    );
   }
 
   void _openDrawer() {
@@ -1043,6 +1298,19 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           musicRoots: _folderPaths,
           onOverflow: _onLibraryTrackOverflow,
           onOpenNowPlaying: _openNowPlaying,
+          onOpenLibrary: _goLibrary,
+          onOpenSettings: _goSettings,
+          onOpenHelp: () {
+            Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                builder: (helpCtx) =>
+                    HelpScreen(onBack: () => Navigator.of(helpCtx).pop()),
+              ),
+            );
+          },
+          onQuit: () {
+            unawaited(_quitApp());
+          },
           onRefreshLibrary: _refreshLibraryScan,
         ),
       ),
@@ -1109,9 +1377,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 Navigator.pop(context);
                 Navigator.of(context).push<void>(
                   MaterialPageRoute<void>(
-                    builder: (ctx) => HelpScreen(
-                      onBack: () => Navigator.of(ctx).pop(),
-                    ),
+                    builder: (ctx) =>
+                        HelpScreen(onBack: () => Navigator.of(ctx).pop()),
                   ),
                 );
               },
@@ -1274,87 +1541,106 @@ class _GlossyDrawer extends StatelessWidget {
     final pal = context.palette;
     final theme = Theme.of(context);
     final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+    final drawerBg = Color.alphaBlend(
+      pal.onScaffold.withValues(alpha: 0.04),
+      pal.surface,
+    );
 
     return Drawer(
-      backgroundColor: Colors.transparent,
+      backgroundColor: drawerBg,
       elevation: 0,
-      child: DaisyBackground(
-        baseColor: pal.surface,
-        child: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-                child: Text(
-                  'MadPlayer',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    color: ivy ? const Color(0xFF1C1C1E) : pal.onScaffold,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color.alphaBlend(
+                pal.onScaffold.withValues(alpha: 0.05),
+                drawerBg,
+              ),
+              drawerBg,
+            ],
+          ),
+        ),
+        child: DaisyBackground(
+          baseColor: drawerBg,
+          child: SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+                  child: Text(
+                    'MadPlayer',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      color: ivy ? const Color(0xFF1C1C1E) : pal.textPrimary,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5,
+                    ),
                   ),
                 ),
-              ),
-              Divider(
-                indent: 24,
-                endIndent: 24,
-                thickness: 0.8,
-                color: pal.onScaffold.withValues(alpha: 0.12),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  children: [
-                    _GlossyDrawerTile(
-                      icon: Icons.play_circle_outline_rounded,
-                      label: 'Now playing',
-                      onTap: hasCurrentTrack ? onNowPlaying : null,
-                      selected: false,
-                    ),
-                    _GlossyDrawerTile(
-                      icon: Icons.library_music_outlined,
-                      label: 'Library',
-                      onTap: onLibrary,
-                      selected: currentPage == _ShellPage.library,
-                    ),
-                    _GlossyDrawerTile(
-                      icon: Icons.folder_open_rounded,
-                      label: 'Files',
-                      onTap: onFiles,
-                      selected: false,
-                    ),
-                    _GlossyDrawerTile(
-                      icon: Icons.settings_outlined,
-                      label: 'Settings',
-                      onTap: onSettings,
-                      selected: currentPage == _ShellPage.settings,
-                    ),
-                    _GlossyDrawerTile(
-                      icon: Icons.help_outline_rounded,
-                      label: 'Help',
-                      onTap: onHelp,
-                      selected: false,
-                    ),
-                  ],
+                Divider(
+                  indent: 24,
+                  endIndent: 24,
+                  thickness: 0.8,
+                  color: pal.onScaffold.withValues(alpha: 0.12),
                 ),
-              ),
-              Divider(
-                indent: 24,
-                endIndent: 24,
-                thickness: 0.8,
-                color: pal.onScaffold.withValues(alpha: 0.12),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
-                child: _GlossyDrawerTile(
-                  icon: Icons.power_settings_new_rounded,
-                  label: 'Quit',
-                  onTap: onQuit,
-                  selected: false,
+                const SizedBox(height: 12),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    children: [
+                      _GlossyDrawerTile(
+                        icon: Icons.play_circle_outline_rounded,
+                        label: 'Now playing',
+                        onTap: hasCurrentTrack ? onNowPlaying : null,
+                        selected: false,
+                      ),
+                      _GlossyDrawerTile(
+                        icon: Icons.library_music_outlined,
+                        label: 'Library',
+                        onTap: onLibrary,
+                        selected: currentPage == _ShellPage.library,
+                      ),
+                      _GlossyDrawerTile(
+                        icon: Icons.folder_open_rounded,
+                        label: 'Files',
+                        onTap: onFiles,
+                        selected: false,
+                      ),
+                      _GlossyDrawerTile(
+                        icon: Icons.settings_outlined,
+                        label: 'Settings',
+                        onTap: onSettings,
+                        selected: currentPage == _ShellPage.settings,
+                      ),
+                      _GlossyDrawerTile(
+                        icon: Icons.help_outline_rounded,
+                        label: 'Help',
+                        onTap: onHelp,
+                        selected: false,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                Divider(
+                  indent: 24,
+                  endIndent: 24,
+                  thickness: 0.8,
+                  color: pal.onScaffold.withValues(alpha: 0.12),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                  child: _GlossyDrawerTile(
+                    icon: Icons.power_settings_new_rounded,
+                    label: 'Quit',
+                    onTap: onQuit,
+                    selected: false,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1377,8 +1663,12 @@ class _GlossyDrawerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
     final pal = context.palette;
+    final ivy = context.appliedThemePalette == AppThemePalette.ivy;
+    final baseTextColor = pal.textPrimary;
+    final mutedTextColor = pal.textSecondary;
+    final selectedTextColor = ivy ? const Color(0xFF1C1C1E) : baseTextColor;
+    final unselectedTextColor = ivy ? const Color(0xFF48484A) : mutedTextColor;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1393,8 +1683,8 @@ class _GlossyDrawerTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
               color: selected
                   ? (ivy
-                      ? Colors.white.withValues(alpha: 0.5)
-                      : pal.onScaffold.withValues(alpha: 0.1))
+                        ? Colors.white.withValues(alpha: 0.5)
+                        : pal.onScaffold.withValues(alpha: 0.1))
                   : null,
             ),
             child: Row(
@@ -1403,20 +1693,14 @@ class _GlossyDrawerTile extends StatelessWidget {
                   icon,
                   color: selected
                       ? (ivy ? const Color(0xFF1C1C1E) : context.controlAccent)
-                      : (ivy
-                          ? const Color(0xFF48484A)
-                          : pal.onScaffold.withValues(alpha: 0.7)),
+                      : unselectedTextColor,
                   size: 26,
                 ),
                 const SizedBox(width: 16),
                 Text(
                   label,
                   style: TextStyle(
-                    color: selected
-                        ? (ivy ? const Color(0xFF1C1C1E) : pal.onScaffold)
-                        : (ivy
-                            ? const Color(0xFF48484A)
-                            : pal.onScaffold.withValues(alpha: 0.8)),
+                    color: selected ? selectedTextColor : unselectedTextColor,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     fontSize: 16,
                   ),

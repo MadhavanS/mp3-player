@@ -133,4 +133,16 @@ class RecentlyAddedStore {
     await prefs.setString(_prefsKey, jsonEncode(m));
     revision.value++;
   }
+
+  /// Removes [path] from the recently-added key map.
+  static Future<void> removePathKey(String path) async {
+    final key = canonicalMusicLibraryPathKey(path);
+    if (key.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final m = await _loadMap();
+    if (!m.containsKey(key)) return;
+    m.remove(key);
+    await prefs.setString(_prefsKey, jsonEncode(m));
+    revision.value++;
+  }
 }

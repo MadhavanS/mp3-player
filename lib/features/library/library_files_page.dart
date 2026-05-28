@@ -16,6 +16,10 @@ class LibraryFilesPage extends StatefulWidget {
     required this.musicRoots,
     required this.onOverflow,
     required this.onOpenNowPlaying,
+    required this.onOpenLibrary,
+    required this.onOpenSettings,
+    required this.onOpenHelp,
+    required this.onQuit,
     this.onRefreshLibrary,
   });
 
@@ -26,6 +30,10 @@ class LibraryFilesPage extends StatefulWidget {
 
   /// Same as shell mini player tap — opens full Now Playing.
   final VoidCallback onOpenNowPlaying;
+  final VoidCallback onOpenLibrary;
+  final VoidCallback onOpenSettings;
+  final VoidCallback onOpenHelp;
+  final VoidCallback onQuit;
 
   final Future<void> Function(
     BuildContext context,
@@ -42,7 +50,30 @@ class LibraryFilesPage extends StatefulWidget {
 }
 
 class _LibraryFilesPageState extends State<LibraryFilesPage> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _searchController = TextEditingController();
+
+  void _openDrawer() {
+    _scaffoldKey.currentState?.openDrawer();
+  }
+
+  void _closeDrawer() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _switchToLibrary() {
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    widget.onOpenLibrary();
+  }
+
+  void _switchToSettings() {
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    widget.onOpenSettings();
+  }
 
   @override
   void initState() {
@@ -106,7 +137,56 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
     final player = PlayerController.of(context);
 
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: pal.scaffoldBackground,
+      drawer: Drawer(
+        backgroundColor: pal.surface,
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            children: [
+              ListTile(
+                leading: const Icon(Icons.play_circle_outline_rounded),
+                title: const Text('Now playing'),
+                onTap: () {
+                  _closeDrawer();
+                  widget.onOpenNowPlaying();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.library_music_outlined),
+                title: const Text('Library'),
+                onTap: _switchToLibrary,
+              ),
+              const ListTile(
+                leading: Icon(Icons.folder_open_rounded),
+                title: Text('Files'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings_outlined),
+                title: const Text('Settings'),
+                onTap: _switchToSettings,
+              ),
+              ListTile(
+                leading: const Icon(Icons.help_outline_rounded),
+                title: const Text('Help'),
+                onTap: () {
+                  _closeDrawer();
+                  widget.onOpenHelp();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.power_settings_new_rounded),
+                title: const Text('Quit'),
+                onTap: () {
+                  _closeDrawer();
+                  widget.onQuit();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
       body: DaisyBackground(
         baseColor: pal.scaffoldBackground,
         child: SafeArea(
@@ -119,10 +199,10 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.arrow_back_rounded),
-                      tooltip: 'Close',
+                      icon: const Icon(Icons.menu_rounded),
+                      tooltip: 'Open menu',
                       color: pal.onScaffold,
-                      onPressed: () => Navigator.of(context).maybePop(),
+                      onPressed: _openDrawer,
                     ),
                     Expanded(
                       child: TextField(
@@ -152,10 +232,7 @@ class _LibraryFilesPageState extends State<LibraryFilesPage> {
                   onRefreshLibrary: widget.onRefreshLibrary,
                 ),
               ),
-              MiniPlayerBar(
-                controller: player,
-                onTap: widget.onOpenNowPlaying,
-              ),
+              MiniPlayerBar(controller: player, onTap: widget.onOpenNowPlaying),
             ],
           ),
         ),

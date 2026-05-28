@@ -90,6 +90,7 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
       _scheduleAndroidHomeWidgetSync();
     } else if (state == AppLifecycleState.detached) {
       _markAndroidHomeWidgetPausedAppearance();
+      unawaited(_shutdownPlaybackForProcessExit());
     }
   }
 
@@ -99,6 +100,13 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
     _androidWidgetProgressTimer?.cancel();
     _androidWidgetSyncDebounce?.cancel();
     unawaited(AndroidHomeWidgetBridge.setPlayingIndicator(false));
+  }
+
+  Future<void> _shutdownPlaybackForProcessExit() async {
+    try {
+      await _player.audioPlayer.stop();
+    } catch (_) {}
+    await PlayerController.shutdownNativePlayer();
   }
 
   bool _onGlobalHardwareKey(KeyEvent event) {
