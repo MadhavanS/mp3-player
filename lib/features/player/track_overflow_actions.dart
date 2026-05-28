@@ -173,6 +173,7 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
     this.overflowIcon = Icons.more_horiz_rounded,
     this.iconSize = 24,
     this.menuIconColor,
+    this.showFavoriteBadge = true,
   });
 
   final AppPalette pal;
@@ -184,6 +185,7 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
   /// Defaults to [AppPalette.onScaffold] at 80% opacity (library). Files explorer
   /// passes a muted variant so the heart still uses [BuildContext.controlAccent].
   final Color? menuIconColor;
+  final bool showFavoriteBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -199,7 +201,7 @@ class TrackOverflowMenuWithFavourite extends StatelessWidget {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (isFav)
+            if (isFav && showFavoriteBadge)
               Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Icon(

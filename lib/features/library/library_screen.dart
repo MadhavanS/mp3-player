@@ -1888,6 +1888,10 @@ class LibraryScreenState extends State<LibraryScreen>
                                         : pal.onScaffold,
                                   ),
                                   padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 152,
+                                    maxWidth: 188,
+                                  ),
                                   onSelected: (value) async {
                                     if (value is LibraryTrackSortMode) {
                                       await LibraryTrackSortStore.save(value);
@@ -1912,32 +1916,44 @@ class LibraryScreenState extends State<LibraryScreen>
                                         >(
                                           value: mode,
                                           checked: mode == _songSortMode,
+                                          height: 32,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                          ),
                                           child: Text(
                                             mode.menuLabel,
                                             style: isIvy
                                                 ? const TextStyle(
                                                     color: Colors.white,
                                                     fontWeight: FontWeight.w600,
+                                                    fontSize: 12,
                                                   )
-                                                : null,
+                                                : const TextStyle(fontSize: 12),
                                           ),
                                         ),
                                     ];
                                     if (_songsAlphabetExperimentEnabled) {
-                                      items.add(const PopupMenuDivider());
+                                      items.add(
+                                        const PopupMenuDivider(height: 4),
+                                      );
                                       items.add(
                                         CheckedPopupMenuItem<Object>(
                                           value:
                                               _SongsMenuAction.toggleAlphaIndex,
                                           checked: _songsAlphabetIndexEnabled,
+                                          height: 32,
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                          ),
                                           child: Text(
                                             'Alphabet quick index',
                                             style: isIvy
                                                 ? const TextStyle(
                                                     color: Colors.white,
                                                     fontWeight: FontWeight.w600,
+                                                    fontSize: 12,
                                                   )
-                                                : null,
+                                                : const TextStyle(fontSize: 12),
                                           ),
                                         ),
                                       );
@@ -3378,10 +3394,49 @@ class _TrackTileBody extends StatelessWidget {
             ],
           ),
         ),
+        Builder(
+          builder: (context) {
+            final path = track.filePath?.trim() ?? '';
+            if (path.isEmpty) return const SizedBox.shrink();
+            return ValueListenableBuilder<int>(
+              valueListenable: FavoriteSongsStore.revision,
+              builder: (context, _, __) {
+                final isFav = FavoriteSongsStore.isFavorite(path);
+                return IconButton(
+                  tooltip: isFav ? 'Remove from favourites' : 'Add to favourites',
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    isFav
+                        ? Icons.favorite_rounded
+                        : Icons.favorite_border_rounded,
+                    color: isFav
+                        ? Colors.redAccent
+                        : (isIvy
+                              ? const Color(0xFF48484A)
+                              : pal.textSecondary.withValues(alpha: 0.92)),
+                  ),
+                  onPressed: () async {
+                    final nowFav = await FavoriteSongsStore.toggleFavorite(path);
+                    if (!context.mounted) return;
+                    ActionPillToast.show(
+                      context,
+                      nowFav ? 'Favourited' : 'Removed from favourites',
+                      icon: nowFav
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      uppercaseLabel: true,
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
         if (onOverflowAction != null)
           TrackOverflowMenuWithFavourite(
             pal: pal,
             track: track,
+            showFavoriteBadge: false,
             onSelected: onOverflowAction!,
           ),
       ],
