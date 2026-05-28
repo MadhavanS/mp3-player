@@ -68,6 +68,25 @@ class TrackAlbumArt extends StatelessWidget {
     return key.isEmpty ? 'track-art' : key;
   }
 
+  static const int _kRememberedArtMaxEntries = 64;
+  static final Map<String, Uint8List> _rememberedArtByPathKey =
+      <String, Uint8List>{};
+
+  void _rememberArt(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    final key = _pathKey;
+    _rememberedArtByPathKey.remove(key);
+    _rememberedArtByPathKey[key] = bytes;
+    if (_rememberedArtByPathKey.length > _kRememberedArtMaxEntries) {
+      final oldest = _rememberedArtByPathKey.keys.first;
+      _rememberedArtByPathKey.remove(oldest);
+    }
+  }
+
+  Uint8List? _rememberedArt() => _rememberedArtByPathKey[_pathKey];
+
+  ValueKey<String> get _stableArtKey => ValueKey<String>('$_pathKey.art');
+
   Widget _noArtPlaceholder(BuildContext context) {
     if (context.appliedThemePalette == AppThemePalette.daisy) {
       return _daisyPlaceholderDecoration(context);
@@ -111,11 +130,12 @@ class TrackAlbumArt extends StatelessWidget {
         targetDimension: pixelSize,
       );
       if (sync != null && sync.isNotEmpty) {
+        _rememberArt(sync);
         return _imageShell(
           context,
           sync,
           pixelSize,
-          key: ValueKey<String>('$_pathKey.sync'),
+          key: _stableArtKey,
         );
       }
       return FutureBuilder<Uint8List?>(
@@ -132,13 +152,15 @@ class TrackAlbumArt extends StatelessWidget {
 
     final bytes = track.albumArtBytes;
     if (bytes != null && bytes.isNotEmpty) {
+      _rememberArt(bytes);
       final cached = cachedAlbumArtSync(track, maxDimension: pixelSize);
       if (cached != null && cached.isNotEmpty) {
+        _rememberArt(cached);
         return _imageShell(
           context,
           cached,
           pixelSize,
-          key: ValueKey<String>('$_pathKey.sync'),
+          key: _stableArtKey,
         );
       }
       return FutureBuilder<Uint8List?>(
@@ -156,11 +178,12 @@ class TrackAlbumArt extends StatelessWidget {
         targetDimension: pixelSize,
       );
       if (fromDisk != null && fromDisk.isNotEmpty) {
+        _rememberArt(fromDisk);
         return _imageShell(
           context,
           fromDisk,
           pixelSize,
-          key: ValueKey<String>('$_pathKey.sync'),
+          key: _stableArtKey,
         );
       }
       return FutureBuilder<Uint8List?>(
@@ -183,7 +206,28 @@ class TrackAlbumArt extends StatelessWidget {
     int pixelSize,
   ) {
     if (art == null || art.isEmpty) {
+      final remembered = _rememberedArt();
+      if (remembered != null && remembered.isNotEmpty) {
+        return _imageShell(
+          context,
+          remembered,
+          pixelSize,
+          key: _stableArtKey,
+        );
+      }
       return _noArtPlaceholder(context);
+    }
+    _rememberArt(art);
+    if (display == TrackArtDisplay.mini ||
+        display == TrackArtDisplay.nowPlaying) {
+      // Under heavy queue expansion, mini/now-playing can rebuild rapidly.
+      // Avoid cross-fade transitions there to prevent visible flicker.
+      return _imageShell(
+        context,
+        art,
+        pixelSize,
+        key: _stableArtKey,
+      );
     }
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 180),
@@ -191,7 +235,7 @@ class TrackAlbumArt extends StatelessWidget {
         context,
         art,
         pixelSize,
-        key: ValueKey<String>('$_pathKey.loaded'),
+        key: _stableArtKey,
       ),
     );
   }

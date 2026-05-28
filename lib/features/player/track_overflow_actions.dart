@@ -14,6 +14,8 @@ import '../../services/song_metadata_cache.dart';
 import '../../services/storage_access.dart';
 import '../../services/track_file_delete.dart';
 import '../../services/user_playlists_store.dart';
+import '../../services/recently_added_store.dart';
+import '../../services/recently_played_store.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
@@ -52,10 +54,10 @@ Widget _compactOverflowMenuRow({
     builder: (context) {
       final ivy = context.appliedThemePalette == AppThemePalette.ivy;
       final ink = ivy ? Colors.white : const Color(0xFF1C1C1E);
-      final muted = ivy 
-          ? Colors.white.withValues(alpha: 0.7) 
+      final muted = ivy
+          ? Colors.white.withValues(alpha: 0.7)
           : const Color(0xFF48484A);
-      
+
       final effectiveIconColor = iconColor ?? (ivy ? muted : null);
       final effectiveLabelColor = labelColor ?? (ivy ? ink : null);
 
@@ -69,7 +71,7 @@ Widget _compactOverflowMenuRow({
         title: Text(
           label,
           style: TextStyle(
-            fontSize: 14, 
+            fontSize: 14,
             color: effectiveLabelColor,
             fontWeight: ivy ? FontWeight.w600 : null,
           ),
@@ -355,10 +357,11 @@ Future<void> showUserPlaylistPickerAndAddPaths(
                         style: TextStyle(color: pal.textSecondary),
                       ),
                       onTap: () async {
-                        final added = await UserPlaylistsStore.addPathsToPlaylist(
-                          pl.id,
-                          paths,
-                        );
+                        final added =
+                            await UserPlaylistsStore.addPathsToPlaylist(
+                              pl.id,
+                              paths,
+                            );
                         if (context.mounted) {
                           final player = PlayerController.of(context);
                           for (final path in paths) {
@@ -595,10 +598,17 @@ Future<void> applyTrackOverflowAction(
       }
 
     case TrackOverflowAction.playFromHere:
+      // Ensure we are not constrained by an older folder/files scope.
+      // "Play from here" should run on the full provided list.
+      player.setPlaybackPathKeyScope(null, reloadQueue: false);
       await player.setPlaylistAndPlay(
-        tracks.sublist(ix),
+        tracks,
+        startIndex: ix,
         playbackOriginTab: tab ?? LibraryTabId.songs,
-        keepShuffleMode: true,
+        // "Play from here" should continue in visible list order, not preserve
+        // any prior random shuffle order from the previous queue/session.
+        keepShuffleMode: false,
+        enableShuffle: false,
       );
 
     case TrackOverflowAction.playOnlyThis:
@@ -711,7 +721,8 @@ Future<void> applyTrackOverflowAction(
       final wasPlaying = player.isPlaying;
       final pathKey = canonicalMusicLibraryPathKey(path);
       final curPath = player.currentTrack?.filePath?.trim();
-      final targetsCurrent = curPath != null &&
+      final targetsCurrent =
+          curPath != null &&
           curPath.isNotEmpty &&
           canonicalMusicLibraryPathKey(curPath) == pathKey;
 
@@ -742,17 +753,34 @@ Future<void> applyTrackOverflowAction(
       await player.evictArtCachesForPath(path);
       player.removeFromLibraryCatalogByPath(path);
       unawaited(SongMetadataCache.deletePaths([path]));
-      final queueIx = player.playlist.indexWhere((t) {
-        final fp = t.filePath?.trim();
-        return fp != null &&
-            fp.isNotEmpty &&
-            canonicalMusicLibraryPathKey(fp) == pathKey;
-      });
-      if (queueIx >= 0) {
+      await Future.wait([
+        FavoriteSongsStore.removePath(path),
+        RecentlyPlayedStore.removePath(path),
+        RecentlyAddedStore.removePathKey(path),
+        UserPlaylistsStore.removePathFromAllPlaylists(path),
+      ]);
+
+      var resumedCurrentRemoval = false;
+      while (true) {
+        var queueIx = -1;
+        for (var qi = 0; qi < player.playlist.length; qi++) {
+          final fp = player.playlist[qi].filePath?.trim();
+          if (fp == null || fp.isEmpty) continue;
+          if (canonicalMusicLibraryPathKey(fp) == pathKey) {
+            queueIx = qi;
+            break;
+          }
+        }
+        if (queueIx < 0) break;
+        final isCurrentQueueItem = queueIx == player.currentIndex;
         await player.removePlaylistEntryAt(
           queueIx,
-          resumePlayingIfCurrentRemoved: wasPlaying && targetsCurrent,
+          resumePlayingIfCurrentRemoved:
+              isCurrentQueueItem && wasPlaying && !resumedCurrentRemoval,
         );
+        if (isCurrentQueueItem) {
+          resumedCurrentRemoval = true;
+        }
       }
 
       if (context.mounted) {
