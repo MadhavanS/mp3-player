@@ -6,11 +6,15 @@ class SongFileInfo {
     required this.fileName,
     required this.folderPath,
     required this.sizeBytes,
+    required this.durationMs,
+    required this.bitrateKbps,
   });
 
   final String fileName;
   final String folderPath;
   final int? sizeBytes;
+  final int? durationMs;
+  final int? bitrateKbps;
 }
 
 Future<SongFileInfo> readSongFileInfo(String? filePath) =>

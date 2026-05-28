@@ -9,11 +9,15 @@ Future<SongFileInfo> readSongFileInfo(String? filePath) async {
       fileName: 'Unknown',
       folderPath: 'Unknown',
       sizeBytes: null,
+      durationMs: null,
+      bitrateKbps: null,
     );
   }
   return SongFileInfo(
     fileName: p.basename(raw),
     folderPath: p.dirname(raw),
     sizeBytes: null,
+    durationMs: null,
+    bitrateKbps: null,
   );
 }

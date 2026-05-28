@@ -601,6 +601,23 @@ Future<void> applyTrackOverflowAction(
     return '${value.toStringAsFixed(precision)} ${units[unit]}';
   }
 
+  String _formatDuration(int? durationMs) {
+    if (durationMs == null || durationMs <= 0) return 'Unknown';
+    final totalSeconds = durationMs ~/ 1000;
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String _formatBitrate(int? bitrateKbps) {
+    if (bitrateKbps == null || bitrateKbps <= 0) return 'Unknown';
+    return '$bitrateKbps kbps';
+  }
+
   Future<void> showTrackInfoDialog(TrackItem track) async {
     if (!context.mounted) return;
     final info = await readSongFileInfo(track.filePath);
@@ -643,6 +660,34 @@ Future<void> applyTrackOverflowAction(
               const SizedBox(height: 4),
               Text(
                 _formatBytes(info.sizeBytes),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Duration',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: pal.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _formatDuration(info.durationMs),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: pal.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Bit rate',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: pal.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _formatBitrate(info.bitrateKbps),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: pal.textPrimary,
                 ),
