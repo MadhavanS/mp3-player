@@ -14,7 +14,10 @@ import io.flutter.embedding.engine.FlutterEngine
 class Mp3PlayerAudioServiceActivity : AudioServiceActivity() {
 
     override fun getCachedEngineId(): String {
-        AudioServicePlugin.getFlutterEngine(this)
+        // Cached engines from audio_service may skip configureFlutterEngine on
+        // hot restart / reopen; ensure widget MethodChannel is always registered.
+        val engine = AudioServicePlugin.getFlutterEngine(this)
+        Mp3PlayerWidgetMethodChannel.attach(engine, applicationContext)
         return AudioServicePlugin.getFlutterEngineId()
     }
 

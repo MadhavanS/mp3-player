@@ -42,9 +42,14 @@ class WidgetMediaActionReceiver : BroadcastReceiver() {
                     when (action) {
                         ACTION_PLAY_PAUSE -> {
                             val st = controller.playbackState?.state ?: PlaybackStateCompat.STATE_NONE
+                            val prefsPlaying = appCtx.getSharedPreferences(
+                                Mp3PlayerWidgetPrefs.PREFS_NAME,
+                                Context.MODE_PRIVATE,
+                            ).getBoolean(Mp3PlayerWidgetPrefs.PLAYING, false)
                             val activelyPlaying =
                                 st == PlaybackStateCompat.STATE_PLAYING ||
-                                    st == PlaybackStateCompat.STATE_BUFFERING
+                                    st == PlaybackStateCompat.STATE_BUFFERING ||
+                                    (st == PlaybackStateCompat.STATE_NONE && prefsPlaying)
                             if (activelyPlaying) tc.pause() else tc.play()
                             finishDeferred = true
                             refreshAfterMetadataSettles(

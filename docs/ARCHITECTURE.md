@@ -22,6 +22,7 @@ lib/
     shell/                         # Main shell, folder scan, background sync
   services/
     library_track_sort.dart        # Shared sort modes (Songs + Files)
+    track_grouping.dart            # Reusable group resolvers (album now, artist-ready)
     song_metadata_cache_io.dart    # Isar tag cache (fingerprints, no art bytes)
     album_art_cache_io.dart        # Path-keyed PNG disk cache for list art
     track_metadata_io.dart         # metadata_god → Dart fallback reads
@@ -237,6 +238,45 @@ Defined in `lib/services/library_track_sort.dart`, persisted via `LibraryTrackSo
 | `titleAZ` / `titleZA` | Title, then path |
 
 Shared by **Library → Songs** and **drawer → Files** (MP3 listings).
+
+---
+
+## Context track groups (Album now, Artist-ready)
+
+Track overflow actions can open a dedicated grouped-track screen from the selected row.
+
+- `TrackOverflowAction.albumTracks` launches `ContextTracksScreen`.
+- Group matching is centralized in `lib/services/track_grouping.dart`:
+  - `TrackGroupKind` (`album`, reserved `artist` for follow-up)
+  - `TrackGroupRequest`
+  - `resolveTracksForGroup(...)`
+- Current implementation filters from `PlayerController.libraryCatalog` and plays only
+  the grouped list (`setPlaylistAndPlay`) from:
+  - `Play all` (index 0)
+  - tapped track index in grouped list.
+
+This keeps grouping logic reusable and UI-agnostic so adding Artist tracks later is a
+new menu action + request type, not a second screen architecture.
+
+---
+
+## Recent behavior fixes (stability + UX)
+
+- **Queue correctness:** "play from here" and folder/songs start points now keep the
+  full list and set `startIndex` instead of truncating with `sublist(...)`.
+- **Shuffle/scope safety:** "play from here" clears prior folder scope and disables
+  inherited shuffle to prevent random carry-over after targeted starts.
+- **Queue mutation stability:** reorder/play-next paths prefer in-place concat updates,
+  defer expensive reloads while actively playing, and remap active order indexes to
+  avoid UI/native desync.
+- **Repeat-one correctness:** native loop mode is used and mutation-time completion
+  noise is guarded to prevent brief incorrect auto-advance.
+- **Startup empty state:** Songs/Recently Added show loading when folders exist but scan
+  metadata is still initializing; "No tracks yet" is now reserved for true empty setup.
+- **Drawer/menu UX:** Files route has its own drawer so hamburger remains in Files;
+  shell drawer styling and text now follow active theme contrast.
+- **Track info action:** overflow `Info` includes filename, size, duration, bitrate,
+  and folder path via platform-safe metadata lookup services.
 
 ---
 

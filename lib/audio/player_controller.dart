@@ -434,32 +434,33 @@ class PlayerController {
         return false;
       }
 
-      if (checkIndexRange &&
-          _playlistPaths.isNotEmpty &&
-          (_index < 0 || _index >= _playlistPaths.length)) {
-        debugPrint(
-          '[$context] _index=$_index out of range '
-          '(len=${_playlistPaths.length})',
-        );
-        return false;
-      }
+      if (checkIndexRange) {
+        if (_playlistPaths.isNotEmpty &&
+            (_index < 0 || _index >= _playlistPaths.length)) {
+          debugPrint(
+            '[$context] _index=$_index out of range '
+            '(len=${_playlistPaths.length})',
+          );
+          return false;
+        }
 
-      if (_shuffle && _shuffleOrder.length != _playlistPaths.length) {
-        debugPrint(
-          '[$context] shuffleOrder.length=${_shuffleOrder.length} '
-          '!= paths.length=${_playlistPaths.length}',
-        );
-        return false;
-      }
+        if (_shuffle && _shuffleOrder.length != _playlistPaths.length) {
+          debugPrint(
+            '[$context] shuffleOrder.length=${_shuffleOrder.length} '
+            '!= paths.length=${_playlistPaths.length}',
+          );
+          return false;
+        }
 
-      if (_shuffle &&
-          _shuffleOrder.isNotEmpty &&
-          (_shufflePos < 0 || _shufflePos >= _shuffleOrder.length)) {
-        debugPrint(
-          '[$context] _shufflePos=$_shufflePos out of range '
-          '(shuffleLen=${_shuffleOrder.length})',
-        );
-        return false;
+        if (_shuffle &&
+            _shuffleOrder.isNotEmpty &&
+            (_shufflePos < 0 || _shufflePos >= _shuffleOrder.length)) {
+          debugPrint(
+            '[$context] _shufflePos=$_shufflePos out of range '
+            '(shuffleLen=${_shuffleOrder.length})',
+          );
+          return false;
+        }
       }
 
       debugPrint(
@@ -3430,12 +3431,11 @@ class PlayerController {
   Future<void> pause() async {
     _playbackPausedByUser = true;
     _invalidatePlayResumeRetries();
+    _schedulePlayerUiNotify();
     try {
-      // [AudioPlayer.pause] no-ops when [playing] is already false, but ExoPlayer
-      // can still be outputting audio after a handler/UI desync.
-      if (_player.playing) {
-        await _player.pause();
-      }
+      // Always issue pause once; transport state can briefly lag around
+      // notification/widget taps and report !playing while audio is still running.
+      await _player.pause();
       if (!kIsWeb &&
           (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS)) {

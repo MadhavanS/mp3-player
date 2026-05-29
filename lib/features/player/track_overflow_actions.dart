@@ -13,6 +13,7 @@ import '../../services/music_library_path_key.dart';
 import '../../services/song_metadata_cache.dart';
 import '../../services/song_file_info.dart';
 import '../../services/storage_access.dart';
+import '../../services/track_grouping.dart';
 import '../../services/track_file_delete.dart';
 import '../../services/user_playlists_store.dart';
 import '../../services/recently_added_store.dart';
@@ -21,6 +22,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../../widgets/player_adaptive_controls.dart';
+import '../library/context_tracks_screen.dart';
 import 'edit_track_tags_sheet.dart';
 import 'site_rename_standalone_dialog.dart';
 
@@ -28,6 +30,8 @@ enum TrackOverflowAction {
   playNext,
   playFromHere,
   playOnlyThis,
+  albumTracks,
+  artistTracks,
   info,
   addToPlaylist,
   removeFromPlaylist,
@@ -109,6 +113,20 @@ List<PopupMenuEntry<TrackOverflowAction>> trackOverflowPopupMenuEntries({
       child: _compactOverflowMenuRow(
         icon: Icons.music_note_rounded,
         label: 'Play this song only',
+      ),
+    ),
+    PopupMenuItem(
+      value: TrackOverflowAction.albumTracks,
+      child: _compactOverflowMenuRow(
+        icon: Icons.album_outlined,
+        label: 'Album Tracks',
+      ),
+    ),
+    PopupMenuItem(
+      value: TrackOverflowAction.artistTracks,
+      child: _compactOverflowMenuRow(
+        icon: Icons.person_outline_rounded,
+        label: 'Artist Tracks',
       ),
     ),
     PopupMenuItem(
@@ -719,6 +737,15 @@ Future<void> applyTrackOverflowAction(
     );
   }
 
+  double _adaptiveContextSheetHeight(BuildContext context, int trackCount) {
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final maxHeight = screenHeight * 0.8;
+    const baseChrome = 190.0; // handle + header + actions + paddings
+    const rowEstimate = 78.0; // one list row + divider
+    final wanted = baseChrome + (trackCount * rowEstimate);
+    return wanted.clamp(260.0, maxHeight);
+  }
+
   switch (action) {
     case TrackOverflowAction.playNext:
       final t = tracks[ix];
@@ -759,6 +786,56 @@ Future<void> applyTrackOverflowAction(
         [tracks[ix]],
         playbackOriginTab: tab ?? LibraryTabId.songs,
         keepShuffleMode: true,
+      );
+
+    case TrackOverflowAction.albumTracks:
+      final sourceTrack = tracks[ix];
+      final album = trackGroupValueFor(sourceTrack, TrackGroupKind.album);
+      final groupTracks = resolveTracksForGroup(
+        source: player.libraryCatalog,
+        request: TrackGroupRequest(kind: TrackGroupKind.album, value: album),
+      );
+      if (!context.mounted) return;
+      final sheetHeight = _adaptiveContextSheetHeight(context, groupTracks.length);
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useRootNavigator: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => SizedBox(
+          height: sheetHeight,
+          child: ContextTracksScreen(
+            groupKind: TrackGroupKind.album,
+            groupValue: album,
+            tracks: groupTracks,
+          ),
+        ),
+      );
+
+    case TrackOverflowAction.artistTracks:
+      final sourceTrack = tracks[ix];
+      final artist = trackGroupValueFor(sourceTrack, TrackGroupKind.artist);
+      final selectedArtists = splitArtistNames(artist);
+      final groupTracks = resolveTracksForArtists(
+        source: player.libraryCatalog,
+        artistNames: selectedArtists,
+      );
+      if (!context.mounted) return;
+      final sheetHeight = _adaptiveContextSheetHeight(context, groupTracks.length);
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useRootNavigator: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => SizedBox(
+          height: sheetHeight,
+          child: ContextTracksScreen(
+            groupKind: TrackGroupKind.artist,
+            groupValue: artist,
+            tracks: groupTracks,
+            initialArtistNames: selectedArtists,
+          ),
+        ),
       );
 
     case TrackOverflowAction.info:

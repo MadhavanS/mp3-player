@@ -9,6 +9,7 @@ A Flutter Android app that scans user-chosen music folders, plays local `.mp3` f
 1. **User-chosen path** — Select music folders in Settings; app scans recursively for `.mp3` files.
 2. **Local playback** — `just_audio` + `audio_service` / `just_audio_background` for background play and notifications.
 3. **Polished UI** — Multiple themes (Julia, Leah, Silver, Daisy, Ivy, …), liquid glass / mini player, library tabs.
+4. **Context actions** — Track overflow supports `Album Tracks` and `Info` (file details + technical metadata).
 
 ## Tech stack
 
@@ -64,6 +65,12 @@ Full **`setAudioSource`** reload happens for a new playlist, shuffle toggle (nex
 
 Default: **folder order** (Settings folder list, then path under each root).  
 Other modes: date modified, title A–Z / Z–A. Shared by Songs tab and Files browser (`LibraryTrackSortStore`).
+
+## Track overflow highlights
+
+- **Album Tracks:** Opens a dedicated grouped screen and plays only tracks in the same album.
+- **Info:** Shows filename, file size, duration, bitrate, and folder path.
+- Grouping internals are reusable (`lib/services/track_grouping.dart`) so Artist-based grouping can be added without rebuilding screen architecture.
 
 ## Project layout
 
