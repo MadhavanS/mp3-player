@@ -1,5 +1,6 @@
 package com.example.mp3_player
 
+import android.content.Intent
 import com.ryanheise.audioservice.AudioServiceActivity
 import com.ryanheise.audioservice.AudioServicePlugin
 import io.flutter.embedding.engine.FlutterEngine
@@ -26,6 +27,17 @@ class Mp3PlayerAudioServiceActivity : AudioServiceActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         Mp3PlayerWidgetMethodChannel.attach(flutterEngine, applicationContext)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // singleTask reuses this activity; keep intent + widget channel in sync with
+        // the cached audio_service FlutterEngine (notification / launcher relaunch).
+        setIntent(intent)
+        Mp3PlayerWidgetMethodChannel.attach(
+            AudioServicePlugin.getFlutterEngine(this),
+            applicationContext,
+        )
     }
 
     override fun onStop() {

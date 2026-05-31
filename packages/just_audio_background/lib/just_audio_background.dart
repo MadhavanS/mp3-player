@@ -115,6 +115,15 @@ class _JustAudioBackgroundPlugin extends JustAudioPlatform {
     bool preloadArtwork = false,
     Map<String, dynamic>? androidBrowsableRootExtras,
   }) async {
+    // Hot restart / activity relaunch keeps native ExoPlayer alive while Dart
+    // statics reset; release stale decoders before binding a fresh handler.
+    try {
+      await JustAudioPlatform.instance.disposeAllPlayers(
+        DisposeAllPlayersRequest(),
+      );
+    } catch (e, st) {
+      debugPrint('just_audio_background: dispose stale players: $e\n$st');
+    }
     _platform = JustAudioPlatform.instance;
     JustAudioPlatform.instance = _JustAudioBackgroundPlugin();
     _audioHandler = await AudioService.init(
