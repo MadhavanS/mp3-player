@@ -12,6 +12,7 @@ class SiteRenameSuggestion {
     required this.suggestedAlbum,
     required this.suggestedTitle,
     required this.suggestedGenre,
+    required this.suggestedComposer,
     required this.originalBasenameWithoutExt,
   });
 
@@ -20,6 +21,7 @@ class SiteRenameSuggestion {
   final String suggestedAlbum;
   final String suggestedTitle;
   final String suggestedGenre;
+  final String suggestedComposer;
   final String originalBasenameWithoutExt;
 
   bool get filenameChanged =>
@@ -31,7 +33,8 @@ class SiteRenameSuggestion {
           suggestedArtist.isNotEmpty ||
           suggestedAlbum.isNotEmpty ||
           suggestedTitle.isNotEmpty ||
-          suggestedGenre.isNotEmpty);
+          suggestedGenre.isNotEmpty ||
+          suggestedComposer.isNotEmpty);
 }
 
 abstract final class SiteTextConst {
@@ -39,6 +42,7 @@ abstract final class SiteTextConst {
   static const artist = 'artist';
   static const album = 'album';
   static const genre = 'genre';
+  static const composer = 'composer';
 }
 
 String _stripExtension(String? str) {
@@ -83,6 +87,7 @@ const _allFieldKeys = <String>[
   SiteTextConst.artist,
   SiteTextConst.album,
   SiteTextConst.genre,
+  SiteTextConst.composer,
 ];
 
 const _rules = <_Rule>[
@@ -501,12 +506,14 @@ class ResolvedTagsForWrite {
     required this.artist,
     required this.album,
     required this.genre,
+    required this.composer,
   });
 
   final String title;
   final String artist;
   final String album;
   final String genre;
+  final String composer;
 }
 
 /// Merges manual editor fields with [computeSiteRename] and on-disk tags.
@@ -516,20 +523,25 @@ ResolvedTagsForWrite resolveTagsForWrite({
   required String editorArtist,
   required String editorAlbum,
   required String editorGenre,
+  required String editorComposer,
   required String initialTitle,
   required String initialArtist,
   required String initialAlbum,
   required String initialGenre,
+  required String initialComposer,
   String? embeddedTitle,
   String? embeddedArtist,
   String? embeddedAlbum,
   String? embeddedGenre,
+  String? embeddedComposer,
   bool clearGenre = false,
+  bool clearComposer = false,
 }) {
   final fileTitle = (embeddedTitle ?? '').trim();
   final fileArtist = (embeddedArtist ?? '').trim();
   final fileAlbum = (embeddedAlbum ?? '').trim();
   final fileGenre = (embeddedGenre ?? '').trim();
+  final fileComposer = (embeddedComposer ?? '').trim();
 
   final suggestion = computeSiteRename(
     filePath: filePath,
@@ -545,6 +557,9 @@ ResolvedTagsForWrite resolveTagsForWrite({
     genreFromTags: editorGenre.trim().isNotEmpty
         ? editorGenre
         : (fileGenre.isNotEmpty ? fileGenre : initialGenre),
+    composerFromTags: editorComposer.trim().isNotEmpty
+        ? editorComposer
+        : (fileComposer.isNotEmpty ? fileComposer : initialComposer),
   );
 
   String pick(
@@ -569,6 +584,8 @@ ResolvedTagsForWrite resolveTagsForWrite({
       editorAlbum.trim().isEmpty && initialAlbum.trim().isNotEmpty;
   final clearedGenre =
       editorGenre.trim().isEmpty && initialGenre.trim().isNotEmpty;
+  final clearedComposer =
+      editorComposer.trim().isEmpty && initialComposer.trim().isNotEmpty;
 
   var title = pick(
     editorTitle,
@@ -594,6 +611,12 @@ ResolvedTagsForWrite resolveTagsForWrite({
     suggestion.suggestedGenre,
     fileGenre,
   );
+  var composer = pick(
+    editorComposer,
+    initialComposer,
+    suggestion.suggestedComposer,
+    fileComposer,
+  );
 
   final fromName = _albumTitleFromBasename(
     p.basenameWithoutExtension(filePath),
@@ -610,9 +633,18 @@ ResolvedTagsForWrite resolveTagsForWrite({
   if (!clearGenre && !clearedGenre && genre.isEmpty && fileGenre.isNotEmpty) {
     genre = fileGenre;
   }
+  if (!clearComposer &&
+      !clearedComposer &&
+      composer.isEmpty &&
+      fileComposer.isNotEmpty) {
+    composer = fileComposer;
+  }
 
   if (clearGenre) {
     genre = '';
+  }
+  if (clearComposer) {
+    composer = '';
   }
 
   return ResolvedTagsForWrite(
@@ -620,6 +652,7 @@ ResolvedTagsForWrite resolveTagsForWrite({
     artist: artist,
     album: album,
     genre: genre,
+    composer: composer,
   );
 }
 
@@ -784,6 +817,7 @@ SiteRenameSuggestion computeSiteRename({
   required String artistFromTags,
   required String titleFromTags,
   required String genreFromTags,
+  String composerFromTags = '',
 }) {
   final filename = p.basename(filePath);
   final originalBase = _stripExtension(filename);
@@ -792,6 +826,7 @@ SiteRenameSuggestion computeSiteRename({
     SiteTextConst.artist: artistFromTags.trim(),
     SiteTextConst.album: (albumFromTags ?? '').trim(),
     SiteTextConst.genre: genreFromTags.trim(),
+    SiteTextConst.composer: composerFromTags.trim(),
     'filename': filename,
     'stem': originalBase,
     'ext': '.mp3',
@@ -803,6 +838,7 @@ SiteRenameSuggestion computeSiteRename({
   var artist = sourceFields[SiteTextConst.artist] ?? '';
   var album = sourceFields[SiteTextConst.album] ?? '';
   var genre = sourceFields[SiteTextConst.genre] ?? '';
+  var composer = sourceFields[SiteTextConst.composer] ?? '';
   var matchedRule = false;
 
   for (final rule in _rules) {
@@ -821,6 +857,7 @@ SiteRenameSuggestion computeSiteRename({
       SiteTextConst.artist: sourceFields[SiteTextConst.artist] ?? '',
       SiteTextConst.album: sourceFields[SiteTextConst.album] ?? '',
       SiteTextConst.genre: sourceFields[SiteTextConst.genre] ?? '',
+      SiteTextConst.composer: sourceFields[SiteTextConst.composer] ?? '',
       'filename': filename,
       'stem': originalBase,
       'ext': '.mp3',
@@ -856,6 +893,7 @@ SiteRenameSuggestion computeSiteRename({
     artist = fields[SiteTextConst.artist] ?? artist;
     album = fields[SiteTextConst.album] ?? album;
     genre = fields[SiteTextConst.genre] ?? genre;
+    composer = fields[SiteTextConst.composer] ?? composer;
     matchedRule = true;
     break;
   }
@@ -868,6 +906,7 @@ SiteRenameSuggestion computeSiteRename({
       suggestedAlbum: fromName.$1,
       suggestedTitle: fromName.$2,
       suggestedGenre: sourceFields[SiteTextConst.genre] ?? '',
+      suggestedComposer: sourceFields[SiteTextConst.composer] ?? '',
       originalBasenameWithoutExt: originalBase,
     );
   }
@@ -891,6 +930,7 @@ SiteRenameSuggestion computeSiteRename({
     suggestedAlbum: album,
     suggestedTitle: title,
     suggestedGenre: genre,
+    suggestedComposer: composer,
     originalBasenameWithoutExt: originalBase,
   );
 }

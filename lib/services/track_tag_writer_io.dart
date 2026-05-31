@@ -64,6 +64,7 @@ Future<void> writeEmbeddedAudioTags({
   required String artist,
   required String album,
   required String genre,
+  String composer = '',
   AlbumArtEditKind artEdit = AlbumArtEditKind.keep,
   Uint8List? newCoverBytes,
   String? newCoverMimeType,
@@ -88,6 +89,21 @@ Future<void> writeEmbeddedAudioTags({
         .where((s) => s.isNotEmpty)
         .toList();
     metadata.setGenres(parts);
+  }
+
+  final c = composer.trim();
+  switch (metadata) {
+    case Mp3Metadata m:
+      m.composer = c.isEmpty ? null : c;
+      break;
+    case VorbisMetadata m:
+      m.composer = c.isEmpty ? [] : [c];
+      break;
+    case ApeMetadata m:
+      m.composer = c.isEmpty ? null : c;
+      break;
+    default:
+      break;
   }
 
   switch (artEdit) {

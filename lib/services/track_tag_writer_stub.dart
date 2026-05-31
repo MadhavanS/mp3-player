@@ -8,6 +8,7 @@ Future<void> writeEmbeddedAudioTags({
   required String artist,
   required String album,
   required String genre,
+  String composer = '',
   AlbumArtEditKind artEdit = AlbumArtEditKind.keep,
   Uint8List? newCoverBytes,
   String? newCoverMimeType,

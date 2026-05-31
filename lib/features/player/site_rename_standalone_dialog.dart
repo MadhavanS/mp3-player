@@ -17,6 +17,8 @@ String _genrePlain(TrackItem t) {
   return t.genres.replaceAll('#', ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
 }
 
+String _composerPlain(TrackItem t) => (t.composer ?? '').trim();
+
 /// Shows only the “Clean site-style filename” confirmation (no tag editor sheet).
 Future<void> showStandaloneSiteRenameDialog(
   BuildContext context,
@@ -61,6 +63,7 @@ Future<void> showStandaloneSiteRenameDialog(
     artistFromTags: artistTag,
     titleFromTags: snap.title,
     genreFromTags: _genrePlain(snap),
+    composerFromTags: _composerPlain(snap),
   );
 
   if (!suggestion.hasSuggestion) {
@@ -113,6 +116,14 @@ Future<void> showStandaloneSiteRenameDialog(
             ),
             const SizedBox(height: 8),
             Text('Genre (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+            Text(
+              '(removed)',
+              style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                    fontStyle: FontStyle.italic,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text('Composer (tag)', style: Theme.of(ctx).textTheme.labelSmall),
             Text(
               '(removed)',
               style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
@@ -203,10 +214,12 @@ Future<void> _applySiteRenameStandalone(
       editorArtist: suggestion.suggestedArtist,
       editorAlbum: suggestion.suggestedAlbum,
       editorGenre: suggestion.suggestedGenre,
+      editorComposer: suggestion.suggestedComposer,
       initialTitle: '',
       initialArtist: '',
       initialAlbum: '',
       initialGenre: '',
+      initialComposer: '',
       embeddedTitle: snapBeforeWrite.title,
       embeddedArtist: artistBefore,
       embeddedAlbum: albumBefore,
@@ -214,7 +227,9 @@ Future<void> _applySiteRenameStandalone(
           .replaceAll('#', ' ')
           .trim()
           .replaceAll(RegExp(r'\s+'), ' '),
+      embeddedComposer: _composerPlain(snapBeforeWrite),
       clearGenre: true,
+      clearComposer: true,
     );
     await writeEmbeddedAudioTags(
       filePath: newPath,
@@ -222,6 +237,7 @@ Future<void> _applySiteRenameStandalone(
       album: tags.album,
       artist: tags.artist,
       genre: tags.genre,
+      composer: tags.composer,
       artEdit: AlbumArtEditKind.keep,
     );
 

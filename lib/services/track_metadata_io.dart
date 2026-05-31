@@ -10,8 +10,48 @@ import 'metadata_backend_config.dart';
 import 'song_metadata_cache.dart';
 import 'metadata_god_init_io.dart';
 import 'metadata_god_reader_io.dart';
+import 'replay_gain_tags_io.dart';
 
 final Set<String> _metadataWarnedPaths = <String>{};
+
+String? _composerFromParserTag(Object meta) {
+  if (meta is Mp3Metadata) {
+    return meta.composer?.trim();
+  }
+  if (meta is VorbisMetadata) {
+    if (meta.composer.isEmpty) return null;
+    return meta.composer
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .join(', ');
+  }
+  if (meta is ApeMetadata) {
+    return meta.composer?.trim();
+  }
+  return null;
+}
+
+Uint8List? _albumArtFromParserTag(Object meta) {
+  List<Picture> pics;
+  switch (meta) {
+    case Mp3Metadata m:
+      pics = m.pictures;
+    case VorbisMetadata m:
+      pics = m.pictures;
+    case ApeMetadata m:
+      pics = m.pictures;
+    case Mp4Metadata m:
+      final pic = m.picture;
+      pics = pic == null ? const [] : [pic];
+    case RiffMetadata m:
+      pics = m.pictures;
+    default:
+      return null;
+  }
+  if (pics.isEmpty) return null;
+  final raw = pics.first.bytes;
+  return raw.isEmpty ? null : raw;
+}
 
 void _logMetadataSkipOnce(String path, Object error) {
   if (_metadataWarnedPaths.add(path)) {
@@ -48,9 +88,13 @@ TrackItem _trackFromMp3Metadata(TrackItem base, Mp3Metadata mp3) {
     artist: primaryArtist,
     album: mp3.album?.trim(),
     genre: genreStr,
+    composer: mp3.composer?.trim(),
     albumArtBytes: art,
     replaceGenreFromFile: true,
+    replaceComposerFromFile: true,
     replaceAlbumArtFromFile: true,
+    replayGain: replayGainFromParserTag(mp3),
+    replaceReplayGainFromFile: true,
   );
 }
 
@@ -87,22 +131,56 @@ Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
       }
     }
 
-    final meta = readMetadata(file, getImage: true);
-
-    Uint8List? art;
-    if (meta.pictures.isNotEmpty) {
-      final raw = meta.pictures.first.bytes;
-      if (raw.isNotEmpty) art = raw;
+    final meta = readAllMetadata(file, getImage: true);
+    if (meta is Mp3Metadata) {
+      stopwatch?.stop();
+      if (kMetadataReadTimingLogs) {
+        debugPrint(
+          'audio_metadata_reader read ${stopwatch!.elapsedMilliseconds}ms: $path',
+        );
+      }
+      return _trackFromMp3Metadata(base, meta);
     }
 
-    var artist = meta.artist?.trim();
-    if (artist == null || artist.isEmpty) {
-      artist = meta.performers.isNotEmpty ? meta.performers.first.trim() : null;
-    }
+    Uint8List? art = _albumArtFromParserTag(meta);
 
+    String? title;
+    String? artist;
+    String? album;
     String? genreStr;
-    if (meta.genres.isNotEmpty) {
-      genreStr = meta.genres.first;
+    switch (meta) {
+      case VorbisMetadata m:
+        title = m.title.firstOrNull?.trim();
+        artist = m.artist.firstOrNull?.trim();
+        album = m.album.firstOrNull?.trim();
+        if (m.genres.isNotEmpty) genreStr = m.genres.first;
+        if (artist == null || artist.isEmpty) {
+          artist = m.performer.isNotEmpty ? m.performer.first.trim() : null;
+        }
+        break;
+      case ApeMetadata m:
+        title = m.title?.trim();
+        artist = m.artist?.trim();
+        album = m.album?.trim();
+        if (m.genres.isNotEmpty) genreStr = m.genres.first;
+        if (artist == null || artist.isEmpty) {
+          artist = m.performer.isNotEmpty ? m.performer.first.trim() : null;
+        }
+        break;
+      case Mp4Metadata m:
+        title = m.title?.trim();
+        artist = m.artist?.trim();
+        album = m.album?.trim();
+        genreStr = m.genre?.trim();
+        break;
+      case RiffMetadata m:
+        title = m.title?.trim();
+        artist = m.artist?.trim();
+        album = m.album?.trim();
+        genreStr = m.genre?.trim();
+        break;
+      default:
+        break;
     }
 
     stopwatch?.stop();
@@ -113,12 +191,14 @@ Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
     }
 
     return base.withEmbeddedMetadata(
-      title: meta.title?.trim(),
+      title: title,
       artist: artist,
-      album: meta.album?.trim(),
+      album: album,
       genre: genreStr,
+      composer: _composerFromParserTag(meta),
       albumArtBytes: art,
       replaceGenreFromFile: true,
+      replaceComposerFromFile: true,
       replaceAlbumArtFromFile: true,
     );
   } catch (e) {
@@ -129,7 +209,14 @@ Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
 
 Future<TrackItem> _finalizeMetadataRead(TrackItem result) async {
   final path = result.filePath?.trim();
-  final art = result.albumArtBytes;
+  var out = result;
+  if (path != null && path.isNotEmpty && !out.replayGainAdjustment.hasTags) {
+    final rg = await readReplayGainTags(path);
+    if (rg.hasTags) {
+      out = out.withReplayGain(rg);
+    }
+  }
+  final art = out.albumArtBytes;
   if (path != null && path.isNotEmpty) {
     if (art != null && art.isNotEmpty) {
       await primeAlbumArtDiskCache(path, art);
@@ -138,7 +225,7 @@ Future<TrackItem> _finalizeMetadataRead(TrackItem result) async {
     // Drop stale notification PNGs when embedded art changes in place.
     await evictNotificationArtCacheForPath(path);
   }
-  return result;
+  return out;
 }
 
 /// Cover bytes only (warmup). Still reads the file; skips tag merge overhead.

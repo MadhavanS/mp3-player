@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
+import '../audio/replay_gain.dart';
+
 /// Row in the library / mini-player / now-playing. [filePath] is set for local scans.
 class TrackItem {
   const TrackItem({
@@ -13,6 +15,9 @@ class TrackItem {
     required this.artColors,
     this.filePath,
     this.albumArtBytes,
+    this.replayGainTrackDb,
+    this.replayGainAlbumDb,
+    this.composer,
   });
 
   final String title;
@@ -20,6 +25,9 @@ class TrackItem {
   final String metaLine;
   final String genres;
   final List<Color> artColors;
+
+  /// Embedded TCOM / COMPOSER tag, when present.
+  final String? composer;
 
   /// Album line for library / queue rows (genre is not shown in list UI).
   String get cardSubtitle => metaLine;
@@ -29,6 +37,17 @@ class TrackItem {
 
   /// Embedded cover art from tags (JPEG/PNG), if any.
   final Uint8List? albumArtBytes;
+
+  /// Embedded ReplayGain track adjustment in dB, when present.
+  final double? replayGainTrackDb;
+
+  /// Embedded ReplayGain album adjustment in dB, when present.
+  final double? replayGainAlbumDb;
+
+  ReplayGainAdjustment get replayGainAdjustment => ReplayGainAdjustment(
+        trackDb: replayGainTrackDb,
+        albumDb: replayGainAlbumDb,
+      );
 
   static const Color _pink = Color(0xFFFF6B9D);
   static const Color _blue = Color(0xFF4FACFE);
@@ -78,14 +97,19 @@ class TrackItem {
     String? artist,
     String? album,
     String? genre,
+    String? composer,
     Uint8List? albumArtBytes,
     bool replaceGenreFromFile = false,
+    bool replaceComposerFromFile = false,
     bool replaceAlbumArtFromFile = false,
+    ReplayGainAdjustment? replayGain,
+    bool replaceReplayGainFromFile = false,
   }) {
     final t = title?.trim();
     final a = artist?.trim();
     final alb = album?.trim();
     final g = genre?.trim();
+    final c = composer?.trim();
     final newGenres = () {
       if (g != null && g.isNotEmpty) {
         return '#${g.replaceAll(RegExp(r'\s+'), '')}';
@@ -94,6 +118,11 @@ class TrackItem {
         return '';
       }
       return genres;
+    }();
+    final newComposer = () {
+      if (c != null && c.isNotEmpty) return c;
+      if (replaceComposerFromFile) return null;
+      return this.composer;
     }();
     final mergedArt = () {
       if (replaceAlbumArtFromFile) {
@@ -104,6 +133,14 @@ class TrackItem {
       return albumArtBytes ?? this.albumArtBytes;
     }();
 
+    final mergedReplayGain = () {
+      if (replaceReplayGainFromFile) {
+        return replayGain ?? const ReplayGainAdjustment();
+      }
+      if (replayGain != null && replayGain.hasTags) return replayGain;
+      return replayGainAdjustment;
+    }();
+
     return TrackItem(
       title: (t != null && t.isNotEmpty) ? t : this.title,
       artist: (a != null && a.isNotEmpty) ? a : this.artist,
@@ -112,6 +149,24 @@ class TrackItem {
       artColors: artColors,
       filePath: filePath,
       albumArtBytes: mergedArt,
+      replayGainTrackDb: mergedReplayGain.trackDb,
+      replayGainAlbumDb: mergedReplayGain.albumDb,
+      composer: newComposer,
+    );
+  }
+
+  TrackItem withReplayGain(ReplayGainAdjustment adjustment) {
+    return TrackItem(
+      title: title,
+      artist: artist,
+      metaLine: metaLine,
+      genres: genres,
+      artColors: artColors,
+      filePath: filePath,
+      albumArtBytes: albumArtBytes,
+      replayGainTrackDb: adjustment.trackDb,
+      replayGainAlbumDb: adjustment.albumDb,
+      composer: composer,
     );
   }
 
@@ -125,6 +180,9 @@ class TrackItem {
       genres: genres,
       artColors: artColors,
       filePath: filePath,
+      replayGainTrackDb: replayGainTrackDb,
+      replayGainAlbumDb: replayGainAlbumDb,
+      composer: composer,
     );
   }
 

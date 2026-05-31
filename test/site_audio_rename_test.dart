@@ -9,14 +9,17 @@ void main() {
       editorArtist: '',
       editorAlbum: '',
       editorGenre: '',
+      editorComposer: '',
       initialTitle: '',
       initialArtist: '',
       initialAlbum: '',
       initialGenre: '',
+      initialComposer: '',
       embeddedTitle: '',
       embeddedArtist: '',
       embeddedAlbum: '',
       embeddedGenre: '',
+      embeddedComposer: '',
     );
     expect(resolved.album, 'Aalavandhan');
     expect(resolved.title, 'Kadavul Paathi');
@@ -29,14 +32,17 @@ void main() {
       editorArtist: '',
       editorAlbum: '',
       editorGenre: '',
+      editorComposer: '',
       initialTitle: 'Aalavandhan - Kadavul Paathi',
       initialArtist: '',
       initialAlbum: '',
       initialGenre: '',
+      initialComposer: '',
       embeddedTitle: 'Kadavul Paathi',
       embeddedArtist: 'Kamal Hassan',
       embeddedAlbum: 'Aalavandhan',
       embeddedGenre: 'Soundtrack',
+      embeddedComposer: 'Ilaiyaraaja',
     );
     expect(resolved.title, 'Aalavandhan - Kadavul Paathi');
     expect(resolved.artist, 'Kamal Hassan');
@@ -50,18 +56,22 @@ void main() {
       editorArtist: '',
       editorAlbum: '',
       editorGenre: '',
+      editorComposer: '',
       initialTitle: 'Had Title',
       initialArtist: 'Had Artist',
       initialAlbum: 'Had Album',
       initialGenre: 'Had Genre',
+      initialComposer: 'Had Composer',
       embeddedTitle: 'Still On Disk',
       embeddedArtist: 'Still On Disk',
       embeddedAlbum: 'Still On Disk',
       embeddedGenre: 'Still On Disk',
+      embeddedComposer: 'Still On Disk',
     );
     expect(resolved.title, '');
     expect(resolved.artist, '');
     expect(resolved.album, '');
     expect(resolved.genre, '');
+    expect(resolved.composer, '');
   });
 }

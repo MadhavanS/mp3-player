@@ -23,6 +23,8 @@ String _genreTextFromTrack(TrackItem t) {
   return t.genres.replaceAll('#', ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
 }
 
+String _composerTextFromTrack(TrackItem t) => (t.composer ?? '').trim();
+
 String _mimeFromFileName(String name) {
   final lower = name.toLowerCase();
   if (lower.endsWith('.png')) return 'image/png';
@@ -150,6 +152,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   late final TextEditingController _artist;
   late final TextEditingController _album;
   late final TextEditingController _genre;
+  late final TextEditingController _composer;
   late final TextEditingController _fileName;
 
   AlbumArtEditKind _artEdit = AlbumArtEditKind.keep;
@@ -169,6 +172,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   late final String _initialArtist;
   late final String _initialAlbum;
   late final String _initialGenre;
+  late final String _initialComposer;
 
   @override
   void initState() {
@@ -186,10 +190,12 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     _initialArtist = t.artist == 'Unknown artist' ? '' : t.artist;
     _initialAlbum = t.metaLine == 'mp3' ? '' : t.metaLine;
     _initialGenre = _genreTextFromTrack(t);
+    _initialComposer = _composerTextFromTrack(t);
     _title = TextEditingController(text: _initialTitle);
     _artist = TextEditingController(text: _initialArtist);
     _album = TextEditingController(text: _initialAlbum);
     _genre = TextEditingController(text: _initialGenre);
+    _composer = TextEditingController(text: _initialComposer);
     final fp = t.filePath ?? '';
     _fileName = TextEditingController(
       text: fp.isEmpty ? '' : p.basenameWithoutExtension(fp),
@@ -198,6 +204,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     _artist.addListener(_onTagFieldChanged);
     _album.addListener(_onTagFieldChanged);
     _genre.addListener(_onTagFieldChanged);
+    _composer.addListener(_onTagFieldChanged);
     _fileName.addListener(_onTagFieldChanged);
   }
 
@@ -272,11 +279,13 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     _artist.removeListener(_onTagFieldChanged);
     _album.removeListener(_onTagFieldChanged);
     _genre.removeListener(_onTagFieldChanged);
+    _composer.removeListener(_onTagFieldChanged);
     _fileName.removeListener(_onTagFieldChanged);
     _title.dispose();
     _artist.dispose();
     _album.dispose();
     _genre.dispose();
+    _composer.dispose();
     _fileName.dispose();
     super.dispose();
   }
@@ -424,14 +433,17 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
       editorArtist: _artist.text,
       editorAlbum: _album.text,
       editorGenre: _genre.text,
+      editorComposer: _composer.text,
       initialTitle: _initialTitle,
       initialArtist: _initialArtist,
       initialAlbum: _initialAlbum,
       initialGenre: _initialGenre,
+      initialComposer: _initialComposer,
       embeddedTitle: snap.title,
       embeddedArtist: artistFromFile,
       embeddedAlbum: albumFromFile,
       embeddedGenre: _genreTextFromTrack(snap),
+      embeddedComposer: _composerTextFromTrack(snap),
     );
   }
 
@@ -463,6 +475,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         artistFromTags: artistTag,
         titleFromTags: snap.title,
         genreFromTags: _genreTextFromTrack(snap),
+        composerFromTags: _composerTextFromTrack(snap),
       );
       if (!mounted) return;
       final noOpSuggestion =
@@ -470,7 +483,9 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           suggestion.suggestedTitle.trim() == snap.title.trim() &&
           suggestion.suggestedArtist.trim() == artistTag.trim() &&
           suggestion.suggestedAlbum.trim() == (albumTag ?? '').trim() &&
-          suggestion.suggestedGenre.trim() == _genreTextFromTrack(snap).trim();
+          suggestion.suggestedGenre.trim() == _genreTextFromTrack(snap).trim() &&
+          suggestion.suggestedComposer.trim() ==
+              _composerTextFromTrack(snap).trim();
       if (!suggestion.hasSuggestion || noOpSuggestion) {
         ActionPillToast.showUsingRootNavigator(
           'No Auto Rename',
@@ -530,9 +545,23 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                     suggestion.suggestedGenre,
                     style: Theme.of(ctx).textTheme.bodyMedium,
                   ),
+                  const SizedBox(height: 8),
+                  Text('Composer (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+                  Text(
+                    suggestion.suggestedComposer,
+                    style: Theme.of(ctx).textTheme.bodyMedium,
+                  ),
                 ] else ...[
                   const SizedBox(height: 8),
                   Text('Genre (tag)', style: Theme.of(ctx).textTheme.labelSmall),
+                  Text(
+                    '(removed)',
+                    style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                          fontStyle: FontStyle.italic,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('Composer (tag)', style: Theme.of(ctx).textTheme.labelSmall),
                   Text(
                     '(removed)',
                     style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
@@ -559,6 +588,9 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
                 _artist.text = suggestion.suggestedArtist;
                 _album.text = suggestion.suggestedAlbum;
                 _genre.text = '';
+                _composer.text = tagOnlyFlow
+                    ? suggestion.suggestedComposer
+                    : '';
                 _fileName.text = suggestion.newBasenameWithoutExt;
                 Navigator.pop(ctx);
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -652,15 +684,19 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         editorArtist: suggestion.suggestedArtist,
         editorAlbum: suggestion.suggestedAlbum,
         editorGenre: suggestion.suggestedGenre,
+        editorComposer: suggestion.suggestedComposer,
         initialTitle: _initialTitle,
         initialArtist: _initialArtist,
         initialAlbum: _initialAlbum,
         initialGenre: _initialGenre,
+        initialComposer: _initialComposer,
         embeddedTitle: snapBeforeWrite.title,
         embeddedArtist: artistBefore,
         embeddedAlbum: albumBefore,
         embeddedGenre: _genreTextFromTrack(snapBeforeWrite),
+        embeddedComposer: _composerTextFromTrack(snapBeforeWrite),
         clearGenre: !tagOnlyFlow,
+        clearComposer: !tagOnlyFlow,
       );
       await writeEmbeddedAudioTags(
         filePath: newPath,
@@ -668,6 +704,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         album: tags.album,
         artist: tags.artist,
         genre: tags.genre,
+        composer: tags.composer,
         artEdit: _artEdit,
         newCoverBytes: _pickedCoverBytes,
         newCoverMimeType: _pickedCoverMime,
@@ -830,6 +867,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         artist: tags.artist,
         album: tags.album,
         genre: tags.genre,
+        composer: tags.composer,
         artEdit: _artEdit,
         newCoverBytes: _pickedCoverBytes,
         newCoverMimeType: _pickedCoverMime,
@@ -1223,6 +1261,17 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
             labelText: 'Genre (comma-separated)',
             border: const OutlineInputBorder(),
             suffixIcon: _clearFieldSuffix(_genre),
+          ),
+          textCapitalization: TextCapitalization.words,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _composer,
+          enabled: !_saving,
+          decoration: InputDecoration(
+            labelText: 'Composer',
+            border: const OutlineInputBorder(),
+            suffixIcon: _clearFieldSuffix(_composer),
           ),
           textCapitalization: TextCapitalization.words,
         ),
