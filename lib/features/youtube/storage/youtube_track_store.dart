@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../../models/track_item.dart';
+import '../youtube_duration_format.dart';
 import 'youtube_track_record.dart';
 
 Isar? _isar;
@@ -146,10 +147,14 @@ class YoutubeTrackStore {
 
 TrackItem trackItemFromYoutubeRecord(YoutubeTrackRecord r) {
   final path = r.localPath!.trim();
+  final durationLabel = formatYoutubeDurationMs(r.durationMs);
+  final metaLine = durationLabel.isEmpty
+      ? 'YouTube'
+      : 'YouTube · $durationLabel';
   return TrackItem(
     title: r.title.trim().isNotEmpty ? r.title : r.videoId,
     artist: r.artist.trim().isNotEmpty ? r.artist : 'Unknown artist',
-    metaLine: 'YouTube',
+    metaLine: metaLine,
     genres: '',
     artColors: TrackItem.fromFilePath(path).artColors,
     filePath: path,

@@ -42,14 +42,25 @@ class YoutubeThumbnailCache {
   }
 
   /// After download, prime album-art cache for the local audio file path.
-  Future<void> primeForLocalFile({
+  /// Returns the on-disk thumbnail cache path when available.
+  Future<String?> primeForLocalFile({
     required String videoId,
     required String localPath,
     String? thumbnailUrl,
   }) async {
     final bytes = await getThumbnailBytes(videoId, thumbnailUrl);
-    if (bytes == null || bytes.isEmpty) return;
+    if (bytes == null || bytes.isEmpty) return null;
     await primeAlbumArtDiskCache(localPath, bytes);
+    final cacheFile = await _thumbnailFile(videoId.trim());
+    return cacheFile.path;
+  }
+
+  Future<String?> cachePathForVideoId(String videoId) async {
+    final id = videoId.trim();
+    if (id.isEmpty) return null;
+    final cacheFile = await _thumbnailFile(id);
+    if (!await cacheFile.exists()) return null;
+    return cacheFile.path;
   }
 
   Future<File> _thumbnailFile(String videoId) async {

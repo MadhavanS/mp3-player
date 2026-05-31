@@ -8,6 +8,7 @@ import '../catalog/youtube_library_catalog.dart';
 import '../download/youtube_download_manager.dart';
 import '../models/youtube_track.dart';
 import '../search/youtube_search_service.dart';
+import '../youtube_duration_format.dart';
 import 'youtube_download_sheet.dart';
 import 'youtube_track_tile.dart';
 
@@ -137,7 +138,12 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          subtitle: Text(t.artist, maxLines: 1),
+                          subtitle: Text(
+                            t.duration != null
+                                ? '${t.artist} · ${formatYoutubeDurationMs(t.duration!.inMilliseconds)}'
+                                : t.artist,
+                            maxLines: 1,
+                          ),
                           trailing: IconButton(
                             icon: const Icon(Icons.download_outlined),
                             tooltip: 'Download',

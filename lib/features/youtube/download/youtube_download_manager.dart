@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:metadata_god/metadata_god.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../catalog/youtube_library_catalog.dart';
@@ -15,7 +16,10 @@ import '../storage/youtube_track_record.dart';
 import '../storage/youtube_track_store.dart';
 import '../thumbnail/youtube_thumbnail_cache.dart';
 import 'youtube_download_job.dart';
+import 'youtube_download_notifications.dart';
+import 'youtube_download_queue_store.dart';
 import 'youtube_manifest_resolver.dart';
+import 'youtube_stream_format.dart';
 
 /// Serial download queue: search → local file → library (no streaming playback).
 class YoutubeDownloadManager extends ChangeNotifier {
@@ -45,11 +49,27 @@ class YoutubeDownloadManager extends ChangeNotifier {
       )
       .toList(growable: false);
 
-  Future<YoutubeDownloadJob> enqueue(YoutubeTrack track) async {
+  /// Re-enqueues downloads persisted before the last process exit.
+  Future<void> resumePendingDownloads() async {
+    final pending = await YoutubeDownloadQueueStore.loadPending();
+    for (final track in pending) {
+      try {
+        await enqueue(track, persistQueue: false);
+      } catch (_) {
+        // Already on disk or actively queued — drop stale queue row later.
+      }
+    }
+  }
+
+  Future<YoutubeDownloadJob> enqueue(
+    YoutubeTrack track, {
+    bool persistQueue = true,
+  }) async {
     final existing = await YoutubeTrackStore.instance.get(track.videoId);
     if (existing?.localPath != null) {
       final file = File(existing!.localPath!);
       if (await file.exists()) {
+        await YoutubeDownloadQueueStore.remove(track.videoId);
         throw StateError('Already downloaded: ${track.videoId}');
       }
     }
@@ -66,10 +86,14 @@ class YoutubeDownloadManager extends ChangeNotifier {
       title: track.title,
       artist: track.artist,
       thumbnailUrl: track.thumbnailUrl,
+      durationMs: track.duration?.inMilliseconds,
     );
 
     _jobs[track.videoId] = job;
     _queue.add(track.videoId);
+    if (persistQueue) {
+      await YoutubeDownloadQueueStore.upsert(track);
+    }
     notifyListeners();
     unawaited(_processQueue());
     return job;
@@ -84,6 +108,9 @@ class YoutubeDownloadManager extends ChangeNotifier {
         title: record.title,
         artist: record.artist,
         thumbnailUrl: record.thumbnailUrl,
+        duration: record.durationMs != null && record.durationMs! > 0
+            ? Duration(milliseconds: record.durationMs!)
+            : null,
       ),
     );
   }
@@ -96,6 +123,8 @@ class YoutubeDownloadManager extends ChangeNotifier {
     job.applyUpdate(state: YoutubeDownloadState.cancelled);
     _queue.removeWhere((id) => id == videoId);
     _jobs.remove(videoId);
+    unawaited(YoutubeDownloadQueueStore.remove(videoId));
+    unawaited(YoutubeDownloadNotifications.dismiss());
     notifyListeners();
   }
 
@@ -104,20 +133,37 @@ class YoutubeDownloadManager extends ChangeNotifier {
     if (_queue.isEmpty) return;
 
     _isProcessing = true;
-    while (_queue.isNotEmpty) {
-      final videoId = _queue.removeFirst();
-      final job = _jobs[videoId];
-      if (job == null || job.state == YoutubeDownloadState.cancelled) {
-        continue;
+    await WakelockPlus.enable();
+    try {
+      while (_queue.isNotEmpty) {
+        final videoId = _queue.removeFirst();
+        final job = _jobs[videoId];
+        if (job == null || job.state == YoutubeDownloadState.cancelled) {
+          continue;
+        }
+        await _processJob(job);
       }
-      await _processJob(job);
+    } finally {
+      _isProcessing = false;
+      if (_queue.isEmpty && activeJobs.isEmpty) {
+        await WakelockPlus.disable();
+        await YoutubeDownloadNotifications.dismiss();
+      }
     }
-    _isProcessing = false;
   }
 
   Future<void> _processJob(YoutubeDownloadJob job) async {
     try {
       job.applyUpdate(state: YoutubeDownloadState.fetchingManifest);
+      await YoutubeDownloadNotifications.showActive(job);
+
+      final enriched = await _fetchVideoMetadata(job);
+      job.applyUpdate(
+        title: enriched.title,
+        artist: enriched.artist,
+        thumbnailUrl: enriched.thumbnailUrl,
+        durationMs: enriched.duration?.inMilliseconds ?? job.durationMs,
+      );
 
       final streamInfo =
           await YoutubeManifestResolver.instance.resolveAudio(job.videoId);
@@ -126,26 +172,46 @@ class YoutubeDownloadManager extends ChangeNotifier {
           state: YoutubeDownloadState.failed,
           error: 'Could not fetch stream info',
         );
+        await YoutubeDownloadNotifications.showFailed(job.title, job.error);
         notifyListeners();
         return;
       }
 
-      job.applyUpdate(state: YoutubeDownloadState.downloading);
+      job.applyUpdate(
+        state: YoutubeDownloadState.downloading,
+        containerLabel: containerLabelForStream(streamInfo.container),
+      );
+      await YoutubeDownloadNotifications.showActive(job);
 
       final tempFile = await _downloadToTemp(job, streamInfo);
       if (tempFile == null) return;
 
       job.applyUpdate(state: YoutubeDownloadState.processing);
+      await YoutubeDownloadNotifications.showActive(job);
 
       final finalPath = await _finalizeDownload(job, tempFile, streamInfo);
       final fileLen = await File(finalPath).length();
 
-      unawaited(
-        YoutubeThumbnailCache.instance.primeForLocalFile(
-          videoId: job.videoId,
-          localPath: finalPath,
-          thumbnailUrl: job.thumbnailUrl,
-        ),
+      final thumbPath = await YoutubeThumbnailCache.instance.primeForLocalFile(
+        videoId: job.videoId,
+        localPath: finalPath,
+        thumbnailUrl: job.thumbnailUrl,
+      );
+      final artCachePath =
+          thumbPath ??
+          await YoutubeThumbnailCache.instance.cachePathForVideoId(job.videoId);
+      final thumbBytes = artCachePath != null
+          ? await File(artCachePath).readAsBytes()
+          : await YoutubeThumbnailCache.instance.getThumbnailBytes(
+              job.videoId,
+              job.thumbnailUrl,
+            );
+
+      await _writeTags(
+        finalPath,
+        job,
+        durationMs: job.durationMs,
+        pictureBytes: thumbBytes,
       );
 
       final record = YoutubeTrackRecord()
@@ -155,15 +221,19 @@ class YoutubeDownloadManager extends ChangeNotifier {
         ..thumbnailUrl = job.thumbnailUrl
         ..localPath = finalPath
         ..downloadedAtMs = DateTime.now().millisecondsSinceEpoch
-        ..fileSizeBytes = fileLen;
+        ..fileSizeBytes = fileLen
+        ..durationMs = job.durationMs
+        ..albumArtCachePath = artCachePath;
 
       await YoutubeTrackStore.instance.save(record);
+      await YoutubeDownloadQueueStore.remove(job.videoId);
 
       job.applyUpdate(
         state: YoutubeDownloadState.complete,
         localPath: finalPath,
       );
       lastCompletedJob.value = job;
+      await YoutubeDownloadNotifications.showComplete(job.title);
       notifyListeners();
 
       unawaited(YoutubeLibraryCatalog.instance.reload());
@@ -173,7 +243,31 @@ class YoutubeDownloadManager extends ChangeNotifier {
         state: YoutubeDownloadState.failed,
         error: e.toString(),
       );
+      await YoutubeDownloadNotifications.showFailed(job.title, job.error);
       notifyListeners();
+    }
+  }
+
+  Future<YoutubeTrack> _fetchVideoMetadata(YoutubeDownloadJob job) async {
+    try {
+      final video = await _yt.videos.get(job.videoId);
+      return YoutubeTrack(
+        videoId: job.videoId,
+        title: video.title.trim().isNotEmpty ? video.title : job.title,
+        artist: video.author.trim().isNotEmpty ? video.author : job.artist,
+        thumbnailUrl: video.thumbnails.mediumResUrl.trim().isNotEmpty
+            ? video.thumbnails.mediumResUrl
+            : job.thumbnailUrl,
+        duration: video.duration ?? job.duration,
+      );
+    } catch (_) {
+      return YoutubeTrack(
+        videoId: job.videoId,
+        title: job.title,
+        artist: job.artist,
+        thumbnailUrl: job.thumbnailUrl,
+        duration: job.duration,
+      );
     }
   }
 
@@ -207,6 +301,7 @@ class YoutubeDownloadManager extends ChangeNotifier {
 
         if (downloaded % (512 * 1024) < chunk.length || downloaded >= total) {
           job.applyUpdate(downloaded: downloaded, total: total);
+          await YoutubeDownloadNotifications.showActive(job);
         }
       }
 
@@ -222,6 +317,7 @@ class YoutubeDownloadManager extends ChangeNotifier {
         state: YoutubeDownloadState.failed,
         error: e.toString(),
       );
+      await YoutubeDownloadNotifications.showFailed(job.title, job.error);
       notifyListeners();
       return null;
     }
@@ -238,7 +334,7 @@ class YoutubeDownloadManager extends ChangeNotifier {
       await ytDir.create(recursive: true);
     }
 
-    final ext = streamInfo.container.name == 'mp4' ? 'm4a' : 'webm';
+    final ext = fileExtensionForStream(streamInfo.container);
     final safeName = job.title
         .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
         .trim();
@@ -251,19 +347,31 @@ class YoutubeDownloadManager extends ChangeNotifier {
       await File(finalPath).delete();
     }
     await tempFile.rename(finalPath);
-
-    await _writeTags(finalPath, job);
     return finalPath;
   }
 
-  Future<void> _writeTags(String path, YoutubeDownloadJob job) async {
+  Future<void> _writeTags(
+    String path,
+    YoutubeDownloadJob job, {
+    required int? durationMs,
+    Uint8List? pictureBytes,
+  }) async {
     try {
+      Picture? picture;
+      if (pictureBytes != null && pictureBytes.isNotEmpty) {
+        picture = Picture(mimeType: 'image/jpeg', data: pictureBytes);
+      }
       await MetadataGod.writeMetadata(
         file: path,
         metadata: Metadata(
           title: job.title,
           artist: job.artist,
           album: 'YouTube',
+          albumArtist: job.artist,
+          durationMs: durationMs != null && durationMs > 0
+              ? durationMs.toDouble()
+              : null,
+          picture: picture,
         ),
       );
     } catch (e) {

@@ -54,6 +54,10 @@ const YoutubeTrackRecordSchema = IsarGeneratedSchema(
         type: IsarType.long,
       ),
       IsarPropertySchema(
+        name: 'albumArtCachePath',
+        type: IsarType.string,
+      ),
+      IsarPropertySchema(
         name: 'isDownloaded',
         type: IsarType.bool,
       ),
@@ -101,7 +105,15 @@ int serializeYoutubeTrackRecord(IsarWriter writer, YoutubeTrackRecord object) {
   IsarCore.writeLong(writer, 6, object.downloadedAtMs);
   IsarCore.writeLong(writer, 7, object.fileSizeBytes);
   IsarCore.writeLong(writer, 8, object.durationMs ?? -9223372036854775808);
-  IsarCore.writeBool(writer, 9, object.isDownloaded);
+  {
+    final value = object.albumArtCachePath;
+    if (value == null) {
+      IsarCore.writeNull(writer, 9);
+    } else {
+      IsarCore.writeString(writer, 9, value);
+    }
+  }
+  IsarCore.writeBool(writer, 10, object.isDownloaded);
   return object.id;
 }
 
@@ -124,6 +136,7 @@ YoutubeTrackRecord deserializeYoutubeTrackRecord(IsarReader reader) {
       object.durationMs = value;
     }
   }
+  object.albumArtCachePath = IsarCore.readString(reader, 9);
   return object;
 }
 
@@ -156,7 +169,9 @@ dynamic deserializeYoutubeTrackRecordProp(IsarReader reader, int property) {
         }
       }
     case 9:
-      return IsarCore.readBool(reader, 9);
+      return IsarCore.readString(reader, 9);
+    case 10:
+      return IsarCore.readBool(reader, 10);
     default:
       throw ArgumentError('Unknown property: $property');
   }
@@ -173,6 +188,7 @@ sealed class _YoutubeTrackRecordUpdate {
     int? downloadedAtMs,
     int? fileSizeBytes,
     int? durationMs,
+    String? albumArtCachePath,
     bool? isDownloaded,
   });
 }
@@ -193,6 +209,7 @@ class _YoutubeTrackRecordUpdateImpl implements _YoutubeTrackRecordUpdate {
     Object? downloadedAtMs = ignore,
     Object? fileSizeBytes = ignore,
     Object? durationMs = ignore,
+    Object? albumArtCachePath = ignore,
     Object? isDownloaded = ignore,
   }) {
     return collection.updateProperties([
@@ -206,7 +223,8 @@ class _YoutubeTrackRecordUpdateImpl implements _YoutubeTrackRecordUpdate {
           if (downloadedAtMs != ignore) 6: downloadedAtMs as int?,
           if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
           if (durationMs != ignore) 8: durationMs as int?,
-          if (isDownloaded != ignore) 9: isDownloaded as bool?,
+          if (albumArtCachePath != ignore) 9: albumArtCachePath as String?,
+          if (isDownloaded != ignore) 10: isDownloaded as bool?,
         }) >
         0;
   }
@@ -223,6 +241,7 @@ sealed class _YoutubeTrackRecordUpdateAll {
     int? downloadedAtMs,
     int? fileSizeBytes,
     int? durationMs,
+    String? albumArtCachePath,
     bool? isDownloaded,
   });
 }
@@ -243,6 +262,7 @@ class _YoutubeTrackRecordUpdateAllImpl implements _YoutubeTrackRecordUpdateAll {
     Object? downloadedAtMs = ignore,
     Object? fileSizeBytes = ignore,
     Object? durationMs = ignore,
+    Object? albumArtCachePath = ignore,
     Object? isDownloaded = ignore,
   }) {
     return collection.updateProperties(id, {
@@ -254,7 +274,8 @@ class _YoutubeTrackRecordUpdateAllImpl implements _YoutubeTrackRecordUpdateAll {
       if (downloadedAtMs != ignore) 6: downloadedAtMs as int?,
       if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
       if (durationMs != ignore) 8: durationMs as int?,
-      if (isDownloaded != ignore) 9: isDownloaded as bool?,
+      if (albumArtCachePath != ignore) 9: albumArtCachePath as String?,
+      if (isDownloaded != ignore) 10: isDownloaded as bool?,
     });
   }
 }
@@ -276,6 +297,7 @@ sealed class _YoutubeTrackRecordQueryUpdate {
     int? downloadedAtMs,
     int? fileSizeBytes,
     int? durationMs,
+    String? albumArtCachePath,
     bool? isDownloaded,
   });
 }
@@ -297,6 +319,7 @@ class _YoutubeTrackRecordQueryUpdateImpl
     Object? downloadedAtMs = ignore,
     Object? fileSizeBytes = ignore,
     Object? durationMs = ignore,
+    Object? albumArtCachePath = ignore,
     Object? isDownloaded = ignore,
   }) {
     return query.updateProperties(limit: limit, {
@@ -308,7 +331,8 @@ class _YoutubeTrackRecordQueryUpdateImpl
       if (downloadedAtMs != ignore) 6: downloadedAtMs as int?,
       if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
       if (durationMs != ignore) 8: durationMs as int?,
-      if (isDownloaded != ignore) 9: isDownloaded as bool?,
+      if (albumArtCachePath != ignore) 9: albumArtCachePath as String?,
+      if (isDownloaded != ignore) 10: isDownloaded as bool?,
     });
   }
 }
@@ -338,6 +362,7 @@ class _YoutubeTrackRecordQueryBuilderUpdateImpl
     Object? downloadedAtMs = ignore,
     Object? fileSizeBytes = ignore,
     Object? durationMs = ignore,
+    Object? albumArtCachePath = ignore,
     Object? isDownloaded = ignore,
   }) {
     final q = query.build();
@@ -351,7 +376,8 @@ class _YoutubeTrackRecordQueryBuilderUpdateImpl
         if (downloadedAtMs != ignore) 6: downloadedAtMs as int?,
         if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
         if (durationMs != ignore) 8: durationMs as int?,
-        if (isDownloaded != ignore) 9: isDownloaded as bool?,
+        if (albumArtCachePath != ignore) 9: albumArtCachePath as String?,
+        if (isDownloaded != ignore) 10: isDownloaded as bool?,
       });
     } finally {
       q.close();
@@ -1657,13 +1683,207 @@ extension YoutubeTrackRecordQueryFilter
   }
 
   QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const IsNullCondition(property: 9));
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathIsNotNull() {
+    return QueryBuilder.apply(not(), (query) {
+      return query.addFilterCondition(const IsNullCondition(property: 9));
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathEqualTo(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        EqualCondition(
+          property: 9,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathGreaterThan(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        GreaterCondition(
+          property: 9,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathGreaterThanOrEqualTo(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        GreaterOrEqualCondition(
+          property: 9,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathLessThan(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        LessCondition(
+          property: 9,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathLessThanOrEqualTo(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        LessOrEqualCondition(
+          property: 9,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathBetween(
+    String? lower,
+    String? upper, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        BetweenCondition(
+          property: 9,
+          lower: lower,
+          upper: upper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        StartsWithCondition(
+          property: 9,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        EndsWithCondition(
+          property: 9,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        ContainsCondition(
+          property: 9,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        MatchesCondition(
+          property: 9,
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const EqualCondition(
+          property: 9,
+          value: '',
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
+      albumArtCachePathIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const GreaterCondition(
+          property: 9,
+          value: '',
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterFilterCondition>
       isDownloadedEqualTo(
     bool value,
   ) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 9,
+          property: 10,
           value: value,
         ),
       );
@@ -1838,16 +2058,37 @@ extension YoutubeTrackRecordQuerySortBy
   }
 
   QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterSortBy>
+      sortByAlbumArtCachePath({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(
+        9,
+        caseSensitive: caseSensitive,
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterSortBy>
+      sortByAlbumArtCachePathDesc({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(
+        9,
+        sort: Sort.desc,
+        caseSensitive: caseSensitive,
+      );
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterSortBy>
       sortByIsDownloaded() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(9);
+      return query.addSortBy(10);
     });
   }
 
   QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterSortBy>
       sortByIsDownloadedDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(9, sort: Sort.desc);
+      return query.addSortBy(10, sort: Sort.desc);
     });
   }
 }
@@ -1981,16 +2222,30 @@ extension YoutubeTrackRecordQuerySortThenBy
   }
 
   QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterSortBy>
+      thenByAlbumArtCachePath({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(9, caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterSortBy>
+      thenByAlbumArtCachePathDesc({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(9, sort: Sort.desc, caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterSortBy>
       thenByIsDownloaded() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(9);
+      return query.addSortBy(10);
     });
   }
 
   QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterSortBy>
       thenByIsDownloadedDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(9, sort: Sort.desc);
+      return query.addSortBy(10, sort: Sort.desc);
     });
   }
 }
@@ -2054,9 +2309,16 @@ extension YoutubeTrackRecordQueryWhereDistinct
   }
 
   QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterDistinct>
+      distinctByAlbumArtCachePath({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(9, caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<YoutubeTrackRecord, YoutubeTrackRecord, QAfterDistinct>
       distinctByIsDownloaded() {
     return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(9);
+      return query.addDistinctBy(10);
     });
   }
 }
@@ -2121,10 +2383,17 @@ extension YoutubeTrackRecordQueryProperty1
     });
   }
 
+  QueryBuilder<YoutubeTrackRecord, String?, QAfterProperty>
+      albumArtCachePathProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
+    });
+  }
+
   QueryBuilder<YoutubeTrackRecord, bool, QAfterProperty>
       isDownloadedProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(9);
+      return query.addProperty(10);
     });
   }
 }
@@ -2193,10 +2462,17 @@ extension YoutubeTrackRecordQueryProperty2<R>
     });
   }
 
+  QueryBuilder<YoutubeTrackRecord, (R, String?), QAfterProperty>
+      albumArtCachePathProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
+    });
+  }
+
   QueryBuilder<YoutubeTrackRecord, (R, bool), QAfterProperty>
       isDownloadedProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(9);
+      return query.addProperty(10);
     });
   }
 }
@@ -2265,10 +2541,17 @@ extension YoutubeTrackRecordQueryProperty3<R1, R2>
     });
   }
 
+  QueryBuilder<YoutubeTrackRecord, (R1, R2, String?), QOperations>
+      albumArtCachePathProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
+    });
+  }
+
   QueryBuilder<YoutubeTrackRecord, (R1, R2, bool), QOperations>
       isDownloadedProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(9);
+      return query.addProperty(10);
     });
   }
 }

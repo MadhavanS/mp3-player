@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'catalog/youtube_library_catalog.dart';
+import 'download/youtube_download_manager.dart';
+import 'download/youtube_download_notifications.dart';
+import 'download/youtube_download_queue_store.dart';
 import 'storage/youtube_track_store.dart';
 import 'thumbnail/youtube_thumbnail_cache.dart';
 
@@ -11,7 +14,9 @@ import 'thumbnail/youtube_thumbnail_cache.dart';
 Future<void> initYoutubeFeature() async {
   if (kIsWeb) return;
   await YoutubeTrackStore.instance.init();
+  await YoutubeDownloadNotifications.init();
   await YoutubeLibraryCatalog.instance.reload();
+  await YoutubeDownloadManager.instance.resumePendingDownloads();
 }
 
 /// Deletes YouTube downloads, thumbnails, and Isar index (factory reset).
@@ -21,6 +26,11 @@ Future<void> wipeYoutubeLocalData() async {
     await YoutubeTrackStore.instance.clearAll();
   } catch (e, st) {
     debugPrint('wipeYoutubeLocalData store: $e\n$st');
+  }
+  try {
+    await YoutubeDownloadQueueStore.clear();
+  } catch (e, st) {
+    debugPrint('wipeYoutubeLocalData queue: $e\n$st');
   }
   try {
     await YoutubeThumbnailCache.instance.clearAll();

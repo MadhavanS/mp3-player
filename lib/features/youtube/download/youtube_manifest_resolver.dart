@@ -1,5 +1,7 @@
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import 'youtube_stream_format.dart';
+
 /// Resolves the best audio-only stream for a YouTube video id.
 class YoutubeManifestResolver {
   YoutubeManifestResolver._();
@@ -20,7 +22,7 @@ class YoutubeManifestResolver {
         ],
       );
       if (manifest.audioOnly.isEmpty) return null;
-      return manifest.audioOnly.withHighestBitrate();
+      return pickPreferredAudioStream(manifest.audioOnly);
     } catch (e) {
       return null;
     }

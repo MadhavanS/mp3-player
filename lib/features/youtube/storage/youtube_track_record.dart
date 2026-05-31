@@ -18,6 +18,7 @@ class YoutubeTrackRecord {
   int downloadedAtMs = 0;
   int fileSizeBytes = 0;
   int? durationMs;
+  String? albumArtCachePath;
 
   bool get isDownloaded => localPath != null && localPath!.trim().isNotEmpty;
 }
