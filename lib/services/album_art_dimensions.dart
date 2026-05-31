@@ -4,6 +4,9 @@ const int kAlbumArtMinDimension = 96;
 /// Written by [primeAlbumArtDiskCache] and preferred for Now Playing / hero art.
 const int kAlbumArtPrimeDimension = 1024;
 
+/// Sizes written together when priming path-keyed disk cache (largest first).
+const List<int> kAlbumArtPrimeDiskDimensions = [1024, 512, 192];
+
 /// Upper bound for decode / resize / [Image.memory] cache size.
 const int kAlbumArtMaxDimension = 1024;
 

@@ -7,6 +7,13 @@ import '../services/music_library_path_key.dart';
 import 'library_catalog.dart';
 import 'player_controller.dart';
 
+/// Rough byte floor — skip hot LRU when bytes are likely a tiny thumb.
+int _minBytesForDimension(int dim) {
+  if (dim >= kAlbumArtMaxDimension) return 50000;
+  if (dim >= 512) return 15000;
+  return 5000;
+}
+
 /// Resolves cover bytes for list, mini player, notification, and widget.
 ///
 /// Order: hot LRU (thumbnails only) → path disk (any cached dimension) → embedded.
@@ -25,10 +32,18 @@ Future<Uint8List?> resolveAlbumArtBytes(
   if (useHot) {
     if (player != null) {
       final hot = player.hotArtBytesForPath(path, minPixelSize: target);
-      if (hot != null && hot.isNotEmpty) return hot;
+      if (hot != null &&
+          hot.isNotEmpty &&
+          hot.length >= _minBytesForDimension(target)) {
+        return hot;
+      }
     } else if (catalog != null) {
       final hot = catalog.hotArtBytesForPathKey(pathKey, minPixelSize: target);
-      if (hot != null && hot.isNotEmpty) return hot;
+      if (hot != null &&
+          hot.isNotEmpty &&
+          hot.length >= _minBytesForDimension(target)) {
+        return hot;
+      }
     }
   }
 
@@ -63,7 +78,11 @@ Uint8List? resolveAlbumArtBytesSync(
 
   if (albumArtTargetUsesHotLru(target)) {
     final hot = player.hotArtBytesForPath(path, minPixelSize: target);
-    if (hot != null && hot.isNotEmpty) return hot;
+    if (hot != null &&
+        hot.isNotEmpty &&
+        hot.length >= _minBytesForDimension(target)) {
+      return hot;
+    }
   }
 
   final disk = cachedAlbumArtForPathAnyDimensionSync(

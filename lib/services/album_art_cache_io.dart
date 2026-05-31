@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -249,19 +250,62 @@ Future<void> primeAlbumArtDiskCache(
   int maxDimension = kAlbumArtPrimeDimension,
 }) async {
   if (filePath.trim().isEmpty || raw.isEmpty) return;
-  final normalizedMax = clampAlbumArtDimension(maxDimension);
-  final key = _pathDiskKey(filePath, normalizedMax);
+  // Default: write Now Playing + notification + list sizes in parallel.
+  final sizes = maxDimension == kAlbumArtPrimeDimension
+      ? kAlbumArtPrimeDiskDimensions
+      : [clampAlbumArtDimension(maxDimension)];
+  await Future.wait(
+    sizes.map((dim) => _writePathArtAtSize(filePath, raw, dim)),
+    eagerError: false,
+  );
+}
+
+Future<void> _writePathArtAtSize(
+  String filePath,
+  Uint8List raw,
+  int targetSize,
+) async {
+  final normalized = clampAlbumArtDimension(targetSize);
+  final key = _pathDiskKey(filePath, normalized);
   if (key.isEmpty) return;
 
-  final resized = await _resizeToPng(raw, normalizedMax);
-  final bytes = (resized == null || resized.isEmpty) ? raw : resized;
   try {
+    final sourceMax = await _decodeSourceMaxSide(raw);
+    final effective = sourceMax > 0
+        ? math.min(sourceMax, normalized)
+        : normalized;
+    if (sourceMax > 0 && sourceMax < normalized && kDebugMode) {
+      debugPrint(
+        '[artCache] source ${sourceMax}px < target ${normalized}px '
+        '— writing at ${effective}px (no upscale)',
+      );
+    }
+
+    final resized = await _resizeToPng(raw, normalized);
+    final bytes = (resized == null || resized.isEmpty) ? raw : resized;
     final file = await _cacheFile(key);
     await file.writeAsBytes(bytes, flush: false);
+    _putMemory(key, bytes);
+    if (kDebugMode) {
+      debugPrint('[artCache] wrote ${normalized}px for $key');
+    }
   } catch (e, st) {
-    debugPrint('primeAlbumArtDiskCache write failed: $e\n$st');
+    debugPrint('[artCache] write ${normalized}px failed: $e\n$st');
   }
-  _putMemory(key, bytes);
+}
+
+Future<int> _decodeSourceMaxSide(Uint8List raw) async {
+  try {
+    final codec = await ui.instantiateImageCodec(raw);
+    final frame = await codec.getNextFrame();
+    try {
+      return math.max(frame.image.width, frame.image.height);
+    } finally {
+      frame.image.dispose();
+    }
+  } catch (_) {
+    return 0;
+  }
 }
 
 Future<Uint8List?> _loadPathDiskCache(
