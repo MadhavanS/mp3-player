@@ -11,6 +11,7 @@ import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
 import '../../models/track_item.dart';
 import '../../services/album_art_cache.dart';
+import '../../services/app_data_reset.dart';
 import '../../services/folder_count_cache.dart';
 import '../../services/first_run_library_hint_store.dart';
 import '../../services/mp3_scanner.dart';
@@ -881,6 +882,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _scheduleIdleRescan();
   }
 
+  Future<void> _eraseAllAppData() async {
+    final player = _playerRef ?? PlayerController.of(context);
+    await player.prepareForAppDataWipe();
+    await PlayerController.shutdownNativePlayer();
+    await wipeAllLocalAppData();
+    if (!mounted) return;
+    setState(() {
+      _folderPaths = [];
+      _songsBrowsePathKeysNotifier.value = null;
+    });
+    FolderCountCache.instance.clear();
+    SystemNavigator.pop();
+  }
+
   Future<void> _refreshLibraryScan() async {
     if (_refreshInProgress) return;
     if (_folderPaths.isEmpty) {
@@ -1443,6 +1458,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                                   widget.onPlayerChromeBackgroundKindChanged,
                               onPlayerChromeCustomBackgroundChanged:
                                   widget.onPlayerChromeCustomBackgroundChanged,
+                              onEraseAllAppData: _eraseAllAppData,
                             ),
                     ),
                     if (current != null)

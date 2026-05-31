@@ -72,3 +72,5 @@ Future<void> primeAlbumArtDiskCache(
   int maxDimension = 512,
 }) async {}
 
+Future<void> clearAllAlbumArtDiskCache() async {}
+

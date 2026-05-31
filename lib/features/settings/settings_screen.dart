@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:path/path.dart' as p;
@@ -40,6 +40,7 @@ class SettingsScreen extends StatefulWidget {
     required this.playerChromeCustomBackground,
     required this.onPlayerChromeBackgroundKindChanged,
     required this.onPlayerChromeCustomBackgroundChanged,
+    required this.onEraseAllAppData,
   });
 
   final List<String> folderPaths;
@@ -58,6 +59,7 @@ class SettingsScreen extends StatefulWidget {
   final ValueChanged<PlayerChromeBackgroundKind>
   onPlayerChromeBackgroundKindChanged;
   final ValueChanged<Color> onPlayerChromeCustomBackgroundChanged;
+  final Future<void> Function() onEraseAllAppData;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -70,6 +72,7 @@ enum _SettingsSection {
   recentLists,
   sound,
   experiments,
+  storage,
   help,
   windows,
 }
@@ -578,6 +581,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _confirmEraseAllAppData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final theme = Theme.of(dialogContext);
+        final pal = dialogContext.palette;
+        return AlertDialog(
+          backgroundColor: pal.surface,
+          title: Text(
+            'Erase all app data?',
+            style: theme.textTheme.titleLarge?.copyWith(
+              color: pal.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          content: Text(
+            'This permanently deletes settings, music folders, playlists, '
+            'favorites, playback history, metadata cache, and album-art cache '
+            'on this device.\n\n'
+            'Your MP3 files on storage are not deleted.\n\n'
+            'MadPlayer will close. Reopen the app for a completely fresh start.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: pal.textSecondary,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: pal.textSecondary),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: theme.colorScheme.error,
+                foregroundColor: theme.colorScheme.onError,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Erase everything'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await widget.onEraseAllAppData();
+    } catch (e, st) {
+      debugPrint('eraseAllAppData: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not erase app data: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _goToSection(_SettingsSection section) {
     setState(() => _section = section);
   }
@@ -714,6 +779,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: 'Experiments',
           subtitle: 'Optional library features in development',
           onTap: () => _goToSection(_SettingsSection.experiments),
+        ),
+        Divider(height: 1, color: pal.dividerOnHero),
+        _settingsMenuTile(
+          pal: pal,
+          theme: theme,
+          icon: Icons.storage_outlined,
+          title: 'Storage & data',
+          subtitle: 'Clear caches and reset app to factory state',
+          onTap: () => _goToSection(_SettingsSection.storage),
         ),
         Divider(height: 1, color: pal.dividerOnHero),
         _settingsMenuTile(
@@ -1342,6 +1416,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildStorageDetail(ThemeData theme, AppPalette pal) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      children: [
+        Text(
+          'Erase everything MadPlayer stores on this device — the same as a '
+          'clean install with no restored settings. Your music files on disk or '
+          'SD card are not touched.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: pal.textSecondary.withValues(alpha: 0.95),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Removed:\n'
+          '• Theme, accent, font, and sound settings\n'
+          '• Music folder list and library metadata cache\n'
+          '• Playlists, favorites, and recently played\n'
+          '• Album-art and notification art caches\n'
+          '• Android home-screen widget state',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.95),
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          onPressed: _busy ? null : () => unawaited(_confirmEraseAllAppData()),
+          style: FilledButton.styleFrom(
+            backgroundColor: theme.colorScheme.error,
+            foregroundColor: theme.colorScheme.onError,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          icon: const Icon(Icons.delete_forever_outlined),
+          label: const Text('Erase all app data'),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'The app closes after a successful wipe. Reopen MadPlayer to set up '
+          'from scratch.\n\n'
+          'Tip: Android may restore old settings after reinstall if backup was '
+          'enabled for a previous build. This option clears data without '
+          'reinstalling.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.9),
+            height: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildExperimentsDetail(ThemeData theme, AppPalette pal) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -1398,6 +1524,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.recentLists => 'Recent lists',
       _SettingsSection.sound => 'Sound',
       _SettingsSection.experiments => 'Experiments',
+      _SettingsSection.storage => 'Storage & data',
       _SettingsSection.help => 'Help',
       _SettingsSection.windows => 'Windows',
     };
@@ -1431,6 +1558,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       theme,
                       pal,
                     ),
+                    _SettingsSection.storage => _buildStorageDetail(theme, pal),
                     _SettingsSection.help => const HelpContent(),
                     _SettingsSection.windows => _buildWindowsDetail(theme, pal),
                   },

@@ -42,4 +42,7 @@ class SongMetadataCache {
     Iterable<String> filePaths,
   ) =>
       impl.pathKeysWithValidArtDiskCache(filePaths);
+
+  /// Wipes the Isar metadata database (settings › erase all app data).
+  static Future<void> clearAll() => impl.clearAllSongMetadataCache();
 }

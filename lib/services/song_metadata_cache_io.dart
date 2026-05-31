@@ -49,6 +49,30 @@ Future<Isar> _openIsar() async {
   return db;
 }
 
+/// Closes the metadata database and deletes on-disk Isar files.
+Future<void> clearAllSongMetadataCache() async {
+  final db = _isar;
+  _isar = null;
+  if (db != null && db.isOpen) {
+    try {
+      await db.close();
+    } catch (e, st) {
+      debugPrint('clearAllSongMetadataCache close: $e\n$st');
+    }
+  }
+  try {
+    final support = await getApplicationSupportDirectory();
+    for (final name in ['isar', 'isar_mp3_player_db']) {
+      final dir = Directory(p.join(support.path, name));
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    }
+  } catch (e, st) {
+    debugPrint('clearAllSongMetadataCache delete: $e\n$st');
+  }
+}
+
 void _copyArtDiskFlags({
   required SongMetadataCacheRow row,
   required SongMetadataCacheRow? prev,

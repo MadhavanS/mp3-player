@@ -115,6 +115,18 @@ Future<Directory> _notificationArtCacheDirectory() async {
   return dir;
 }
 
+Future<void> clearAllNotificationArtCache() async {
+  try {
+    final root = await getTemporaryDirectory();
+    final dir = Directory(p.join(root.path, _notifyArtCacheDirName));
+    if (await dir.exists()) {
+      await dir.delete(recursive: true);
+    }
+  } catch (e, st) {
+    debugPrint('clearAllNotificationArtCache: $e\n$st');
+  }
+}
+
 /// Returns a `file://` [Uri] for [audio_service] / [MediaItem.artUri] on Android.
 ///
 /// Uses embedded cover when present; otherwise a theme-aligned placeholder PNG

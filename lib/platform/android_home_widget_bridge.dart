@@ -59,4 +59,10 @@ class AndroidHomeWidgetBridge {
       'playing': playing,
     });
   }
+
+  /// Clears home-screen widget prefs after a full app-data wipe.
+  static Future<void> clearWidgetData() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    await _channel.invokeMethod<void>('clearWidgetData');
+  }
 }

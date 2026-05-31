@@ -40,4 +40,10 @@ class ArtAvailabilityNotifier extends ChangeNotifier {
     if (pathKey.isEmpty) return;
     _available.remove(pathKey);
   }
+
+  void clearAll() {
+    if (_available.isEmpty) return;
+    _available.clear();
+    notifyListeners();
+  }
 }

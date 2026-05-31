@@ -516,6 +516,28 @@ Future<Directory> _albumArtCacheDir() async {
   return dir;
 }
 
+/// Removes path-keyed album-art disk files and in-memory decode cache.
+Future<void> clearAllAlbumArtDiskCache() async {
+  _memory.clear();
+  _inFlight.clear();
+  _inFlightByPathKey.clear();
+  final cachedDir = _cacheDir;
+  _cacheDir = null;
+  try {
+    if (cachedDir != null && await cachedDir.exists()) {
+      await cachedDir.delete(recursive: true);
+      return;
+    }
+    final support = await getApplicationSupportDirectory();
+    final dir = Directory(p.join(support.path, _cacheDirName));
+    if (await dir.exists()) {
+      await dir.delete(recursive: true);
+    }
+  } catch (e, st) {
+    debugPrint('clearAllAlbumArtDiskCache: $e\n$st');
+  }
+}
+
 String _cacheKey(TrackItem track, Uint8List raw, int maxDimension) {
   return '${_trackStableId(track)}_${_bytesFingerprint(raw)}_$maxDimension';
 }

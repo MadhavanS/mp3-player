@@ -103,6 +103,20 @@ class PlayerController {
     }
   }
 
+  /// Stops playback and drops in-memory library/queue before [wipeAllLocalAppData].
+  Future<void> prepareForAppDataWipe() async {
+    try {
+      await _player.stop();
+    } catch (_) {}
+    _playlistPaths.clear();
+    _shuffleOrder.clear();
+    _index = 0;
+    _shufflePos = 0;
+    _libraryCatalog.setAll([]);
+    artAvailability.clearAll();
+    _notifyTrackPlaybackQueue();
+  }
+
   bool _isInterruptedAbort(Object error) {
     if (error is! PlatformException) return false;
     final code = error.code.toLowerCase();

@@ -27,3 +27,5 @@ Future<Set<String>> pathKeysWithValidArtDiskCache(
   Iterable<String> filePaths,
 ) async =>
     const <String>{};
+
+Future<void> clearAllSongMetadataCache() async {}

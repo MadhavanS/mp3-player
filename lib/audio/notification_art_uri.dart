@@ -10,3 +10,6 @@ Future<Uri?> uriForNotificationAlbumArt(TrackItem track) =>
 
 Future<void> evictNotificationArtCacheForPath(String filePath) =>
     impl.evictNotificationArtCacheForPath(filePath);
+
+Future<void> clearAllNotificationArtCache() =>
+    impl.clearAllNotificationArtCache();

@@ -32,6 +32,15 @@ object Mp3PlayerWidgetMethodChannel {
                         Mp3PlayerWidgetSync.setPlayingIndicator(appContext, playing)
                         result.success(null)
                     }
+                    "clearWidgetData" -> {
+                        appContext.getSharedPreferences(
+                            Mp3PlayerWidgetPrefs.PREFS_NAME,
+                            Context.MODE_PRIVATE,
+                        ).edit().clear().apply()
+                        Mp3PlayerAppWidget.refreshAll(appContext)
+                        Mp3PlayerGlassCardWidget.refreshAll(appContext)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
