@@ -2,6 +2,14 @@ import 'dart:io' show File;
 
 import 'package:path/path.dart' as p;
 
+/// True when [rawPath] is under app-local `youtube_audio/` storage.
+bool isYoutubeDownloadStoragePath(String rawPath) {
+  final trimmed = rawPath.trim();
+  if (trimmed.isEmpty) return false;
+  final parts = p.split(p.normalize(trimmed));
+  return parts.any((segment) => segment.toLowerCase() == 'youtube_audio');
+}
+
 /// Canonical path keys for playlist vs Files filtering (handles junctions/long paths).
 String canonicalMusicLibraryPathKey(String rawPath) {
   final trimmed = rawPath.trim();

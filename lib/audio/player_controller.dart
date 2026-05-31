@@ -2846,10 +2846,14 @@ class PlayerController {
   }
 
   bool _prunePlaylistPathsNotInCatalog() {
-    if (_libraryCatalog.isEmpty || _playlistPaths.isEmpty) return false;
+    if (_playlistPaths.isEmpty) return false;
     if (_libraryPathMigrations.isNotEmpty || _loadCurrentPathOverride != null) {
       return false;
     }
+    if (_playbackOriginTab == LibraryTabId.youtube) {
+      return false;
+    }
+    if (_libraryCatalog.isEmpty) return false;
     final validKeys = Set<String>.from(_libraryCatalog.canonicalPathKeys);
     for (final migrated in _libraryPathMigrations.values) {
       final k = canonicalMusicLibraryPathKey(migrated);
@@ -2860,6 +2864,10 @@ class PlayerController {
     final before = _playlistPaths.length;
     final pruned = <String>[];
     for (final path in _playlistPaths) {
+      if (isYoutubeDownloadStoragePath(path)) {
+        pruned.add(path);
+        continue;
+      }
       final k = canonicalMusicLibraryPathKey(path);
       if (k.isNotEmpty && validKeys.contains(k)) {
         pruned.add(path);

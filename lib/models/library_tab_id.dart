@@ -6,7 +6,8 @@ enum LibraryTabId {
   recentlyAdded('recently_added', 'RecentlyAdded'),
   playlist('playlist', 'Playlist'),
   favourites('favourites', 'Favourites'),
-  recentlyPlayed('recently_played', 'RecentlyPlayed');
+  recentlyPlayed('recently_played', 'RecentlyPlayed'),
+  youtube('youtube', 'YouTube');
 
   const LibraryTabId(this.wireValue, this.shortTitle);
 

@@ -10,6 +10,8 @@ import '../platform/android_home_widget_bridge.dart';
 import 'album_art_cache.dart';
 import 'folder_count_cache.dart';
 import 'song_metadata_cache.dart';
+import '../features/youtube/youtube_init_stub.dart'
+    if (dart.library.io) '../features/youtube/youtube_init.dart';
 
 /// Deletes all on-device MadPlayer data: preferences, metadata DB, art caches,
 /// notification art, and Android home-widget state.
@@ -37,6 +39,12 @@ Future<void> wipeAllLocalAppData() async {
     await clearAllNotificationArtCache();
   } catch (e, st) {
     debugPrint('wipeAllLocalAppData: notification art clear failed: $e\n$st');
+  }
+
+  try {
+    await wipeYoutubeLocalData();
+  } catch (e, st) {
+    debugPrint('wipeAllLocalAppData: youtube wipe failed: $e\n$st');
   }
 
   try {

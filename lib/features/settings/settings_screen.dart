@@ -13,6 +13,7 @@ import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/songs_alpha_index_store.dart';
 import '../../services/storage_access.dart';
+import '../youtube/youtube_settings_store.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
@@ -41,6 +42,7 @@ class SettingsScreen extends StatefulWidget {
     required this.onPlayerChromeBackgroundKindChanged,
     required this.onPlayerChromeCustomBackgroundChanged,
     required this.onEraseAllAppData,
+    this.onYoutubeMergeIntoSongsChanged,
   });
 
   final List<String> folderPaths;
@@ -60,6 +62,7 @@ class SettingsScreen extends StatefulWidget {
   onPlayerChromeBackgroundKindChanged;
   final ValueChanged<Color> onPlayerChromeCustomBackgroundChanged;
   final Future<void> Function() onEraseAllAppData;
+  final Future<void> Function(bool enabled)? onYoutubeMergeIntoSongsChanged;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -72,6 +75,7 @@ enum _SettingsSection {
   recentLists,
   sound,
   experiments,
+  youtube,
   storage,
   help,
   windows,
@@ -88,6 +92,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _windowsAlwaysOnTop = false;
   bool _windowsWindowPrefsLoaded = false;
   bool _songsAlphaIndexExperiment = false;
+  bool _youtubeMergeIntoSongs = false;
 
   static bool get _isWindowsDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -101,6 +106,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     unawaited(_loadRecentListLimits());
     unawaited(_loadWindowsWindowPrefs());
     unawaited(_loadSongsAlphaExperiment());
+    unawaited(_loadYoutubeSettings());
+  }
+
+  Future<void> _loadYoutubeSettings() async {
+    if (kIsWeb) return;
+    final merge = await YoutubeSettingsStore.loadMergeIntoSongs();
+    if (mounted) setState(() => _youtubeMergeIntoSongs = merge);
   }
 
   Future<void> _loadSongsAlphaExperiment() async {
@@ -772,6 +784,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onTap: () => _goToSection(_SettingsSection.sound),
         ),
         Divider(height: 1, color: pal.dividerOnHero),
+        if (!kIsWeb)
+          _settingsMenuTile(
+            pal: pal,
+            theme: theme,
+            icon: Icons.music_video_outlined,
+            title: 'YouTube',
+            subtitle: 'Downloaded audio and Songs tab merge',
+            onTap: () => _goToSection(_SettingsSection.youtube),
+          ),
+        if (!kIsWeb) Divider(height: 1, color: pal.dividerOnHero),
         _settingsMenuTile(
           pal: pal,
           theme: theme,
@@ -1435,6 +1457,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           '• Music folder list and library metadata cache\n'
           '• Playlists, favorites, and recently played\n'
           '• Album-art and notification art caches\n'
+          '• Downloaded YouTube audio\n'
           '• Android home-screen widget state',
           style: theme.textTheme.bodySmall?.copyWith(
             color: pal.textMuted.withValues(alpha: 0.95),
@@ -1462,6 +1485,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
           style: theme.textTheme.bodySmall?.copyWith(
             color: pal.textMuted.withValues(alpha: 0.9),
             height: 1.4,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildYoutubeDetail(ThemeData theme, AppPalette pal) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      children: [
+        Text(
+          'YouTube tracks are downloaded to your device and play like local files. '
+          'They stay in the YouTube library tab unless you choose to merge them into Songs.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: pal.textSecondary.withValues(alpha: 0.95),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Material(
+          color: Colors.transparent,
+          child: SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              'Show downloads in Songs tab',
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: pal.onScaffold,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            subtitle: Text(
+              _youtubeMergeIntoSongs
+                  ? 'Downloaded YouTube audio appears in Library › Songs and in the YouTube tab.'
+                  : 'Downloaded tracks appear only under Library › YouTube.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: pal.textMuted.withValues(alpha: 0.95),
+              ),
+            ),
+            value: _youtubeMergeIntoSongs,
+            onChanged: _busy
+                ? null
+                : (v) async {
+                    setState(() => _busy = true);
+                    try {
+                      await YoutubeSettingsStore.saveMergeIntoSongs(v);
+                      if (mounted) setState(() => _youtubeMergeIntoSongs = v);
+                      await widget.onYoutubeMergeIntoSongsChanged?.call(v);
+                    } finally {
+                      if (mounted) setState(() => _busy = false);
+                    }
+                  },
           ),
         ),
       ],
@@ -1524,6 +1597,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.recentLists => 'Recent lists',
       _SettingsSection.sound => 'Sound',
       _SettingsSection.experiments => 'Experiments',
+      _SettingsSection.youtube => 'YouTube',
       _SettingsSection.storage => 'Storage & data',
       _SettingsSection.help => 'Help',
       _SettingsSection.windows => 'Windows',
@@ -1558,6 +1632,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       theme,
                       pal,
                     ),
+                    _SettingsSection.youtube => _buildYoutubeDetail(theme, pal),
                     _SettingsSection.storage => _buildStorageDetail(theme, pal),
                     _SettingsSection.help => const HelpContent(),
                     _SettingsSection.windows => _buildWindowsDetail(theme, pal),

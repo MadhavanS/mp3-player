@@ -38,6 +38,8 @@ import '../player/now_playing_screen.dart';
 import '../player/track_overflow_actions.dart';
 import '../help/help_screen.dart';
 import '../settings/settings_screen.dart';
+import '../youtube/catalog/youtube_catalog_merge.dart';
+import '../youtube/download/youtube_download_manager.dart';
 import 'now_playing_escape_bridge.dart';
 
 /// During folder scan, skip building a huge native playback queue until the user
@@ -137,6 +139,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
   /// Library tab that was visible when Now Playing was opened (for Windows Escape).
   LibraryTabId? _nowPlayingOpenedFromTab;
+  VoidCallback? _youtubeDownloadCompletedListener;
 
   @override
   void initState() {
@@ -172,6 +175,39 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       player.track.addListener(_schedulePlaybackSessionPersist);
       player.playback.addListener(_schedulePlaybackSessionPersist);
     }
+    _wireYoutubeShellHooks(player);
+  }
+
+  Future<void> _setPlayerLibraryCatalog(
+    PlayerController player,
+    List<TrackItem> tracks, {
+    CatalogNotifyMode notify = CatalogNotifyMode.immediate,
+  }) async {
+    final merged = await applyYoutubeCatalogMerge(tracks);
+    player.setLibraryCatalog(merged, notify: notify);
+  }
+
+  Future<void> _applyYoutubeMergeSetting(PlayerController player) async {
+    await _setPlayerLibraryCatalog(
+      player,
+      stripYoutubeTracksFromCatalog(player.metadataLibrary),
+    );
+  }
+
+  void _wireYoutubeShellHooks(PlayerController player) {
+    if (kIsWeb || _youtubeDownloadCompletedListener != null) return;
+
+    _youtubeDownloadCompletedListener = () {
+      final job = YoutubeDownloadManager.instance.lastCompletedJob.value;
+      if (job == null || !mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Downloaded "${job.title}"')),
+      );
+      unawaited(_applyYoutubeMergeSetting(player));
+    };
+    YoutubeDownloadManager.instance.lastCompletedJob.addListener(
+      _youtubeDownloadCompletedListener!,
+    );
   }
 
   @override
@@ -376,7 +412,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
               final bm = cachedByPath[b.filePath]?.fileModifiedMs ?? 0;
               return bm.compareTo(am);
             });
-      player.setLibraryCatalog(tracks);
+      unawaited(_setPlayerLibraryCatalog(player, tracks));
       unawaited(
         player.prefillArtAvailabilityFromDiskCache(
           tracks.map((t) => t.filePath).whereType<String>(),
@@ -488,14 +524,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         final partial = scanned
             .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
             .toList(growable: false);
-        player.setLibraryCatalog(partial, notify: CatalogNotifyMode.throttled);
+        unawaited(
+          _setPlayerLibraryCatalog(
+            player,
+            partial,
+            notify: CatalogNotifyMode.throttled,
+          ),
+        );
       }
 
       if (!mounted) return;
       final finalTracks = scanned
           .map((f) => live[f.path] ?? TrackItem.fromFilePath(f.path))
           .toList(growable: false);
-      player.setLibraryCatalog(finalTracks);
+      unawaited(_setPlayerLibraryCatalog(player, finalTracks));
       FolderCountCache.instance.clear();
       unawaited(
         player.prefillArtAvailabilityFromDiskCache(
@@ -631,6 +673,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       _schedulePlaybackSessionPersist,
     );
     _songsBrowsePathKeysNotifier.dispose();
+    if (_youtubeDownloadCompletedListener != null) {
+      YoutubeDownloadManager.instance.lastCompletedJob.removeListener(
+        _youtubeDownloadCompletedListener!,
+      );
+    }
     super.dispose();
   }
 
@@ -669,7 +716,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
     if (paths.isEmpty) {
       await RecentlyAddedStore.mergeScanPaths([]);
-      player.setLibraryCatalog([]);
+      unawaited(_setPlayerLibraryCatalog(player, []));
       await player.setPlaylist(
         [],
         startIndex: 0,
@@ -703,7 +750,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             content: Text('No .mp3 files found in the saved folders.'),
           ),
         );
-        player.setLibraryCatalog([]);
+        unawaited(_setPlayerLibraryCatalog(player, []));
         await player.setPlaylist(
           [],
           startIndex: 0,
@@ -722,7 +769,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       );
       unawaited(SongMetadataCache.deleteMissingPaths(files.toSet()));
       unawaited(SongMetadataCache.saveTracks(tracks));
-      player.setLibraryCatalog(tracks);
+      unawaited(_setPlayerLibraryCatalog(player, tracks));
       FolderCountCache.instance.clear();
       unawaited(
         player.prefillArtAvailabilityFromDiskCache(
@@ -1139,7 +1186,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     unawaited(SongMetadataCache.deleteMissingPaths(mergedPaths));
     unawaited(SongMetadataCache.saveTracks(merged));
 
-    player.setLibraryCatalog(merged);
+    unawaited(_setPlayerLibraryCatalog(player, merged));
     FolderCountCache.instance.clear();
     unawaited(
       player.prefillArtAvailabilityFromDiskCache(
@@ -1459,6 +1506,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                               onPlayerChromeCustomBackgroundChanged:
                                   widget.onPlayerChromeCustomBackgroundChanged,
                               onEraseAllAppData: _eraseAllAppData,
+                              onYoutubeMergeIntoSongsChanged: kIsWeb
+                                  ? null
+                                  : (_) async {
+                                      final player = PlayerController.of(
+                                        context,
+                                      );
+                                      await _applyYoutubeMergeSetting(player);
+                                    },
                             ),
                     ),
                     if (current != null)

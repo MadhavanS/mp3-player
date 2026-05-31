@@ -28,6 +28,7 @@ import '../help/search_help_text.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
+import '../youtube/ui/youtube_search_screen.dart';
 import 'library_track_lookup.dart';
 import 'playing_queue_tab.dart';
 
@@ -1006,6 +1007,8 @@ class LibraryScreenState extends State<LibraryScreen>
           rowStride: _kQueueListRowStride,
         );
         return;
+      case LibraryTabId.youtube:
+        return;
     }
   }
 
@@ -1017,7 +1020,8 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabId.recentlyAdded ||
     LibraryTabId.favourites ||
     LibraryTabId.recentlyPlayed ||
-    LibraryTabId.nowPlayingList => SearchHelpText.libraryTrackFieldHint,
+    LibraryTabId.nowPlayingList ||
+    LibraryTabId.youtube => SearchHelpText.libraryTrackFieldHint,
     LibraryTabId.playlist => SearchHelpText.playlistTabFieldHint,
   };
 
@@ -2134,6 +2138,7 @@ class LibraryScreenState extends State<LibraryScreen>
         playlistIndexByPathKey,
         browsePathKeys,
       ),
+      LibraryTabId.youtube => YoutubeLibraryTab(player: player),
     };
   }
 
