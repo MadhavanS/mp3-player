@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../../models/track_item.dart';
+import '../../../services/music_library_path_key.dart';
 import '../youtube_duration_format.dart';
 import 'youtube_track_record.dart';
 
@@ -60,6 +61,23 @@ class YoutubeTrackStore {
       debugPrint('YoutubeTrackStore.getAllDownloaded: $e\n$st');
       return const [];
     }
+  }
+
+  Future<Set<String>> downloadedVideoIds() async {
+    final rows = await getAllDownloaded();
+    return rows.map((r) => r.videoId).toSet();
+  }
+
+  Future<YoutubeTrackRecord?> findByLocalPath(String filePath) async {
+    final key = canonicalMusicLibraryPathKey(filePath);
+    if (key.isEmpty) return null;
+    final rows = await getAllDownloaded();
+    for (final row in rows) {
+      final path = row.localPath?.trim();
+      if (path == null || path.isEmpty) continue;
+      if (canonicalMusicLibraryPathKey(path) == key) return row;
+    }
+    return null;
   }
 
   Future<YoutubeTrackRecord?> get(String videoId) async {

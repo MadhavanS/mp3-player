@@ -7,7 +7,6 @@ import '../../../models/library_tab_id.dart';
 import '../../../models/track_item.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/track_list_album_art.dart';
-import '../storage/youtube_track_store.dart';
 
 class YoutubeTrackTile extends StatelessWidget {
   const YoutubeTrackTile({
@@ -71,12 +70,4 @@ class YoutubeTrackTile extends StatelessWidget {
       ),
     );
   }
-}
-
-Future<void> deleteYoutubeTrackByPath(String filePath) async {
-  final base = filePath.split(RegExp(r'[/\\]')).last;
-  final underscore = base.indexOf('_');
-  if (underscore <= 0) return;
-  final videoId = base.substring(0, underscore);
-  await YoutubeTrackStore.instance.delete(videoId);
 }

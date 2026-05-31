@@ -5,10 +5,14 @@ import 'package:flutter/material.dart';
 import '../../../audio/player_controller.dart';
 import '../../../theme/app_theme.dart';
 import '../catalog/youtube_library_catalog.dart';
+import '../download/youtube_download_job.dart';
 import '../download/youtube_download_manager.dart';
 import '../models/youtube_track.dart';
 import '../search/youtube_search_service.dart';
+import '../storage/youtube_track_store.dart';
 import '../youtube_duration_format.dart';
+import '../youtube_track_delete.dart';
+import 'youtube_delete_confirm.dart';
 import 'youtube_download_sheet.dart';
 import 'youtube_track_tile.dart';
 
@@ -23,11 +27,32 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen> {
   final _queryController = TextEditingController();
   var _searching = false;
   List<YoutubeTrack> _results = const [];
+  Set<String> _downloadedVideoIds = const {};
+
+  @override
+  void initState() {
+    super.initState();
+    YoutubeDownloadManager.instance.addListener(_onDownloadsChanged);
+    unawaited(_refreshDownloadedIds());
+  }
 
   @override
   void dispose() {
+    YoutubeDownloadManager.instance.removeListener(_onDownloadsChanged);
     _queryController.dispose();
     super.dispose();
+  }
+
+  void _onDownloadsChanged() {
+    if (!mounted) return;
+    setState(() {});
+    unawaited(_refreshDownloadedIds());
+  }
+
+  Future<void> _refreshDownloadedIds() async {
+    final ids = await YoutubeTrackStore.instance.downloadedVideoIds();
+    if (!mounted) return;
+    setState(() => _downloadedVideoIds = ids);
   }
 
   Future<void> _runSearch() async {
@@ -38,6 +63,7 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen> {
       _results = const [];
     });
     final results = await YoutubeSearchService.instance.search(q);
+    await _refreshDownloadedIds();
     if (!mounted) return;
     setState(() {
       _searching = false;
@@ -46,6 +72,7 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen> {
   }
 
   Future<void> _download(YoutubeTrack track) async {
+    if (_downloadedVideoIds.contains(track.videoId)) return;
     try {
       await YoutubeDownloadManager.instance.enqueue(track);
       if (!mounted) return;
@@ -120,6 +147,10 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen> {
                     ),
                     itemBuilder: (context, i) {
                       final t = _results[i];
+                      final job = YoutubeDownloadManager.instance.jobForVideoId(
+                        t.videoId,
+                      );
+                      final downloaded = _downloadedVideoIds.contains(t.videoId);
                       return Material(
                         color: Colors.transparent,
                         child: ListTile(
@@ -144,10 +175,10 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen> {
                                 : t.artist,
                             maxLines: 1,
                           ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.download_outlined),
-                            tooltip: 'Download',
-                            onPressed: () => unawaited(_download(t)),
+                          trailing: _SearchDownloadTrailing(
+                            downloaded: downloaded,
+                            job: job,
+                            onDownload: () => unawaited(_download(t)),
                           ),
                         ),
                       );
@@ -156,6 +187,56 @@ class _YoutubeSearchScreenState extends State<YoutubeSearchScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SearchDownloadTrailing extends StatelessWidget {
+  const _SearchDownloadTrailing({
+    required this.downloaded,
+    required this.job,
+    required this.onDownload,
+  });
+
+  final bool downloaded;
+  final YoutubeDownloadJob? job;
+  final VoidCallback onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    if (downloaded) {
+      return Icon(
+        Icons.check_circle,
+        color: Theme.of(context).colorScheme.primary,
+      );
+    }
+
+    final active = job;
+    if (active != null &&
+        active.state != YoutubeDownloadState.failed &&
+        active.state != YoutubeDownloadState.cancelled &&
+        active.state != YoutubeDownloadState.complete) {
+      return SizedBox(
+        width: 36,
+        height: 36,
+        child: active.state == YoutubeDownloadState.downloading
+            ? CircularProgressIndicator(value: active.progress, strokeWidth: 2.5)
+            : const CircularProgressIndicator(strokeWidth: 2.5),
+      );
+    }
+
+    if (active?.state == YoutubeDownloadState.failed) {
+      return IconButton(
+        icon: const Icon(Icons.refresh),
+        tooltip: 'Retry download',
+        onPressed: () => YoutubeDownloadManager.instance.retry(active!.videoId),
+      );
+    }
+
+    return IconButton(
+      icon: const Icon(Icons.download_outlined),
+      tooltip: 'Download',
+      onPressed: onDownload,
     );
   }
 }
@@ -215,8 +296,23 @@ class YoutubeLibraryTab extends StatelessWidget {
                               onDelete: (t) async {
                                 final path = t.filePath;
                                 if (path == null) return;
-                                await deleteYoutubeTrackByPath(path);
-                                await YoutubeLibraryCatalog.instance.reload();
+                                if (!context.mounted) return;
+                                final ok = await confirmDeleteYoutubeDownload(
+                                  context,
+                                  t,
+                                );
+                                if (!ok || !context.mounted) return;
+                                await deleteYoutubeDownload(
+                                  player: player,
+                                  filePath: path,
+                                );
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Deleted "${t.title}"'),
+                                    ),
+                                  );
+                                }
                               },
                             );
                           },

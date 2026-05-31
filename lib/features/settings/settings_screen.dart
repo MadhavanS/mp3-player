@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show debugPrint, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,6 +15,7 @@ import '../../services/recently_played_store.dart';
 import '../../services/songs_alpha_index_store.dart';
 import '../../services/storage_access.dart';
 import '../youtube/youtube_settings_store.dart';
+import '../youtube/youtube_storage_paths.dart';
 import '../../theme/accent_color_option.dart';
 import '../../theme/app_font_option.dart';
 import '../../theme/app_theme.dart';
@@ -93,6 +95,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _windowsWindowPrefsLoaded = false;
   bool _songsAlphaIndexExperiment = false;
   bool _youtubeMergeIntoSongs = false;
+  String? _youtubeStoragePath;
 
   static bool get _isWindowsDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -112,7 +115,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadYoutubeSettings() async {
     if (kIsWeb) return;
     final merge = await YoutubeSettingsStore.loadMergeIntoSongs();
-    if (mounted) setState(() => _youtubeMergeIntoSongs = merge);
+    final storagePath = await youtubeAudioStorageDirectoryPath();
+    if (mounted) {
+      setState(() {
+        _youtubeMergeIntoSongs = merge;
+        _youtubeStoragePath = storagePath;
+      });
+    }
+  }
+
+  Future<void> _copyYoutubeStoragePath() async {
+    final path = _youtubeStoragePath?.trim();
+    if (path == null || path.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: path));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Storage path copied to clipboard.')),
+    );
   }
 
   Future<void> _loadSongsAlphaExperiment() async {
@@ -790,7 +809,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             theme: theme,
             icon: Icons.music_video_outlined,
             title: 'YouTube',
-            subtitle: 'Downloaded audio and Songs tab merge',
+            subtitle: 'Downloads folder and Songs tab merge',
             onTap: () => _goToSection(_SettingsSection.youtube),
           ),
         if (!kIsWeb) Divider(height: 1, color: pal.dividerOnHero),
@@ -1535,6 +1554,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       if (mounted) setState(() => _busy = false);
                     }
                   },
+          ),
+        ),
+        const SizedBox(height: 24),
+        Text(
+          'Storage location',
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: pal.onScaffold,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Material(
+          color: Colors.transparent,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: SelectableText(
+              _youtubeStoragePath ?? 'Loading…',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: pal.onScaffold,
+                fontFamily: 'monospace',
+                fontSize: 13,
+              ),
+            ),
+            subtitle: Text(
+              'Downloaded YouTube audio (.m4a / .webm) is saved in this app folder.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: pal.textMuted.withValues(alpha: 0.95),
+              ),
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.copy_outlined),
+              tooltip: 'Copy path',
+              onPressed:
+                  _youtubeStoragePath == null || _youtubeStoragePath!.isEmpty
+                  ? null
+                  : () => unawaited(_copyYoutubeStoragePath()),
+            ),
           ),
         ),
       ],

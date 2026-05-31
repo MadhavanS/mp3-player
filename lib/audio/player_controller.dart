@@ -24,6 +24,7 @@ import '../services/music_library_path_key.dart';
 import '../services/song_metadata_cache.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
+import '../features/youtube/catalog/youtube_library_catalog.dart';
 import 'art_availability_notifier.dart';
 import 'equalizer_service.dart';
 import 'replay_gain_service.dart';
@@ -472,7 +473,17 @@ class PlayerController {
 
   TrackItem _trackAt(int playlistIndex) {
     final path = _playlistPaths[playlistIndex];
-    return _libraryCatalog.trackForPath(path) ?? TrackItem.fromFilePath(path);
+    final fromLib = _libraryCatalog.trackForPath(path);
+    if (fromLib != null) return fromLib;
+    if (isYoutubeDownloadStoragePath(path)) {
+      final key = canonicalMusicLibraryPathKey(path);
+      for (final t in YoutubeLibraryCatalog.instance.tracks) {
+        final fp = t.filePath?.trim();
+        if (fp == null || fp.isEmpty) continue;
+        if (canonicalMusicLibraryPathKey(fp) == key) return t;
+      }
+    }
+    return TrackItem.fromFilePath(path);
   }
 
   void _setPlaylistPaths(

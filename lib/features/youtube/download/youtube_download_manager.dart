@@ -15,6 +15,7 @@ import '../models/youtube_track.dart';
 import '../storage/youtube_track_record.dart';
 import '../storage/youtube_track_store.dart';
 import '../thumbnail/youtube_thumbnail_cache.dart';
+import '../youtube_storage_paths.dart';
 import 'youtube_download_job.dart';
 import 'youtube_download_notifications.dart';
 import 'youtube_download_queue_store.dart';
@@ -328,11 +329,7 @@ class YoutubeDownloadManager extends ChangeNotifier {
     File tempFile,
     AudioOnlyStreamInfo streamInfo,
   ) async {
-    final docsDir = await getApplicationDocumentsDirectory();
-    final ytDir = Directory(p.join(docsDir.path, 'youtube_audio'));
-    if (!await ytDir.exists()) {
-      await ytDir.create(recursive: true);
-    }
+    final ytDirPath = await ensureYoutubeAudioStorageDirectory();
 
     final ext = fileExtensionForStream(streamInfo.container);
     final safeName = job.title
@@ -341,7 +338,7 @@ class YoutubeDownloadManager extends ChangeNotifier {
     final clipped = safeName.isEmpty
         ? job.videoId
         : safeName.substring(0, math.min(safeName.length, 50));
-    final finalPath = p.join(ytDir.path, '${job.videoId}_$clipped.$ext');
+    final finalPath = p.join(ytDirPath, '${job.videoId}_$clipped.$ext');
 
     if (await File(finalPath).exists()) {
       await File(finalPath).delete();

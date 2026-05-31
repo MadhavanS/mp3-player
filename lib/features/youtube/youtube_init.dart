@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
 
 import 'catalog/youtube_library_catalog.dart';
 import 'download/youtube_download_manager.dart';
@@ -9,6 +8,7 @@ import 'download/youtube_download_notifications.dart';
 import 'download/youtube_download_queue_store.dart';
 import 'storage/youtube_track_store.dart';
 import 'thumbnail/youtube_thumbnail_cache.dart';
+import 'youtube_storage_paths.dart';
 
 /// Initializes YouTube storage and reloads the downloaded library catalog.
 Future<void> initYoutubeFeature() async {
@@ -38,8 +38,7 @@ Future<void> wipeYoutubeLocalData() async {
     debugPrint('wipeYoutubeLocalData thumbs: $e\n$st');
   }
   try {
-    final docs = await getApplicationDocumentsDirectory();
-    final ytDir = Directory('${docs.path}/youtube_audio');
+    final ytDir = Directory(await youtubeAudioStorageDirectoryPath());
     if (await ytDir.exists()) {
       await ytDir.delete(recursive: true);
     }

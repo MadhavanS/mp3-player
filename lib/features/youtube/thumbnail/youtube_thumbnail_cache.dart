@@ -63,6 +63,19 @@ class YoutubeThumbnailCache {
     return cacheFile.path;
   }
 
+  Future<void> deleteForVideoId(String videoId) async {
+    final id = videoId.trim();
+    if (id.isEmpty) return;
+    try {
+      final file = await _thumbnailFile(id);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (e, st) {
+      debugPrint('[YoutubeThumbnailCache.deleteForVideoId] $e\n$st');
+    }
+  }
+
   Future<File> _thumbnailFile(String videoId) async {
     final dir = await getApplicationCacheDirectory();
     return File(p.join(dir.path, 'yt_thumbs', '$videoId.jpg'));

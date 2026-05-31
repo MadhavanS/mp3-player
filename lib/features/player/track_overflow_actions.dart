@@ -22,6 +22,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../../widgets/player_adaptive_controls.dart';
+import '../youtube/youtube_track_delete.dart';
 import '../library/context_tracks_screen.dart';
 import 'edit_track_tags_sheet.dart';
 import 'site_rename_standalone_dialog.dart';
@@ -914,6 +915,14 @@ Future<void> applyTrackOverflowAction(
         destructive: true,
       );
       if (confirmed != true || !context.mounted) return;
+
+      if (isYoutubeDownloadStoragePath(path)) {
+        await deleteYoutubeDownload(player: player, filePath: path);
+        if (context.mounted) {
+          ActionPillToast.show(context, 'Deleted', uppercaseLabel: true);
+        }
+        return;
+      }
 
       if (!await ensureCanWriteLibraryFiles(
         context,
