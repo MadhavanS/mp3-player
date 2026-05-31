@@ -34,4 +34,9 @@ class SongMetadataCacheRow {
       hasArtDiskCache &&
       artCachedForModifiedMs == updatedAtMs &&
       artCachedForSizeBytes == fileSizeBytes;
+
+  bool hasReplayGainTrack = false;
+  double replayGainTrackDb = 0;
+  bool hasReplayGainAlbum = false;
+  double replayGainAlbumDb = 0;
 }

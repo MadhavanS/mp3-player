@@ -8,7 +8,7 @@ import 'dart:typed_data';
 
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb, listEquals;
+    show TargetPlatform, defaultTargetPlatform, kDebugMode, kIsWeb, listEquals;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -25,6 +25,8 @@ import '../services/song_metadata_cache.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
 import 'art_availability_notifier.dart';
+import 'equalizer_service.dart';
+import 'replay_gain_service.dart';
 import 'notification_art_uri.dart';
 import 'album_art_resolver.dart';
 import 'library_catalog.dart';
@@ -62,6 +64,10 @@ bool _concatUseLazyPreparationForPlatform() {
 /// Local playback coordinator. UI listens to [position], [track], [playback], [queue]
 /// notifiers — not this class — to avoid whole-tree rebuilds.
 class PlayerController {
+  final EqualizerService _equalizerService = EqualizerService();
+  late final ReplayGainService _replayGainService =
+      ReplayGainService(_equalizerService);
+
   void _debugTraceReloadOrigin(String tag) {
     assert(() {
       final frames = StackTrace.current
@@ -106,8 +112,26 @@ class PlayerController {
 
   Future<void> _playSafely({String context = 'play'}) async {
     try {
+      if (kDebugMode) {
+        int? sessionId;
+        try {
+          sessionId = await _player.androidAudioSessionId;
+        } catch (_) {
+          sessionId = null;
+        }
+        debugPrint(
+          '[playSafely:$context] '
+          'volume=${_player.volume} '
+          'speed=${_player.speed} '
+          'sessionId=$sessionId '
+          'processing=${_player.processingState} '
+          'playing=${_player.playing}',
+        );
+      }
       await _activateAudioSessionForPlayback();
-      await _player.play();
+      if (!_player.playing) {
+        await _player.play();
+      }
     } catch (e, st) {
       if (_isInterruptedAbort(e)) return;
       debugPrint('$context error: $e\n$st');
@@ -249,6 +273,7 @@ class PlayerController {
     positionNotifier.attach();
     unawaited(_loadPersistedVolume());
     _audioSessionInit = _initAudioSessionInterruptions();
+    unawaited(_initAudioEffects());
     // Single subscription: listening to [processingStateStream] and
     // [playerStateStream] both triggered platform init; concurrent inits caused
     // "Platform player … already exists" on some devices (just_audio / Android).
@@ -295,12 +320,51 @@ class PlayerController {
     _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
   }
 
+  Future<void> _initAudioEffects() async {
+    await _equalizerService.init();
+    await _replayGainService.init();
+    await _syncPlaybackEnhancements();
+  }
+
+  Future<void> _syncPlaybackEnhancements({int? sessionId}) async {
+    await _replayGainService.applyForTrack(
+      track: currentTrack,
+      albumPlaybackContext: _isAlbumPlaybackContext(),
+    );
+    try {
+      final id = sessionId ?? await _player.androidAudioSessionId;
+      await _equalizerService.reattachToSession(id);
+    } catch (e, st) {
+      debugPrint('_syncPlaybackEnhancements: $e\n$st');
+    }
+  }
+
+  bool _isAlbumPlaybackContext() {
+    final album = currentTrack?.metaLine;
+    if (album == null || album.isEmpty || album == 'mp3') return false;
+    if (_playlistPaths.length < 2) return false;
+    var sameAlbum = 0;
+    for (final path in _playlistPaths) {
+      if (_libraryCatalog.trackForPath(path)?.metaLine == album) {
+        sameAlbum++;
+      }
+    }
+    return sameAlbum >= (_playlistPaths.length * 0.8).ceil();
+  }
+
+  Future<void> syncPlaybackEnhancements() => _syncPlaybackEnhancements();
+
   /// [just_audio] can subscribe to [AudioSession] interruptions internally, but
   /// we disable that and handle focus here so phone calls / mic use reliably pause
   /// and transient focus loss can resume after the call.
   late final AudioPlayer _player = _sharedNativePlayer ??= AudioPlayer(
     handleInterruptions: false,
+    audioPipeline: EqualizerService.sharedPipeline,
   );
+
+  /// Android loudness/EQ/ReplayGain controls (no-op on other platforms).
+  EqualizerService get equalizerService => _equalizerService;
+  ReplayGainService get replayGainService => _replayGainService;
   late final PositionNotifier positionNotifier = PositionNotifier(_player);
   final TrackNotifier track = TrackNotifier();
   final PlaybackNotifier playback = PlaybackNotifier();
@@ -656,7 +720,19 @@ class PlayerController {
     }
     try {
       final session = await AudioSession.instance;
-      await session.configure(const AudioSessionConfiguration.music());
+      await session.configure(
+        const AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playback,
+          avAudioSessionMode: AVAudioSessionMode.defaultMode,
+          androidAudioAttributes: AndroidAudioAttributes(
+            contentType: AndroidAudioContentType.music,
+            usage: AndroidAudioUsage.media,
+          ),
+          androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+          androidWillPauseWhenDucked: true,
+        ),
+      );
+      debugPrint('[audioSession] configured: music/media');
       await _audioInterruptionSub?.cancel();
       await _becomingNoisySub?.cancel();
       await _devicesChangedSub?.cancel();
@@ -1369,6 +1445,8 @@ class PlayerController {
         final enriched = await readAudioMetadata(track);
         if (enriched.albumArtBytes != null &&
             enriched.albumArtBytes!.isNotEmpty) {
+          await primeAlbumArtDiskCache(enrichPath, enriched.albumArtBytes!);
+          await SongMetadataCache.markArtDiskCachedForPath(enrichPath);
           updateTrackByPath(
             enrichPath,
             enriched,
@@ -3153,6 +3231,12 @@ class PlayerController {
       }
     }
     _prewarmPlaybackAlbumArt();
+    try {
+      final sessionId = await _player.androidAudioSessionId;
+      await _syncPlaybackEnhancements(sessionId: sessionId);
+    } catch (e, st) {
+      debugPrint('_loadCurrent EQ/RG sync: $e\n$st');
+    }
     _notifyTrack();
     positionNotifier.flush();
   }
@@ -3324,6 +3408,12 @@ class PlayerController {
         _ignoreSpuriousPlaybackCompletedUntil = null;
         _scheduleNotificationArtRefresh();
       }
+    }
+    try {
+      final sessionId = await _player.androidAudioSessionId;
+      await _syncPlaybackEnhancements(sessionId: sessionId);
+    } catch (e, st) {
+      debugPrint('$context EQ/RG sync: $e\n$st');
     }
   }
 

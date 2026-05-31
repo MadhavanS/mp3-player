@@ -120,6 +120,8 @@ Future<Map<String, TrackItem>> loadTracksByPaths(List<String> paths) async {
             .toList(growable: false),
         filePath: row.path,
         albumArtBytes: null,
+        replayGainTrackDb: row.hasReplayGainTrack ? row.replayGainTrackDb : null,
+        replayGainAlbumDb: row.hasReplayGainAlbum ? row.replayGainAlbumDb : null,
       );
     }
     return out;
@@ -164,7 +166,11 @@ Future<void> saveTracks(Iterable<TrackItem> tracks) async {
         // Preserve disk-sync fingerprint so background sync does not re-read
         // every file after art-only warmup or tag edits.
         ..fileSizeBytes = prev?.fileSizeBytes ?? 0
-        ..updatedAtMs = prev?.updatedAtMs ?? now;
+        ..updatedAtMs = prev?.updatedAtMs ?? now
+        ..hasReplayGainTrack = t.replayGainTrackDb != null
+        ..replayGainTrackDb = t.replayGainTrackDb ?? 0
+        ..hasReplayGainAlbum = t.replayGainAlbumDb != null
+        ..replayGainAlbumDb = t.replayGainAlbumDb ?? 0;
       _copyArtDiskFlags(
         row: row,
         prev: prev,
@@ -202,6 +208,8 @@ Future<Map<String, CachedTrackSnapshot>> loadSnapshotsForRoots(
             .toList(growable: false),
         filePath: row.path,
         albumArtBytes: null,
+        replayGainTrackDb: row.hasReplayGainTrack ? row.replayGainTrackDb : null,
+        replayGainAlbumDb: row.hasReplayGainAlbum ? row.replayGainAlbumDb : null,
       );
       out[row.path] = CachedTrackSnapshot(
         track: track,
@@ -257,7 +265,11 @@ Future<void> saveTrackSnapshots(Iterable<CachedTrackSnapshot> tracks) async {
             .map((c) => c.toARGB32())
             .toList(growable: false)
         ..fileSizeBytes = s.fileSizeBytes
-        ..updatedAtMs = s.fileModifiedMs;
+        ..updatedAtMs = s.fileModifiedMs
+        ..hasReplayGainTrack = s.track.replayGainTrackDb != null
+        ..replayGainTrackDb = s.track.replayGainTrackDb ?? 0
+        ..hasReplayGainAlbum = s.track.replayGainAlbumDb != null
+        ..replayGainAlbumDb = s.track.replayGainAlbumDb ?? 0;
       _copyArtDiskFlags(
         row: row,
         prev: prev,

@@ -182,6 +182,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       // granted, trigger an immediate rescan so the library populates.
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         unawaited(_recheckPermissionOnResume());
+        final player = _playerRef;
+        if (player != null) {
+          unawaited(player.syncPlaybackEnhancements());
+        }
       }
     }
     if (state == AppLifecycleState.paused ||

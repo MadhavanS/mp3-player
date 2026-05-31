@@ -20,6 +20,7 @@ import '../../theme/player_chrome_background.dart';
 import '../../widgets/daisy_background.dart';
 import '../../widgets/player_adaptive_controls.dart';
 import '../help/help_screen.dart';
+import 'sound_settings_panel.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -67,6 +68,7 @@ enum _SettingsSection {
   appearance,
   musicFolders,
   recentLists,
+  sound,
   experiments,
   help,
   windows,
@@ -617,6 +619,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _settingsMenuTile({
+    required AppPalette pal,
+    required ThemeData theme,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(vertical: 6),
+        leading: Icon(
+          icon,
+          color: pal.onScaffold.withValues(alpha: 0.88),
+          size: 28,
+        ),
+        title: Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: pal.onScaffold,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.95),
+          ),
+        ),
+        trailing: Icon(
+          Icons.chevron_right_rounded,
+          color: pal.textMuted.withValues(alpha: 0.75),
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+
   Widget _buildMainMenu(ThemeData theme, AppPalette pal) {
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -630,166 +671,67 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 6),
-          leading: Icon(
-            Icons.palette_outlined,
-            color: pal.onScaffold.withValues(alpha: 0.88),
-            size: 28,
-          ),
-          title: Text(
-            'Appearance',
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: pal.onScaffold,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          subtitle: Text(
-            'Theme and accent color',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: pal.textMuted.withValues(alpha: 0.95),
-            ),
-          ),
-          trailing: Icon(
-            Icons.chevron_right_rounded,
-            color: pal.textMuted.withValues(alpha: 0.75),
-          ),
+        _settingsMenuTile(
+          pal: pal,
+          theme: theme,
+          icon: Icons.palette_outlined,
+          title: 'Appearance',
+          subtitle: 'Theme and accent color',
           onTap: () => _goToSection(_SettingsSection.appearance),
         ),
         Divider(height: 1, color: pal.dividerOnHero),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 6),
-          leading: Icon(
-            Icons.folder_special_outlined,
-            color: pal.onScaffold.withValues(alpha: 0.88),
-            size: 28,
-          ),
-          title: Text(
-            'Music folders',
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: pal.onScaffold,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          subtitle: Text(
-            'Scan paths and library options',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: pal.textMuted.withValues(alpha: 0.95),
-            ),
-          ),
-          trailing: Icon(
-            Icons.chevron_right_rounded,
-            color: pal.textMuted.withValues(alpha: 0.75),
-          ),
+        _settingsMenuTile(
+          pal: pal,
+          theme: theme,
+          icon: Icons.folder_special_outlined,
+          title: 'Music folders',
+          subtitle: 'Scan paths and library options',
           onTap: () => _goToSection(_SettingsSection.musicFolders),
         ),
         Divider(height: 1, color: pal.dividerOnHero),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 6),
-          leading: Icon(
-            Icons.history_toggle_off_rounded,
-            color: pal.onScaffold.withValues(alpha: 0.88),
-            size: 28,
-          ),
-          title: Text(
-            'Recent lists',
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: pal.onScaffold,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          subtitle: Text(
-            'RecentlyAdded and RecentlyPlayed count',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: pal.textMuted.withValues(alpha: 0.95),
-            ),
-          ),
-          trailing: Icon(
-            Icons.chevron_right_rounded,
-            color: pal.textMuted.withValues(alpha: 0.75),
-          ),
+        _settingsMenuTile(
+          pal: pal,
+          theme: theme,
+          icon: Icons.history_toggle_off_rounded,
+          title: 'Recent lists',
+          subtitle: 'RecentlyAdded and RecentlyPlayed count',
           onTap: () => _goToSection(_SettingsSection.recentLists),
         ),
         Divider(height: 1, color: pal.dividerOnHero),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 6),
-          leading: Icon(
-            Icons.science_outlined,
-            color: pal.onScaffold.withValues(alpha: 0.88),
-            size: 28,
-          ),
-          title: Text(
-            'Experiments',
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: pal.onScaffold,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          subtitle: Text(
-            'Optional library features in development',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: pal.textMuted.withValues(alpha: 0.95),
-            ),
-          ),
-          trailing: Icon(
-            Icons.chevron_right_rounded,
-            color: pal.textMuted.withValues(alpha: 0.75),
-          ),
+        _settingsMenuTile(
+          pal: pal,
+          theme: theme,
+          icon: Icons.graphic_eq_rounded,
+          title: 'Sound',
+          subtitle: 'Loudness boost and equalizer presets',
+          onTap: () => _goToSection(_SettingsSection.sound),
+        ),
+        Divider(height: 1, color: pal.dividerOnHero),
+        _settingsMenuTile(
+          pal: pal,
+          theme: theme,
+          icon: Icons.science_outlined,
+          title: 'Experiments',
+          subtitle: 'Optional library features in development',
           onTap: () => _goToSection(_SettingsSection.experiments),
         ),
         Divider(height: 1, color: pal.dividerOnHero),
-        ListTile(
-          contentPadding: const EdgeInsets.symmetric(vertical: 6),
-          leading: Icon(
-            Icons.help_outline_rounded,
-            color: pal.onScaffold.withValues(alpha: 0.88),
-            size: 28,
-          ),
-          title: Text(
-            'Help',
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: pal.onScaffold,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          subtitle: Text(
-            'Search filters and library tips',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: pal.textMuted.withValues(alpha: 0.95),
-            ),
-          ),
-          trailing: Icon(
-            Icons.chevron_right_rounded,
-            color: pal.textMuted.withValues(alpha: 0.75),
-          ),
+        _settingsMenuTile(
+          pal: pal,
+          theme: theme,
+          icon: Icons.help_outline_rounded,
+          title: 'Help',
+          subtitle: 'Search filters and library tips',
           onTap: () => _goToSection(_SettingsSection.help),
         ),
         if (_isWindowsDesktop) ...[
           Divider(height: 1, color: pal.dividerOnHero),
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(vertical: 6),
-            leading: Icon(
-              Icons.desktop_windows_outlined,
-              color: pal.onScaffold.withValues(alpha: 0.88),
-              size: 28,
-            ),
-            title: Text(
-              'Windows',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: pal.onScaffold,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            subtitle: Text(
-              'Always on top and window size',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: pal.textMuted.withValues(alpha: 0.95),
-              ),
-            ),
-            trailing: Icon(
-              Icons.chevron_right_rounded,
-              color: pal.textMuted.withValues(alpha: 0.75),
-            ),
+          _settingsMenuTile(
+            pal: pal,
+            theme: theme,
+            icon: Icons.desktop_windows_outlined,
+            title: 'Windows',
+            subtitle: 'Always on top and window size',
             onTap: () => _goToSection(_SettingsSection.windows),
           ),
         ],
@@ -1454,6 +1396,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _SettingsSection.appearance => 'Appearance',
       _SettingsSection.musicFolders => 'Music folders',
       _SettingsSection.recentLists => 'Recent lists',
+      _SettingsSection.sound => 'Sound',
       _SettingsSection.experiments => 'Experiments',
       _SettingsSection.help => 'Help',
       _SettingsSection.windows => 'Windows',
@@ -1483,6 +1426,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       theme,
                       pal,
                     ),
+                    _SettingsSection.sound => const SoundSettingsPanel(),
                     _SettingsSection.experiments => _buildExperimentsDetail(
                       theme,
                       pal,
