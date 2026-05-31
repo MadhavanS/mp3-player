@@ -11,6 +11,7 @@ Future<SongFileInfo> readSongFileInfo(String? filePath) async {
       sizeBytes: null,
       durationMs: null,
       bitrateKbps: null,
+      composer: null,
     );
   }
   return SongFileInfo(
@@ -19,5 +20,6 @@ Future<SongFileInfo> readSongFileInfo(String? filePath) async {
     sizeBytes: null,
     durationMs: null,
     bitrateKbps: null,
+    composer: null,
   );
 }

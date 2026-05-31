@@ -8,6 +8,7 @@ class SongFileInfo {
     required this.sizeBytes,
     required this.durationMs,
     required this.bitrateKbps,
+    this.composer,
   });
 
   final String fileName;
@@ -15,6 +16,9 @@ class SongFileInfo {
   final int? sizeBytes;
   final int? durationMs;
   final int? bitrateKbps;
+
+  /// Embedded TCOM / COMPOSER tag, when present.
+  final String? composer;
 }
 
 Future<SongFileInfo> readSongFileInfo(String? filePath) =>

@@ -642,6 +642,37 @@ Future<void> applyTrackOverflowAction(
     if (!context.mounted) return;
     final pal = context.palette;
     final theme = Theme.of(context);
+
+    Widget infoRow(String label, String value, {bool selectable = false}) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: pal.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          if (selectable)
+            SelectableText(
+              value,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: pal.textPrimary,
+              ),
+            )
+          else
+            Text(
+              value,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: pal.textPrimary,
+              ),
+            ),
+          const SizedBox(height: 12),
+        ],
+      );
+    }
+
     await showDialog<void>(
       context: context,
       builder: (ctx) {
@@ -651,80 +682,32 @@ Future<void> applyTrackOverflowAction(
             'Song info',
             style: theme.textTheme.titleLarge?.copyWith(color: pal.textPrimary),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'File name',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: pal.textSecondary,
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                infoRow('Title', track.title),
+                infoRow('Artist', track.artist),
+                if (track.metaLine.isNotEmpty && track.metaLine != 'mp3')
+                  infoRow('Album', track.metaLine),
+                infoRow(
+                  'Composer',
+                  info.composer ?? 'Not set',
                 ),
-              ),
-              const SizedBox(height: 4),
-              SelectableText(
-                info.fileName,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: pal.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Size',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: pal.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _formatBytes(info.sizeBytes),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: pal.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Duration',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: pal.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _formatDuration(info.durationMs),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: pal.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Bit rate',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: pal.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _formatBitrate(info.bitrateKbps),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: pal.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Folder',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: pal.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 4),
-              SelectableText(
-                info.folderPath,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: pal.textPrimary,
-                ),
-              ),
-            ],
+                if (track.genres.isNotEmpty)
+                  infoRow(
+                    'Genre',
+                    track.genres.replaceAll('#', ' ').trim(),
+                  ),
+                const Divider(height: 20),
+                infoRow('File name', info.fileName, selectable: true),
+                infoRow('Size', _formatBytes(info.sizeBytes)),
+                infoRow('Duration', _formatDuration(info.durationMs)),
+                infoRow('Bit rate', _formatBitrate(info.bitrateKbps)),
+                infoRow('Folder', info.folderPath, selectable: true),
+              ],
+            ),
           ),
           actions: [
             TextButton(

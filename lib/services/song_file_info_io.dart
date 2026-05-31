@@ -15,6 +15,7 @@ Future<SongFileInfo> readSongFileInfo(String? filePath) async {
       sizeBytes: null,
       durationMs: null,
       bitrateKbps: null,
+      composer: null,
     );
   }
 
@@ -37,13 +38,39 @@ Future<SongFileInfo> readSongFileInfo(String? filePath) async {
     bitrateKbps ??= fromReader.bitrateKbps;
   }
 
+  final composer = _readComposerTag(raw);
+
   return SongFileInfo(
     fileName: p.basename(raw),
     folderPath: p.dirname(raw),
     sizeBytes: sizeBytes,
     durationMs: durationMs,
     bitrateKbps: bitrateKbps,
+    composer: composer,
   );
+}
+
+String? _readComposerTag(String path) {
+  try {
+    final tag = readAllMetadata(File(path), getImage: false);
+    if (tag is Mp3Metadata) {
+      return _nonEmptyTag(tag.composer);
+    }
+    if (tag is ApeMetadata) {
+      return _nonEmptyTag(tag.composer);
+    }
+    if (tag is VorbisMetadata) {
+      if (tag.composer.isEmpty) return null;
+      return _nonEmptyTag(tag.composer.join(', '));
+    }
+  } catch (_) {}
+  return null;
+}
+
+String? _nonEmptyTag(String? value) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty) return null;
+  return trimmed;
 }
 
 ({int? durationMs, int? bitrateKbps}) _readWithAudioMetadataReader(String path) {
