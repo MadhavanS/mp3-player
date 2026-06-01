@@ -18,11 +18,6 @@ Future<void> initYoutubeFeature() async {
   await YoutubeTrackStore.instance.init();
   await YoutubeDownloadNotifications.init();
   await YoutubeLibraryCatalog.instance.reload();
-  try {
-    await scanYoutubeStorageFolder();
-  } catch (e, st) {
-    debugPrint('initYoutubeFeature storage scan: $e\n$st');
-  }
   await YoutubeDownloadManager.instance.resumePendingDownloads();
 }
 

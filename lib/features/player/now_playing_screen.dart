@@ -21,7 +21,9 @@ import 'edit_track_tags_sheet.dart';
 import 'mini_player_bar.dart';
 import 'site_rename_standalone_dialog.dart';
 import 'sleep_timer_control.dart';
+import 'now_playing_youtube_panel.dart';
 import 'track_overflow_actions.dart';
+import '../youtube/youtube_now_playing.dart';
 
 /// Silver full-art player: ink, inactive seek track, timestamps, disabled icons.
 const Color _kSilverInk = Color(0xFF0A0A0A);
@@ -201,6 +203,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 
   void _openTagEditor(PlayerController player) => _showTagSheet(player);
+
+  void _onYoutubeSongTap(TrackItem track) {
+    unawaited(showYoutubeNowPlayingTrackSheet(context, track: track));
+  }
 
   Future<void> _onSoftBlurTailOverflowSelected(
     PlayerController player,
@@ -1175,11 +1181,20 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           height: artWidth,
           child: FittedBox(
             fit: BoxFit.contain,
-            child: TrackAlbumArt(
-              track: track,
-              display: TrackArtDisplay.full,
-              showShadow: false,
-              cornerRadius: _isSilverNp(context) ? 14 : 0,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: isYoutubePlaybackTrack(track)
+                    ? () => _onYoutubeSongTap(track)
+                    : null,
+                borderRadius: BorderRadius.circular(14),
+                child: TrackAlbumArt(
+                  track: track,
+                  display: TrackArtDisplay.full,
+                  showShadow: false,
+                  cornerRadius: _isSilverNp(context) ? 14 : 0,
+                ),
+              ),
             ),
           ),
         ),
@@ -1192,6 +1207,35 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             style: _fullArtTrackTitleStyle(context, theme, pal),
           ),
         ),
+        ListenableBuilder(
+          listenable: player.playback,
+          builder: (context, _) {
+            final loadingLabel = player.trackLoadingLabel;
+            if (loadingLabel == null) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: SizedBox(
+                width: artWidth,
+                child: Text(
+                  loadingLabel,
+                  textAlign: TextAlign.center,
+                  style: _fullArtTrackSecondaryStyle(
+                    context,
+                    theme,
+                    pal,
+                    fontSize: 15,
+                    onScaffoldAlpha: 0.95,
+                  )?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: context.controlAccent,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+        if (isYoutubePlaybackTrack(track))
+          YoutubeNowPlayingDownloadRow(track: track, maxWidth: artWidth),
         if (showArtist) ...[
           const SizedBox(height: 6),
           SizedBox(
@@ -1307,11 +1351,19 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           height: artWidth,
           child: FittedBox(
             fit: BoxFit.contain,
-            child: TrackAlbumArt(
-              track: track,
-              display: TrackArtDisplay.full,
-              showShadow: false,
-              cornerRadius: 0,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: isYoutubePlaybackTrack(track)
+                    ? () => _onYoutubeSongTap(track)
+                    : null,
+                child: TrackAlbumArt(
+                  track: track,
+                  display: TrackArtDisplay.full,
+                  showShadow: false,
+                  cornerRadius: 0,
+                ),
+              ),
             ),
           ),
         ),
@@ -1343,6 +1395,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
             ],
           ),
         ),
+        if (isYoutubePlaybackTrack(track))
+          YoutubeNowPlayingDownloadRow(track: track, maxWidth: artWidth),
         const SizedBox(height: 14),
         SizedBox(
           width: artWidth,
@@ -1646,6 +1700,15 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                               playerChrome: playerChrome,
                                               theme: theme,
                                               track: t,
+                                              onSongTap: isYoutubePlaybackTrack(t)
+                                                  ? () => _onYoutubeSongTap(t)
+                                                  : null,
+                                              downloadExtras:
+                                                  isYoutubePlaybackTrack(t)
+                                                  ? YoutubeNowPlayingDownloadRow(
+                                                      track: t,
+                                                    )
+                                                  : null,
                                               artwork: TrackAlbumArt(
                                                 track: t,
                                                 display:
@@ -2109,12 +2172,16 @@ class _NowPlayingAlbumArtCard extends StatefulWidget {
     required this.theme,
     required this.track,
     required this.artwork,
+    this.onSongTap,
+    this.downloadExtras,
   });
 
   final bool playerChrome;
   final ThemeData theme;
   final TrackItem track;
   final Widget artwork;
+  final VoidCallback? onSongTap;
+  final Widget? downloadExtras;
 
   @override
   State<_NowPlayingAlbumArtCard> createState() =>
@@ -2191,33 +2258,51 @@ class _NowPlayingAlbumArtCardState extends State<_NowPlayingAlbumArtCard> {
               ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _MarqueeText(
-                      widget.track.title,
-                      style: titleStyle,
-                      textAlign: TextAlign.center,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: widget.onSongTap,
+                    borderRadius: BorderRadius.circular(outerR - 4),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _MarqueeText(
+                          widget.track.title,
+                          style: titleStyle,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 14),
+                        Center(child: widget.artwork),
+                        const SizedBox(height: 12),
+                        if (showArtist)
+                          _MarqueeText(
+                            artistName,
+                            style: artistStyle,
+                            textAlign: TextAlign.center,
+                          ),
+                        if (showAlbum) ...[
+                          const SizedBox(height: 4),
+                          _MarqueeText(
+                            albumName,
+                            style: albumStyle,
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                        if (widget.downloadExtras != null) widget.downloadExtras!,
+                        if (widget.onSongTap != null) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Tap for download options',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: titleColor.withValues(alpha: 0.55),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    const SizedBox(height: 14),
-                    Center(child: widget.artwork),
-                    const SizedBox(height: 12),
-                    if (showArtist)
-                      _MarqueeText(
-                        artistName,
-                        style: artistStyle,
-                        textAlign: TextAlign.center,
-                      ),
-                    if (showAlbum) ...[
-                      const SizedBox(height: 4),
-                      _MarqueeText(
-                        albumName,
-                        style: albumStyle,
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),

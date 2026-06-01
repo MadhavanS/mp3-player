@@ -5,8 +5,14 @@ abstract final class SearchHelpText {
   /// Shown in the library search field (Songs, Favourites, queue, etc.).
   static const String libraryTrackFieldHint = 'm: album  s: title  a: artist';
 
-  /// Library › Find (YouTube lookup).
+  /// YouTube › Find (online lookup).
   static const String youtubeFindFieldHint = '@channel · title or artist';
+
+  /// YouTube › Library (downloaded tracks).
+  static const String youtubeLibraryFieldHint = 'Downloaded title or artist';
+
+  /// YouTube › Bookmarks (saved search results).
+  static const String youtubeBookmarksFieldHint = 'Bookmarked title or artist';
 
   static const String playlistTabFieldHint =
       'Playlists (min. $libraryMinChars characters)';

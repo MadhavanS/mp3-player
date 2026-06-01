@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p_path;
 
 import '../../audio/player_controller.dart';
 import '../../models/library_tab_id.dart';
+import '../../models/youtube_page_id.dart';
 import '../../models/track_item.dart';
 import '../../services/album_art_cache.dart';
 import '../../services/app_data_reset.dart';
@@ -38,8 +39,9 @@ import '../player/now_playing_screen.dart';
 import '../player/track_overflow_actions.dart';
 import '../help/help_screen.dart';
 import '../settings/settings_screen.dart';
+import '../youtube/ui/youtube_hub_screen.dart';
 import '../youtube/catalog/youtube_catalog_merge.dart';
-import '../youtube/catalog/youtube_storage_scan.dart';
+import '../youtube/catalog/youtube_library_catalog.dart';
 import '../youtube/download/youtube_download_manager.dart';
 import 'now_playing_escape_bridge.dart';
 
@@ -69,7 +71,7 @@ void dispatchEscapeToSongsLibrary() {
   EscapeToSongsLibraryHub.completeNavigationToSongs();
 }
 
-enum _ShellPage { library, settings }
+enum _ShellPage { library, youtube, settings }
 
 class MainShell extends StatefulWidget {
   const MainShell({
@@ -110,6 +112,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey<LibraryScreenState> _libraryScreenKey =
       GlobalKey<LibraryScreenState>();
+  final GlobalKey<YoutubeHubScreenState> _youtubeHubKey =
+      GlobalKey<YoutubeHubScreenState>();
 
   /// When non-null from Files browser, Songs tab restricts to paths in this exact set (from scanMp3Files).
   final ValueNotifier<Set<String>?> _songsBrowsePathKeysNotifier =
@@ -1243,6 +1247,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     unawaited(PlaybackSessionStore.saveShellPageIsSettings(false));
   }
 
+  void _goYoutube() {
+    if (kIsWeb) {
+      _goLibrary();
+      return;
+    }
+    setState(() => _page = _ShellPage.youtube);
+    unawaited(PlaybackSessionStore.saveShellPageIsSettings(false));
+  }
+
   void _onEscapeToSongsLibrary() {
     if (!mounted) return;
     _scaffoldKey.currentState?.closeDrawer();
@@ -1279,6 +1292,21 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         ? LibraryTabId.nowPlayingList
         : (player.playbackOriginTab ?? LibraryTabId.songs);
     final userPlaylistId = player.playbackOriginUserPlaylistId;
+
+    if (tabId == LibraryTabId.youtube ||
+        tabId == LibraryTabId.youtubeSearch) {
+      _goYoutube();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _youtubeHubKey.currentState?.switchToPage(
+          tabId == LibraryTabId.youtubeSearch
+              ? YoutubePageId.find
+              : YoutubePageId.library,
+        );
+      });
+      return;
+    }
+
     _goLibrary();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -1413,7 +1441,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           canPop: _page == _ShellPage.library,
           onPopInvokedWithResult: (didPop, _) {
             if (didPop) return;
-            if (_page == _ShellPage.settings) {
+            if (_page == _ShellPage.settings || _page == _ShellPage.youtube) {
               _goLibrary();
             }
           },
@@ -1436,6 +1464,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                   unawaited(_openFilesExplorerScreen());
                 });
               },
+              onYoutube: kIsWeb
+                  ? null
+                  : () {
+                      Navigator.pop(context);
+                      _goYoutube();
+                    },
               onSettings: () {
                 Navigator.pop(context);
                 _goSettings();
@@ -1459,31 +1493,35 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                 Column(
                   children: [
                     Expanded(
-                      child: _page == _ShellPage.library
-                          ? LibraryScreen(
-                              key: _libraryScreenKey,
-                              folderPaths: _folderPaths,
-                              songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
-                              onClearSongsBrowseFilter: () {
-                                _songsBrowsePathKeysNotifier.value = null;
-                                PlayerController.of(
-                                  context,
-                                ).setPlaybackPathKeyScope(null);
-                                unawaited(
-                                  PlaybackSessionStore.saveBrowsePathKeys(null),
-                                );
-                              },
-                              onOpenDrawer: _openDrawer,
-                              onRefreshLibrary:
-                                  _folderPaths.isEmpty ||
-                                      _scanning ||
-                                      _refreshInProgress
-                                  ? null
-                                  : () {
-                                      unawaited(_refreshLibraryScan());
-                                    },
-                            )
-                          : SettingsScreen(
+                      child: switch (_page) {
+                        _ShellPage.library => LibraryScreen(
+                            key: _libraryScreenKey,
+                            folderPaths: _folderPaths,
+                            songsBrowsePathKeys: _songsBrowsePathKeysNotifier,
+                            onClearSongsBrowseFilter: () {
+                              _songsBrowsePathKeysNotifier.value = null;
+                              PlayerController.of(
+                                context,
+                              ).setPlaybackPathKeyScope(null);
+                              unawaited(
+                                PlaybackSessionStore.saveBrowsePathKeys(null),
+                              );
+                            },
+                            onOpenDrawer: _openDrawer,
+                            onRefreshLibrary:
+                                _folderPaths.isEmpty ||
+                                    _scanning ||
+                                    _refreshInProgress
+                                ? null
+                                : () {
+                                    unawaited(_refreshLibraryScan());
+                                  },
+                          ),
+                        _ShellPage.youtube => YoutubeHubScreen(
+                            key: _youtubeHubKey,
+                            onOpenDrawer: _openDrawer,
+                          ),
+                        _ShellPage.settings => SettingsScreen(
                               folderPaths: _folderPaths,
                               onFoldersChanged: _onFoldersChanged,
                               onOpenDrawer: _openDrawer,
@@ -1519,7 +1557,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                                   ? null
                                   : () async {
                                       try {
-                                        await scanYoutubeStorageFolder();
+                                        await YoutubeLibraryCatalog
+                                            .instance
+                                            .reload();
                                       } catch (e, st) {
                                         debugPrint(
                                           'onYoutubeStorageRefreshed scan: $e\n$st',
@@ -1531,7 +1571,8 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                                       );
                                       await _applyYoutubeMergeSetting(player);
                                     },
-                            ),
+                          ),
+                      },
                     ),
                     if (current != null)
                       MiniPlayerBar(controller: player, onTap: _openNowPlaying),
@@ -1612,6 +1653,7 @@ class _GlossyDrawer extends StatelessWidget {
     required this.onNowPlaying,
     required this.onLibrary,
     required this.onFiles,
+    this.onYoutube,
     required this.onSettings,
     required this.onHelp,
     required this.onQuit,
@@ -1622,6 +1664,7 @@ class _GlossyDrawer extends StatelessWidget {
   final VoidCallback onNowPlaying;
   final VoidCallback onLibrary;
   final VoidCallback onFiles;
+  final VoidCallback? onYoutube;
   final VoidCallback onSettings;
   final VoidCallback onHelp;
   final VoidCallback onQuit;
@@ -1695,6 +1738,13 @@ class _GlossyDrawer extends StatelessWidget {
                         onTap: onLibrary,
                         selected: currentPage == _ShellPage.library,
                       ),
+                      if (onYoutube != null)
+                        _GlossyDrawerTile(
+                          icon: Icons.video_library_outlined,
+                          label: 'YouTube',
+                          onTap: onYoutube,
+                          selected: currentPage == _ShellPage.youtube,
+                        ),
                       _GlossyDrawerTile(
                         icon: Icons.folder_open_rounded,
                         label: 'Files',

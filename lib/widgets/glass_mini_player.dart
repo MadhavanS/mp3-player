@@ -252,19 +252,56 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                           const SizedBox(width: 14),
                           Expanded(
                             child: ListenableBuilder(
-                              listenable: widget.controller.track,
+                              listenable: Listenable.merge([
+                                widget.controller.track,
+                                widget.controller.playback,
+                              ]),
                               builder: (context, _) {
                                 final t = widget.controller.currentTrack!;
-                                return Text(
-                                  t.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: -0.3,
-                                    color: titleColor,
-                                  ),
+                                final loadingLabel =
+                                    widget.controller.trackLoadingLabel;
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      t.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: -0.3,
+                                        color: titleColor,
+                                      ),
+                                    ),
+                                    if (loadingLabel != null)
+                                      Text(
+                                        loadingLabel,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                          fontSize: 12,
+                                          color: accent,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      )
+                                    else if (t.artist.trim().isNotEmpty)
+                                      Text(
+                                        t.artist,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                          fontSize: 12,
+                                          color: titleColor.withValues(
+                                            alpha: 0.72,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 );
                               },
                             ),
@@ -424,25 +461,48 @@ class _GlassMiniPlayerState extends State<GlassMiniPlayer> {
                     const SizedBox(width: 14),
                     Expanded(
                       child: ListenableBuilder(
-                        listenable: widget.controller.track,
+                        listenable: Listenable.merge([
+                          widget.controller.track,
+                          widget.controller.playback,
+                        ]),
                         builder: (context, _) {
                           final t = widget.controller.currentTrack!;
-                          return Text(
-                            t.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: -0.3,
-                              color: titleColor,
-                              shadows: [
-                                Shadow(
-                                  color: Colors.white.withValues(alpha: 0.85),
-                                  offset: const Offset(0, -0.5),
+                          final loadingLabel =
+                              widget.controller.trackLoadingLabel;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                t.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.3,
+                                  color: titleColor,
+                                  shadows: [
+                                    Shadow(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.85),
+                                      offset: const Offset(0, -0.5),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
+                              ),
+                              if (loadingLabel != null)
+                                Text(
+                                  loadingLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 12,
+                                    color: accent,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                            ],
                           );
                         },
                       ),

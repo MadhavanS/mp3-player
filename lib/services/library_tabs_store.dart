@@ -38,19 +38,29 @@ class LibraryTabsStore {
 
   static final ValueNotifier<int> revision = ValueNotifier(0);
 
+  /// YouTube lives in the sidebar hub, not Library tabs.
+  static const Set<LibraryTabId> _youtubeOnlyTabs = {
+    LibraryTabId.youtube,
+    LibraryTabId.youtubeSearch,
+  };
+
+  static bool _isLibraryTab(LibraryTabId id) => !_youtubeOnlyTabs.contains(id);
+
   static List<LibraryTabRow> _defaultRows() => [
         for (final id in LibraryTabId.values)
-          LibraryTabRow(id: id, enabled: true),
+          if (_isLibraryTab(id)) LibraryTabRow(id: id, enabled: true),
       ];
 
   /// Ensures every tab appears exactly once; preserves saved order first.
   static List<LibraryTabRow> normalize(List<LibraryTabRow> saved) {
-    final byId = {for (final r in saved) r.id: r};
+    final filtered = saved.where((r) => _isLibraryTab(r.id)).toList();
+    final byId = {for (final r in filtered) r.id: r};
     final orderedIds = <LibraryTabId>[];
-    for (final r in saved) {
+    for (final r in filtered) {
       if (!orderedIds.contains(r.id)) orderedIds.add(r.id);
     }
     for (final id in LibraryTabId.values) {
+      if (!_isLibraryTab(id)) continue;
       if (!orderedIds.contains(id)) orderedIds.add(id);
     }
     return orderedIds
@@ -76,7 +86,10 @@ class LibraryTabsStore {
   /// Visible tabs in UI order.
   static Future<List<LibraryTabId>> loadVisibleOrdered() async {
     final rows = await loadConfig();
-    return rows.where((r) => r.enabled).map((r) => r.id).toList();
+    return rows
+        .where((r) => r.enabled && _isLibraryTab(r.id))
+        .map((r) => r.id)
+        .toList();
   }
 
   static Future<void> saveConfig(List<LibraryTabRow> rows) async {

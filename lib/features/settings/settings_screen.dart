@@ -14,6 +14,8 @@ import '../../services/recently_added_store.dart';
 import '../../services/recently_played_store.dart';
 import '../../services/songs_alpha_index_store.dart';
 import '../../services/storage_access.dart';
+import '../../models/youtube_page_id.dart';
+import '../youtube/youtube_home_store.dart';
 import '../youtube/youtube_settings_store.dart';
 import '../youtube/youtube_storage_paths.dart';
 import '../../theme/accent_color_option.dart';
@@ -97,6 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _windowsWindowPrefsLoaded = false;
   bool _songsAlphaIndexExperiment = false;
   bool _youtubeMergeIntoSongs = false;
+  YoutubePageId _youtubeDefaultPage = YoutubePageId.library;
   String? _youtubeStoragePath;
   bool _youtubeStorageIsDefault = true;
   VoidCallback? _youtubeSettingsRevisionListener;
@@ -123,11 +126,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadYoutubeSettings() async {
     if (kIsWeb) return;
     final merge = await YoutubeSettingsStore.loadMergeIntoSongs();
+    final defaultPage = await YoutubeHomeStore.loadDefaultPage();
     final storagePath = await youtubeAudioStorageDirectoryPath();
     final isDefault = await usesDefaultYoutubeAudioStoragePath();
     if (mounted) {
       setState(() {
         _youtubeMergeIntoSongs = merge;
+        _youtubeDefaultPage = defaultPage;
         _youtubeStoragePath = storagePath;
         _youtubeStorageIsDefault = isDefault;
       });
@@ -1638,12 +1643,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
       children: [
         Text(
           'YouTube tracks are downloaded to your device and play like local files. '
-          'They stay in the YouTube library tab unless you choose to merge them into Songs.',
+          'Open the YouTube section from the menu for downloads and Find. '
+          'You can merge downloads into Library › Songs below.',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: pal.textSecondary.withValues(alpha: 0.95),
           ),
         ),
         const SizedBox(height: 16),
+        Text(
+          'Default page',
+          style: theme.textTheme.titleSmall?.copyWith(
+            color: pal.onScaffold,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<YoutubePageId>(
+          value: _youtubeDefaultPage,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: pal.onScaffold.withValues(alpha: 0.06),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
+          ),
+          dropdownColor: pal.surface,
+          items: [
+            for (final page in YoutubePageId.values)
+              DropdownMenuItem(
+                value: page,
+                child: Text(
+                  page.title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: pal.onScaffold,
+                  ),
+                ),
+              ),
+          ],
+          onChanged: _busy
+              ? null
+              : (page) async {
+                  if (page == null) return;
+                  setState(() => _busy = true);
+                  try {
+                    await YoutubeHomeStore.saveDefaultPage(page);
+                    if (mounted) setState(() => _youtubeDefaultPage = page);
+                  } finally {
+                    if (mounted) setState(() => _busy = false);
+                  }
+                },
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'When you open YouTube from the menu, this tab is shown first. '
+          'Your Find search text is kept while switching between Library and Find.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: pal.textMuted.withValues(alpha: 0.95),
+          ),
+        ),
+        const SizedBox(height: 24),
         Material(
           color: Colors.transparent,
           child: SwitchListTile.adaptive(
@@ -1657,8 +1720,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             subtitle: Text(
               _youtubeMergeIntoSongs
-                  ? 'Downloaded YouTube audio appears in Library › Songs and in the YouTube tab.'
-                  : 'Downloaded tracks appear only under Library › YouTube.',
+                  ? 'Downloaded YouTube audio appears in Library › Songs and in YouTube › Library.'
+                  : 'Downloaded tracks appear only under YouTube › Library.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: pal.textMuted.withValues(alpha: 0.95),
               ),
@@ -1702,8 +1765,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: Text(
               _youtubeStorageIsDefault
                   ? 'Downloaded YouTube audio (.m4a / .webm) is saved in this app folder. '
-                      'Existing files here appear under Library › YouTube.'
-                  : 'Custom folder for new downloads. Playable files here appear under Library › YouTube.',
+                      'Existing files here appear under YouTube › Library.'
+                  : 'Custom folder for new downloads. Playable files here appear under YouTube › Library.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: pal.textMuted.withValues(alpha: 0.95),
               ),

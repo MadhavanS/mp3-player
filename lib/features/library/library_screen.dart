@@ -28,7 +28,6 @@ import '../help/search_help_text.dart';
 import '../../widgets/action_pill_toast.dart';
 import '../../widgets/create_playlist_name_dialog.dart';
 import '../player/track_overflow_actions.dart';
-import '../youtube/ui/youtube_search_screen.dart';
 import 'library_track_lookup.dart';
 import 'playing_queue_tab.dart';
 
@@ -170,8 +169,6 @@ class LibraryScreenState extends State<LibraryScreen>
     '#',
   ];
   final TextEditingController _searchController = TextEditingController();
-  final GlobalKey<YoutubeSearchTabState> _youtubeSearchTabKey = GlobalKey();
-  bool _youtubeSearchBusy = false;
   LibrarySearchQuery _appliedSearchQuery = LibrarySearchQuery.parse('');
   Timer? _searchFilterDebounce;
   static const Duration _searchFilterDebounceDelay = Duration(
@@ -182,9 +179,11 @@ class LibraryScreenState extends State<LibraryScreen>
   int _songsTabIndicesCacheKey = 0;
 
   late TabController _tabController;
-  List<LibraryTabId> _visibleTabs = List<LibraryTabId>.from(
-    LibraryTabId.values,
-  );
+  List<LibraryTabId> _visibleTabs = [
+    for (final id in LibraryTabId.values)
+      if (id != LibraryTabId.youtube && id != LibraryTabId.youtubeSearch)
+        id,
+  ];
   List<UserPlaylistEntry> _userPlaylists = const <UserPlaylistEntry>[];
   bool _userPlaylistsLoading = true;
   int _recentListRevision = 0;
@@ -293,16 +292,6 @@ class LibraryScreenState extends State<LibraryScreen>
     if (ix >= 0) _tabController.index = ix;
     setState(() {});
   }
-
-  void switchToYoutubeSearchTab() {
-    if (!mounted) return;
-    final ix = _visibleTabs.indexOf(LibraryTabId.youtubeSearch);
-    if (ix >= 0) _tabController.index = ix;
-    setState(() {});
-  }
-
-  bool get _usesLibrarySearchField =>
-      _currentLibraryTabId != LibraryTabId.youtube;
 
   /// Used when closing Now Playing to restore the library section that started playback.
   ///
@@ -562,7 +551,6 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   void _onSearchTextChanged() {
-    if (_currentLibraryTabId == LibraryTabId.youtubeSearch) return;
     _searchFilterDebounce?.cancel();
     _searchFilterDebounce = Timer(_searchFilterDebounceDelay, () {
       if (!mounted) return;
@@ -579,7 +567,6 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   void _applySearchFilterImmediately() {
-    if (_currentLibraryTabId == LibraryTabId.youtubeSearch) return;
     _searchFilterDebounce?.cancel();
     final next = _parseSearchQuery(_searchController.text);
     if (next.field == _appliedSearchQuery.field &&
@@ -1035,10 +1022,10 @@ class LibraryScreenState extends State<LibraryScreen>
     LibraryTabId.recentlyAdded ||
     LibraryTabId.favourites ||
     LibraryTabId.recentlyPlayed ||
-    LibraryTabId.nowPlayingList ||
-    LibraryTabId.youtube => SearchHelpText.libraryTrackFieldHint,
-    LibraryTabId.youtubeSearch => SearchHelpText.youtubeFindFieldHint,
+    LibraryTabId.nowPlayingList => SearchHelpText.libraryTrackFieldHint,
     LibraryTabId.playlist => SearchHelpText.playlistTabFieldHint,
+    LibraryTabId.youtube || LibraryTabId.youtubeSearch =>
+      SearchHelpText.libraryTrackFieldHint,
   };
 
   List<String> _pathsMatchingBrowse(
@@ -1702,7 +1689,6 @@ class LibraryScreenState extends State<LibraryScreen>
     AppPalette pal,
     ThemeData theme, {
     required String hintText,
-    bool showYoutubeBusy = false,
   }) {
     final hasQuery = _searchController.text.trim().isNotEmpty;
     return InputDecoration(
@@ -1723,19 +1709,7 @@ class LibraryScreenState extends State<LibraryScreen>
         color: pal.textMuted.withValues(alpha: 0.9),
         size: 22,
       ),
-      suffixIcon: showYoutubeBusy
-          ? Padding(
-              padding: const EdgeInsets.all(12),
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: pal.accent,
-                ),
-              ),
-            )
-          : hasQuery
+      suffixIcon: hasQuery
           ? IconButton(
               tooltip: 'Clear search',
               icon: Icon(
@@ -1751,18 +1725,11 @@ class LibraryScreenState extends State<LibraryScreen>
 
   void _clearLibrarySearchField() {
     _searchController.clear();
-    if (_currentLibraryTabId == LibraryTabId.youtubeSearch) {
-      _youtubeSearchTabKey.currentState?.clearResults();
-    } else {
-      _applySearchFilterImmediately();
-    }
+    _applySearchFilterImmediately();
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
   void _submitLibrarySearchField() {
-    if (_currentLibraryTabId == LibraryTabId.youtubeSearch) {
-      unawaited(_youtubeSearchTabKey.currentState?.runSearch());
-    }
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
@@ -1835,8 +1802,6 @@ class LibraryScreenState extends State<LibraryScreen>
                                             fontWeight: FontWeight.w600,
                                           ),
                                     )
-                                  : !_usesLibrarySearchField
-                                  ? const SizedBox.shrink()
                                   : AnimatedBuilder(
                                       animation: _searchController,
                                       builder: (context, _) {
@@ -1861,11 +1826,6 @@ class LibraryScreenState extends State<LibraryScreen>
                                             pal,
                                             theme,
                                             hintText: hint,
-                                            showYoutubeBusy:
-                                                _isActiveTab(
-                                                  LibraryTabId.youtubeSearch,
-                                                ) &&
-                                                _youtubeSearchBusy,
                                           ),
                                         );
                                       },
@@ -1911,17 +1871,6 @@ class LibraryScreenState extends State<LibraryScreen>
                                 ),
                               ),
                             ] else ...[
-                              if (_isActiveTab(LibraryTabId.youtubeSearch))
-                                IconButton(
-                                  tooltip: 'Find on YouTube',
-                                  onPressed: _youtubeSearchBusy
-                                      ? null
-                                      : _submitLibrarySearchField,
-                                  icon: Icon(
-                                    Icons.search_rounded,
-                                    color: pal.onScaffold,
-                                  ),
-                                ),
                               IconButton(
                                 icon: const Icon(Icons.refresh_rounded),
                                 color: pal.onScaffold,
@@ -2196,18 +2145,8 @@ class LibraryScreenState extends State<LibraryScreen>
         playlistIndexByPathKey,
         browsePathKeys,
       ),
-      LibraryTabId.youtube => YoutubeLibraryTab(
-        player: player,
-        onOpenSearch: switchToYoutubeSearchTab,
-      ),
-      LibraryTabId.youtubeSearch => YoutubeSearchTab(
-        key: _youtubeSearchTabKey,
-        searchController: _searchController,
-        onSearchingChanged: (busy) {
-          if (!mounted) return;
-          setState(() => _youtubeSearchBusy = busy);
-        },
-      ),
+      LibraryTabId.youtube || LibraryTabId.youtubeSearch =>
+        const SizedBox.shrink(),
     };
   }
 

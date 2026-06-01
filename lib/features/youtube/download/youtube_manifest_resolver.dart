@@ -10,6 +10,8 @@ class YoutubeManifestResolver {
 
   final YoutubeExplode _yt = YoutubeExplode();
 
+  YoutubeExplode get youtubeExplode => _yt;
+
   Future<AudioOnlyStreamInfo?> resolveAudio(String videoId) async {
     final id = videoId.trim();
     if (id.isEmpty) return null;

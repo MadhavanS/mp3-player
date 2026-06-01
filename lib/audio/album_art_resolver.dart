@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../features/youtube/thumbnail/youtube_album_art.dart';
 import '../models/track_item.dart';
 import '../services/album_art_cache.dart';
 import '../services/album_art_dimensions.dart';
@@ -28,6 +29,20 @@ Future<Uint8List?> resolveAlbumArtBytes(
   final pathKey = canonicalMusicLibraryPathKey(path);
   final target = clampAlbumArtDimension(targetDimension);
   final useHot = albumArtTargetUsesHotLru(target);
+
+  if (pathUsesYoutubeAlbumArt(path)) {
+    final ytBytes = await resolveYoutubeAlbumArtForPath(
+      path,
+      targetDimension: target,
+    );
+    if (ytBytes != null && ytBytes.isNotEmpty) {
+      if (useHot) {
+        player?.promoteArtBytesForPath(path, ytBytes, pixelSize: target);
+        catalog?.promoteArtBytes(pathKey, ytBytes, pixelSize: target);
+      }
+      return ytBytes;
+    }
+  }
 
   if (useHot) {
     if (player != null) {

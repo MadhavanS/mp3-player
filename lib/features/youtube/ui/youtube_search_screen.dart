@@ -3,12 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../audio/player_controller.dart';
+import '../../../models/library_tab_id.dart';
+import '../../../models/track_item.dart';
 import '../../../theme/app_theme.dart';
+import '../../../widgets/action_pill_toast.dart';
 import '../catalog/youtube_library_catalog.dart';
-import '../catalog/youtube_storage_scan.dart';
 import '../download/youtube_download_job.dart';
 import '../download/youtube_download_manager.dart';
 import '../models/youtube_track.dart';
+import '../search/youtube_bookmark_store.dart';
 import '../search/youtube_channel_browse.dart';
 import '../search/youtube_channel_query.dart';
 import '../search/youtube_search_history_status.dart';
@@ -16,8 +19,9 @@ import '../search/youtube_search_history_store.dart';
 import '../search/youtube_search_service.dart';
 import '../storage/youtube_track_store.dart';
 import '../youtube_duration_format.dart';
-import '../youtube_track_delete.dart';
-import 'youtube_delete_confirm.dart';
+import '../youtube_settings_store.dart';
+import '../youtube_search_playback.dart';
+import '../../help/search_help_text.dart';
 import 'youtube_download_sheet.dart';
 import 'youtube_track_tile.dart';
 
@@ -61,6 +65,7 @@ class YoutubeSearchTabState extends State<YoutubeSearchTab> {
   var _paging = false;
   List<YoutubeTrack> _results = const [];
   Set<String> _downloadedVideoIds = const {};
+  Set<String> _bookmarkedVideoIds = const {};
   YoutubeChannelBrowse? _channelBrowse;
   YoutubeChannelBrowsePage? _channelPage;
   String? _channelError;
@@ -72,11 +77,24 @@ class YoutubeSearchTabState extends State<YoutubeSearchTab> {
   void initState() {
     super.initState();
     if (!_usesLibrarySearchBar) {
-      _ownedQueryController = TextEditingController();
+      _ownedQueryController = TextEditingController()
+        ..addListener(_onOwnedQueryChanged);
     }
     YoutubeDownloadManager.instance.addListener(_onDownloadsChanged);
+    YoutubeBookmarkStore.revision.addListener(_onBookmarkRevision);
     unawaited(_refreshDownloadedIds());
+    unawaited(_refreshBookmarkedIds());
     unawaited(_loadSearchHistory());
+  }
+
+  void _onBookmarkRevision() {
+    unawaited(_refreshBookmarkedIds());
+  }
+
+  Future<void> _refreshBookmarkedIds() async {
+    final ids = await YoutubeBookmarkStore.loadVideoIds();
+    if (!mounted) return;
+    setState(() => _bookmarkedVideoIds = ids);
   }
 
   Future<void> _loadSearchHistory() async {
@@ -88,6 +106,7 @@ class YoutubeSearchTabState extends State<YoutubeSearchTab> {
   @override
   void dispose() {
     YoutubeDownloadManager.instance.removeListener(_onDownloadsChanged);
+    YoutubeBookmarkStore.revision.removeListener(_onBookmarkRevision);
     _ownedQueryController?.dispose();
     super.dispose();
   }
@@ -96,10 +115,75 @@ class YoutubeSearchTabState extends State<YoutubeSearchTab> {
     widget.onSearchingChanged?.call(value);
   }
 
+  void _onOwnedQueryChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _onDownloadsChanged() {
     if (!mounted) return;
     setState(() {});
     unawaited(_refreshDownloadedIds());
+  }
+
+  void _clearOwnedQuery() {
+    _queryController.clear();
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  InputDecoration _ownedQueryDecoration(AppPalette pal, ThemeData theme) {
+    final hasQuery = _queryController.text.trim().isNotEmpty;
+    final showSuffix = hasQuery || _searching;
+    return InputDecoration(
+      hintText: SearchHelpText.youtubeFindFieldHint,
+      hintStyle: theme.textTheme.bodyMedium?.copyWith(
+        color: pal.textMuted.withValues(alpha: 0.72),
+      ),
+      isDense: true,
+      filled: true,
+      fillColor: pal.onScaffold.withValues(alpha: 0.08),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      prefixIcon: Icon(
+        Icons.search_rounded,
+        color: pal.textMuted.withValues(alpha: 0.9),
+        size: 22,
+      ),
+      suffixIcon: showSuffix
+          ? SizedBox(
+              width: hasQuery && _searching ? 88 : 48,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (_searching)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: pal.accent,
+                        ),
+                      ),
+                    ),
+                  if (hasQuery)
+                    IconButton(
+                      tooltip: 'Clear search',
+                      icon: Icon(
+                        Icons.close_rounded,
+                        color: pal.onScaffold.withValues(alpha: 0.75),
+                        size: 20,
+                      ),
+                      onPressed: _clearOwnedQuery,
+                    ),
+                ],
+              ),
+            )
+          : null,
+    );
   }
 
   Future<void> _refreshDownloadedIds() async {
@@ -214,6 +298,96 @@ class YoutubeSearchTabState extends State<YoutubeSearchTab> {
     _setSearching(false);
   }
 
+  Future<void> _playSearchResult(int index) async {
+    if (!mounted) return;
+    final player = PlayerController.of(context);
+    try {
+      await playYoutubeSearchResult(
+        context: context,
+        player: player,
+        results: _results,
+        index: index,
+      );
+    } catch (e, st) {
+      debugPrint('YoutubeSearchTab._playSearchResult: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not play: $e')),
+      );
+    }
+  }
+
+  Future<void> _handleSearchMenuAction(
+    _YoutubeSearchMenuAction action,
+    int index,
+  ) async {
+    if (!mounted || index < 0 || index >= _results.length) return;
+    final yt = _results[index];
+    final player = PlayerController.of(context);
+
+    switch (action) {
+      case _YoutubeSearchMenuAction.bookmark:
+        final added = await YoutubeBookmarkStore.toggle(yt);
+        await _refreshBookmarkedIds();
+        if (!mounted) return;
+        ActionPillToast.show(
+          context,
+          added ? 'Bookmarked' : 'Bookmark removed',
+          icon: added ? Icons.bookmark : Icons.bookmark_border,
+          uppercaseLabel: true,
+        );
+        return;
+
+      case _YoutubeSearchMenuAction.download:
+        await _download(yt);
+        return;
+
+      case _YoutubeSearchMenuAction.playNext:
+      case _YoutubeSearchMenuAction.addToQueue:
+      case _YoutubeSearchMenuAction.playOnly:
+        final item = await trackItemForYoutubeSearchTrack(yt);
+        if (!mounted) return;
+        if (item == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not queue this track')),
+          );
+          return;
+        }
+        player.setPlaybackPathKeyScope(null, reloadQueue: false);
+        switch (action) {
+          case _YoutubeSearchMenuAction.playNext:
+            final added = await player.playTrackNext(
+              item,
+              playbackOriginTab: LibraryTabId.youtubeSearch,
+            );
+            if (!mounted) return;
+            ActionPillToast.show(
+              context,
+              added ? 'Queued as next' : 'Already in queue',
+              icon: Icons.queue_play_next_rounded,
+              uppercaseLabel: true,
+            );
+          case _YoutubeSearchMenuAction.addToQueue:
+            final added = await player.addToPlaylistIfAbsent(item);
+            if (!mounted) return;
+            ActionPillToast.show(
+              context,
+              added ? 'Added to queue' : 'Already in queue',
+              icon: Icons.playlist_add_rounded,
+              uppercaseLabel: true,
+            );
+          case _YoutubeSearchMenuAction.playOnly:
+            await player.setPlaylistAndPlay(
+              [item],
+              playbackOriginTab: LibraryTabId.youtubeSearch,
+            );
+          case _YoutubeSearchMenuAction.bookmark:
+          case _YoutubeSearchMenuAction.download:
+            break;
+        }
+    }
+  }
+
   Future<void> _download(YoutubeTrack track) async {
     if (_downloadedVideoIds.contains(track.videoId)) return;
     try {
@@ -249,22 +423,15 @@ class YoutubeSearchTabState extends State<YoutubeSearchTab> {
                     Expanded(
                       child: TextField(
                         controller: _queryController,
-                        decoration: InputDecoration(
-                          hintText: '@channel · title or artist',
-                          isDense: true,
-                          filled: true,
-                          fillColor: pal.onScaffold.withValues(alpha: 0.08),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
+                        decoration: _ownedQueryDecoration(pal, theme),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: pal.onScaffold,
+                          fontSize: 15,
                         ),
                         textInputAction: TextInputAction.search,
                         onSubmitted: (_) => unawaited(runSearch()),
+                        onTapOutside: (_) =>
+                            FocusManager.instance.primaryFocus?.unfocus(),
                       ),
                     ),
                     IconButton(
@@ -439,8 +606,11 @@ class YoutubeSearchTabState extends State<YoutubeSearchTab> {
         return _YoutubeSearchResultTile(
           track: t,
           downloaded: downloaded,
+          bookmarked: _bookmarkedVideoIds.contains(t.videoId),
           job: job,
-          onDownload: () => unawaited(_download(t)),
+          onTap: () => unawaited(_playSearchResult(i)),
+          onMenuAction: (action) =>
+              unawaited(_handleSearchMenuAction(action, i)),
         );
       },
     );
@@ -574,24 +744,48 @@ class _HistoryPillIcon extends StatelessWidget {
   }
 }
 
+enum _YoutubeSearchMenuAction {
+  bookmark,
+  playNext,
+  addToQueue,
+  playOnly,
+  download,
+}
+
 class _YoutubeSearchResultTile extends StatelessWidget {
   const _YoutubeSearchResultTile({
     required this.track,
     required this.downloaded,
+    required this.bookmarked,
     required this.job,
-    required this.onDownload,
+    required this.onTap,
+    required this.onMenuAction,
   });
 
   final YoutubeTrack track;
   final bool downloaded;
+  final bool bookmarked;
   final YoutubeDownloadJob? job;
-  final VoidCallback onDownload;
+  final VoidCallback onTap;
+  final ValueChanged<_YoutubeSearchMenuAction> onMenuAction;
+
+  bool get _downloadInProgress {
+    final active = job;
+    return active != null &&
+        active.state != YoutubeDownloadState.failed &&
+        active.state != YoutubeDownloadState.cancelled &&
+        active.state != YoutubeDownloadState.complete;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pal = context.palette;
+
     return Material(
       color: Colors.transparent,
       child: ListTile(
+        onTap: onTap,
         leading: track.thumbnailUrl != null
             ? Image.network(
                 track.thumbnailUrl!,
@@ -614,62 +808,161 @@ class _YoutubeSearchResultTile extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        trailing: _SearchDownloadTrailing(
-          downloaded: downloaded,
-          job: job,
-          onDownload: onDownload,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (bookmarked)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  Icons.bookmark,
+                  size: 20,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            if (downloaded)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  Icons.check_circle,
+                  size: 20,
+                  color: theme.colorScheme.primary,
+                ),
+              )
+            else if (_downloadInProgress)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: job!.state == YoutubeDownloadState.downloading
+                      ? CircularProgressIndicator(
+                          value: job!.progress,
+                          strokeWidth: 2,
+                        )
+                      : const CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            PopupMenuButton<_YoutubeSearchMenuAction>(
+              icon: Icon(Icons.more_vert, color: pal.onScaffold),
+              tooltip: 'More options',
+              onSelected: onMenuAction,
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: _YoutubeSearchMenuAction.bookmark,
+                  child: _SearchMenuRow(
+                    icon: bookmarked ? Icons.bookmark : Icons.bookmark_border,
+                    label: bookmarked ? 'Remove bookmark' : 'Bookmark',
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: _YoutubeSearchMenuAction.playNext,
+                  child: _SearchMenuRow(
+                    icon: Icons.queue_play_next_rounded,
+                    label: 'Play next',
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: _YoutubeSearchMenuAction.addToQueue,
+                  child: _SearchMenuRow(
+                    icon: Icons.playlist_add_rounded,
+                    label: 'Add to queue',
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: _YoutubeSearchMenuAction.playOnly,
+                  child: _SearchMenuRow(
+                    icon: Icons.music_note_rounded,
+                    label: 'Play this track only',
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _YoutubeSearchMenuAction.download,
+                  enabled: !_downloadInProgress,
+                  child: _SearchMenuRow(
+                    icon: downloaded
+                        ? Icons.download_done_rounded
+                        : Icons.download_outlined,
+                    label: downloaded ? 'Download again' : 'Download',
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _SearchDownloadTrailing extends StatelessWidget {
-  const _SearchDownloadTrailing({
-    required this.downloaded,
-    required this.job,
-    required this.onDownload,
-  });
+class _SearchMenuRow extends StatelessWidget {
+  const _SearchMenuRow({required this.icon, required this.label});
 
-  final bool downloaded;
-  final YoutubeDownloadJob? job;
-  final VoidCallback onDownload;
+  final IconData icon;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    if (downloaded) {
-      return Icon(
-        Icons.check_circle,
-        color: Theme.of(context).colorScheme.primary,
-      );
+    return Row(
+      children: [
+        Icon(icon, size: 22),
+        const SizedBox(width: 12),
+        Expanded(child: Text(label)),
+      ],
+    );
+  }
+}
+
+class _YoutubeLibraryFolderHeader extends StatelessWidget {
+  const _YoutubeLibraryFolderHeader({
+    required this.directoryPath,
+    required this.summaryLine,
+    required this.loading,
+  });
+
+  final String? directoryPath;
+  final String? summaryLine;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pal = context.palette;
+    final path = directoryPath?.trim();
+    final summary = summaryLine?.trim();
+
+    if ((path == null || path.isEmpty) && (summary == null || summary.isEmpty)) {
+      return const SizedBox.shrink();
     }
 
-    final active = job;
-    if (active != null &&
-        active.state != YoutubeDownloadState.failed &&
-        active.state != YoutubeDownloadState.cancelled &&
-        active.state != YoutubeDownloadState.complete) {
-      return SizedBox(
-        width: 36,
-        height: 36,
-        child: active.state == YoutubeDownloadState.downloading
-            ? CircularProgressIndicator(value: active.progress, strokeWidth: 2.5)
-            : const CircularProgressIndicator(strokeWidth: 2.5),
-      );
-    }
-
-    if (active?.state == YoutubeDownloadState.failed) {
-      return IconButton(
-        icon: const Icon(Icons.refresh),
-        tooltip: 'Retry download',
-        onPressed: () => YoutubeDownloadManager.instance.retry(active!.videoId),
-      );
-    }
-
-    return IconButton(
-      icon: const Icon(Icons.download_outlined),
-      tooltip: 'Download',
-      onPressed: onDownload,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (path != null && path.isNotEmpty)
+            Text(
+              path,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: pal.textMuted,
+                fontFamily: 'monospace',
+                fontSize: 11,
+              ),
+            ),
+          if (summary != null && summary.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              loading ? 'Scanning folder…' : summary,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: pal.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -678,11 +971,13 @@ class YoutubeLibraryTab extends StatefulWidget {
   const YoutubeLibraryTab({
     super.key,
     required this.player,
-    this.onOpenSearch,
+    this.searchController,
   });
 
   final PlayerController player;
-  final VoidCallback? onOpenSearch;
+
+  /// Hub search field — filters [YoutubeLibraryCatalog] tracks when set.
+  final TextEditingController? searchController;
 
   @override
   State<YoutubeLibraryTab> createState() => _YoutubeLibraryTabState();
@@ -690,6 +985,7 @@ class YoutubeLibraryTab extends StatefulWidget {
 
 class _YoutubeLibraryTabState extends State<YoutubeLibraryTab> {
   bool _scanning = false;
+  VoidCallback? _youtubeSettingsListener;
 
   @override
   void initState() {
@@ -697,6 +993,8 @@ class _YoutubeLibraryTabState extends State<YoutubeLibraryTab> {
     YoutubeDownloadManager.instance.lastCompletedJob.addListener(
       _onDownloadCompleted,
     );
+    _youtubeSettingsListener = () => unawaited(_refreshStorageFolder());
+    YoutubeSettingsStore.revision.addListener(_youtubeSettingsListener!);
     unawaited(_refreshStorageFolder());
   }
 
@@ -705,6 +1003,9 @@ class _YoutubeLibraryTabState extends State<YoutubeLibraryTab> {
     YoutubeDownloadManager.instance.lastCompletedJob.removeListener(
       _onDownloadCompleted,
     );
+    if (_youtubeSettingsListener != null) {
+      YoutubeSettingsStore.revision.removeListener(_youtubeSettingsListener!);
+    }
     super.dispose();
   }
 
@@ -717,7 +1018,7 @@ class _YoutubeLibraryTabState extends State<YoutubeLibraryTab> {
     if (_scanning) return;
     setState(() => _scanning = true);
     try {
-      await scanYoutubeStorageFolder();
+      await YoutubeLibraryCatalog.instance.reload();
     } catch (e, st) {
       debugPrint('YoutubeLibraryTab scan: $e\n$st');
     } finally {
@@ -725,15 +1026,97 @@ class _YoutubeLibraryTabState extends State<YoutubeLibraryTab> {
     }
   }
 
-  void _openSearch(BuildContext context) {
-    final open = widget.onOpenSearch;
-    if (open != null) {
-      open();
-      return;
+  List<TrackItem> _filterTracks(List<TrackItem> tracks) {
+    final q = widget.searchController?.text.trim().toLowerCase() ?? '';
+    if (q.isEmpty) return tracks;
+    return tracks.where((t) {
+      if (t.title.toLowerCase().contains(q)) return true;
+      if (t.artist.toLowerCase().contains(q)) return true;
+      if (t.metaLine.toLowerCase().contains(q)) return true;
+      final path = t.filePath?.toLowerCase() ?? '';
+      return path.contains(q);
+    }).toList(growable: false);
+  }
+
+  Widget _buildLibraryBody(
+    BuildContext context,
+    ThemeData theme,
+    AppPalette pal,
+    YoutubeLibraryCatalog catalog,
+    List<TrackItem> filtered,
+  ) {
+    final query = widget.searchController?.text.trim() ?? '';
+
+    if (catalog.tracks.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _refreshStorageFolder,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.35,
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'Downloaded YouTube audio appears here.\n'
+                    'Place .m4a, .webm, or .mp3 files in your YouTube folder, '
+                    'pull down to refresh, or open Find to download tracks.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: pal.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
     }
-    unawaited(
-      Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(builder: (_) => const YoutubeSearchScreen()),
+
+    if (filtered.isEmpty) {
+      return RefreshIndicator(
+        onRefresh: _refreshStorageFolder,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: MediaQuery.sizeOf(context).height * 0.3,
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    query.isEmpty
+                        ? 'No downloads match.'
+                        : 'No downloads match “$query”.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: pal.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _refreshStorageFolder,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: filtered.length,
+        itemBuilder: (context, i) {
+          final track = filtered[i];
+          return YoutubeTrackTile(
+            track: track,
+            player: widget.player,
+            allTracks: filtered,
+            listIndex: i,
+          );
+        },
       ),
     );
   }
@@ -742,98 +1125,310 @@ class _YoutubeLibraryTabState extends State<YoutubeLibraryTab> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final pal = context.palette;
+    final searchListenable = widget.searchController;
 
-    return ListenableBuilder(
-      listenable: YoutubeLibraryCatalog.instance,
-      builder: (context, _) {
-        final catalog = YoutubeLibraryCatalog.instance;
-
-        return Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const YoutubeActiveDownloadsBar(),
-                if (catalog.loading || _scanning)
-                  const LinearProgressIndicator(minHeight: 2),
-                Expanded(
-                  child: catalog.tracks.isEmpty
-                      ? RefreshIndicator(
-                          onRefresh: _refreshStorageFolder,
-                          child: ListView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            children: [
-                              SizedBox(
-                                height: MediaQuery.sizeOf(context).height * 0.35,
-                                child: Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(24),
-                                    child: Text(
-                                      'Downloaded YouTube audio appears here.\n'
-                                      'Place .m4a, .webm, or .mp3 files in your YouTube folder, '
-                                      'pull down to refresh, or open the Find tab to download tracks.',
-                                      textAlign: TextAlign.center,
-                                      style: theme.textTheme.bodyMedium?.copyWith(
-                                        color: pal.textSecondary,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : RefreshIndicator(
-                          onRefresh: _refreshStorageFolder,
-                          child: ListView.builder(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            itemCount: catalog.tracks.length,
-                            itemBuilder: (context, i) {
-                              final track = catalog.tracks[i];
-                              return YoutubeTrackTile(
-                                track: track,
-                                player: widget.player,
-                                allTracks: catalog.tracks,
-                                onDelete: (t) async {
-                                  final path = t.filePath;
-                                  if (path == null) return;
-                                  if (!context.mounted) return;
-                                  final ok = await confirmDeleteYoutubeDownload(
-                                    context,
-                                    t,
-                                  );
-                                  if (!ok || !context.mounted) return;
-                                  await deleteYoutubeDownload(
-                                    player: widget.player,
-                                    filePath: path,
-                                  );
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text('Deleted "${t.title}"'),
-                                      ),
-                                    );
-                                  }
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                ),
-              ],
-            ),
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: FloatingActionButton.extended(
-                onPressed: () => _openSearch(context),
-                icon: const Icon(Icons.search),
-                label: const Text('Find'),
+    Widget catalogBody() {
+      return ListenableBuilder(
+        listenable: YoutubeLibraryCatalog.instance,
+        builder: (context, _) {
+          final catalog = YoutubeLibraryCatalog.instance;
+          final filtered = _filterTracks(catalog.tracks);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const YoutubeActiveDownloadsBar(),
+              _YoutubeLibraryFolderHeader(
+                directoryPath: catalog.storageDirectoryPath,
+                summaryLine: catalog.scanSummaryLine,
+                loading: catalog.loading || _scanning,
               ),
+              if (catalog.loading || _scanning)
+                const LinearProgressIndicator(minHeight: 2),
+              Expanded(
+                child: _buildLibraryBody(
+                  context,
+                  theme,
+                  pal,
+                  catalog,
+                  filtered,
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }
+
+    if (searchListenable == null) {
+      return catalogBody();
+    }
+
+    return AnimatedBuilder(
+      animation: searchListenable,
+      builder: (context, _) => catalogBody(),
+    );
+  }
+}
+
+/// Saved YouTube search bookmarks — filtered by the hub search field.
+class YoutubeBookmarksTab extends StatefulWidget {
+  const YoutubeBookmarksTab({super.key, this.searchController});
+
+  final TextEditingController? searchController;
+
+  @override
+  State<YoutubeBookmarksTab> createState() => _YoutubeBookmarksTabState();
+}
+
+class _YoutubeBookmarksTabState extends State<YoutubeBookmarksTab> {
+  List<YoutubeTrack> _bookmarks = const [];
+  var _loading = true;
+  Set<String> _downloadedVideoIds = const {};
+  VoidCallback? _bookmarkRevisionListener;
+
+  @override
+  void initState() {
+    super.initState();
+    YoutubeDownloadManager.instance.addListener(_onDownloadsChanged);
+    _bookmarkRevisionListener = () => unawaited(_reloadBookmarks());
+    YoutubeBookmarkStore.revision.addListener(_bookmarkRevisionListener!);
+    unawaited(_reloadBookmarks());
+    unawaited(_refreshDownloadedIds());
+  }
+
+  @override
+  void dispose() {
+    YoutubeDownloadManager.instance.removeListener(_onDownloadsChanged);
+    if (_bookmarkRevisionListener != null) {
+      YoutubeBookmarkStore.revision.removeListener(_bookmarkRevisionListener!);
+    }
+    super.dispose();
+  }
+
+  void _onDownloadsChanged() {
+    if (!mounted) return;
+    setState(() {});
+    unawaited(_refreshDownloadedIds());
+  }
+
+  Future<void> _reloadBookmarks() async {
+    final tracks = await YoutubeBookmarkStore.loadAll();
+    if (!mounted) return;
+    setState(() {
+      _bookmarks = tracks;
+      _loading = false;
+    });
+  }
+
+  Future<void> _refreshDownloadedIds() async {
+    final ids = await YoutubeTrackStore.instance.downloadedVideoIds();
+    if (!mounted) return;
+    setState(() => _downloadedVideoIds = ids);
+  }
+
+  List<YoutubeTrack> _filteredBookmarks() {
+    final q = widget.searchController?.text.trim().toLowerCase() ?? '';
+    if (q.isEmpty) return _bookmarks;
+    return _bookmarks
+        .where(
+          (t) =>
+              t.title.toLowerCase().contains(q) ||
+              t.artist.toLowerCase().contains(q),
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> _playBookmark(int index, List<YoutubeTrack> visible) async {
+    if (!mounted) return;
+    final player = PlayerController.of(context);
+    try {
+      await playYoutubeSearchResult(
+        context: context,
+        player: player,
+        results: visible,
+        index: index,
+      );
+    } catch (e, st) {
+      debugPrint('YoutubeBookmarksTab._playBookmark: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not play: $e')),
+      );
+    }
+  }
+
+  Future<void> _handleMenuAction(
+    _YoutubeSearchMenuAction action,
+    int index,
+    List<YoutubeTrack> visible,
+  ) async {
+    if (!mounted || index < 0 || index >= visible.length) return;
+    final yt = visible[index];
+    final player = PlayerController.of(context);
+
+    switch (action) {
+      case _YoutubeSearchMenuAction.bookmark:
+        final added = await YoutubeBookmarkStore.toggle(yt);
+        if (!mounted) return;
+        ActionPillToast.show(
+          context,
+          added ? 'Bookmarked' : 'Bookmark removed',
+          icon: added ? Icons.bookmark : Icons.bookmark_border,
+          uppercaseLabel: true,
+        );
+        return;
+
+      case _YoutubeSearchMenuAction.download:
+        if (_downloadedVideoIds.contains(yt.videoId)) return;
+        try {
+          await YoutubeDownloadManager.instance.enqueue(yt);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Downloading "${yt.title}"')),
+          );
+        } on StateError catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.message)),
+          );
+        }
+        return;
+
+      case _YoutubeSearchMenuAction.playNext:
+      case _YoutubeSearchMenuAction.addToQueue:
+      case _YoutubeSearchMenuAction.playOnly:
+        final item = await trackItemForYoutubeSearchTrack(yt);
+        if (!mounted) return;
+        if (item == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not queue this track')),
+          );
+          return;
+        }
+        player.setPlaybackPathKeyScope(null, reloadQueue: false);
+        switch (action) {
+          case _YoutubeSearchMenuAction.playNext:
+            final queued = await player.playTrackNext(
+              item,
+              playbackOriginTab: LibraryTabId.youtubeSearch,
+            );
+            if (!mounted) return;
+            ActionPillToast.show(
+              context,
+              queued ? 'Queued as next' : 'Already in queue',
+              icon: Icons.queue_play_next_rounded,
+              uppercaseLabel: true,
+            );
+          case _YoutubeSearchMenuAction.addToQueue:
+            final queued = await player.addToPlaylistIfAbsent(item);
+            if (!mounted) return;
+            ActionPillToast.show(
+              context,
+              queued ? 'Added to queue' : 'Already in queue',
+              icon: Icons.playlist_add_rounded,
+              uppercaseLabel: true,
+            );
+          case _YoutubeSearchMenuAction.playOnly:
+            await player.setPlaylistAndPlay(
+              [item],
+              playbackOriginTab: LibraryTabId.youtubeSearch,
+            );
+          case _YoutubeSearchMenuAction.bookmark:
+          case _YoutubeSearchMenuAction.download:
+            break;
+        }
+    }
+  }
+
+  Widget _buildBody(ThemeData theme, AppPalette pal) {
+    if (_loading) {
+      return Center(
+        child: CircularProgressIndicator(color: pal.accent),
+      );
+    }
+
+    final visible = _filteredBookmarks();
+    final query = widget.searchController?.text.trim() ?? '';
+
+    if (_bookmarks.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            'Bookmarked videos from Find appear here.\n'
+            'Use ⋮ on a search result and choose Bookmark.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: pal.textSecondary,
             ),
-          ],
+          ),
+        ),
+      );
+    }
+
+    if (visible.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            query.isEmpty
+                ? 'No bookmarks match.'
+                : 'No bookmarks match “$query”.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: pal.textSecondary,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      itemCount: visible.length,
+      separatorBuilder: (_, __) => Divider(
+        height: 1,
+        color: pal.dividerOnHero.withValues(alpha: 0.5),
+      ),
+      itemBuilder: (context, i) {
+        final t = visible[i];
+        final downloaded = _downloadedVideoIds.contains(t.videoId);
+        final job = YoutubeDownloadManager.instance.jobForVideoId(t.videoId);
+        return _YoutubeSearchResultTile(
+          track: t,
+          downloaded: downloaded,
+          bookmarked: true,
+          job: job,
+          onTap: () => unawaited(_playBookmark(i, visible)),
+          onMenuAction: (action) =>
+              unawaited(_handleMenuAction(action, i, visible)),
         );
       },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pal = context.palette;
+    final searchListenable = widget.searchController;
+
+    Widget body() {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const YoutubeActiveDownloadsBar(),
+          Expanded(child: _buildBody(theme, pal)),
+        ],
+      );
+    }
+
+    if (searchListenable == null) {
+      return body();
+    }
+
+    return AnimatedBuilder(
+      animation: searchListenable,
+      builder: (context, _) => body(),
     );
   }
 }

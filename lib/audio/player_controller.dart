@@ -25,6 +25,8 @@ import '../services/song_metadata_cache.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
 import '../features/youtube/catalog/youtube_library_catalog.dart';
+import '../features/youtube/streaming/youtube_playback_resolver.dart';
+import '../features/youtube/youtube_stream_paths.dart';
 import 'art_availability_notifier.dart';
 import 'equalizer_service.dart';
 import 'replay_gain_service.dart';
@@ -419,6 +421,9 @@ class PlayerController {
 
   /// Playback queue as file paths; [TrackItem] rows resolve from [LibraryCatalog].
   List<String> _playlistPaths = [];
+
+  /// Title/artist for queue paths that are not in [LibraryCatalog] (e.g. YouTube stream).
+  Map<String, TrackItem> _playlistTrackByPath = {};
   List<TrackItem>? _playlistCache;
   int _index = 0;
 
@@ -473,6 +478,19 @@ class PlayerController {
 
   TrackItem _trackAt(int playlistIndex) {
     final path = _playlistPaths[playlistIndex];
+    if (isYoutubeStreamPath(path)) {
+      return _playlistTrackByPath[path] ??
+          TrackItem(
+            title: 'YouTube',
+            artist: 'Unknown artist',
+            metaLine: 'YouTube',
+            genres: '',
+            artColors: TrackItem.fromFilePath(path).artColors,
+            filePath: path,
+          );
+    }
+    final override = _playlistTrackByPath[path];
+    if (override != null) return override;
     final fromLib = _libraryCatalog.trackForPath(path);
     if (fromLib != null) return fromLib;
     final key = canonicalMusicLibraryPathKey(path);
@@ -489,7 +507,13 @@ class PlayerController {
   void _setPlaylistPaths(
     List<String> paths, {
     bool validateIndexNow = true,
+    bool clearTrackOverrides = true,
   }) {
+    if (clearTrackOverrides) {
+      _playlistTrackByPath = {};
+    } else {
+      _playlistTrackByPath.removeWhere((k, _) => !paths.contains(k));
+    }
     _playlistPaths = List<String>.from(paths);
     _onPlaylistPathsMutated();
     _debugValidateQueueConsistency(
@@ -502,11 +526,20 @@ class PlayerController {
     List<TrackItem> tracks, {
     bool validateIndexNow = true,
   }) {
-    _setPlaylistPaths([
+    _playlistTrackByPath = {
       for (final t in tracks)
         if (t.filePath != null && t.filePath!.trim().isNotEmpty)
-          t.filePath!.trim(),
-    ], validateIndexNow: validateIndexNow);
+          t.filePath!.trim(): t,
+    };
+    _setPlaylistPaths(
+      [
+        for (final t in tracks)
+          if (t.filePath != null && t.filePath!.trim().isNotEmpty)
+            t.filePath!.trim(),
+      ],
+      validateIndexNow: validateIndexNow,
+      clearTrackOverrides: false,
+    );
   }
 
   /// Debug-only queue invariants after mutations (not on position ticks).
@@ -1070,6 +1103,10 @@ class PlayerController {
     for (var i = 0; i < n; i++) {
       final fp = _pathAt(i);
       if (fp == null || fp.trim().isEmpty) continue;
+      if (isYoutubeStreamPath(fp)) {
+        out.add(i);
+        continue;
+      }
       final k = canonicalMusicLibraryPathKey(fp);
       if (k.isNotEmpty && scope.contains(k)) {
         out.add(i);
@@ -1079,6 +1116,19 @@ class PlayerController {
   }
 
   bool get isPlaying => _player.playing || _retainPlayingUiForShuffleReload;
+
+  /// True while the queue item is being prepared or buffered (not yet ready to hear).
+  bool get isTrackLoading {
+    if (currentTrack == null) return false;
+    if (_isLoadingSource) return true;
+    final state = _player.processingState;
+    return state == ProcessingState.loading ||
+        state == ProcessingState.buffering;
+  }
+
+  /// Subtitle for mini player / Now Playing while loading.
+  String? get trackLoadingLabel => isTrackLoading ? 'Loading…' : null;
+
   Duration get position => _player.position;
   Duration? get duration => _player.duration;
 
@@ -1089,6 +1139,7 @@ class PlayerController {
   void _onProcessingState(ProcessingState state) {
     if (_isLoadingSource) {
       _previousProcessing = state;
+      _notifyPlayback();
       return;
     }
     final enteredComplete =
@@ -1104,6 +1155,7 @@ class PlayerController {
       return;
     }
     _previousProcessing = state;
+    _notifyPlayback();
     if (enteredComplete) {
       // Use a short delay to avoid re-entrancy issues where calling player
       // methods from within a stream listener context crashes or no-ops.
@@ -1401,6 +1453,28 @@ class PlayerController {
         : _trackAt(playlistIndex);
     final fp = t.filePath?.trim();
     if (fp == null || fp.isEmpty) return null;
+
+    final streamVideoId = youtubeVideoIdFromStreamPath(fp);
+    if (streamVideoId != null) {
+      Uri? artUri;
+      if (notificationArtUris != null &&
+          notificationArtUris.containsKey(playlistIndex)) {
+        artUri = notificationArtUris[playlistIndex];
+      } else if (resolveArtUri) {
+        artUri = await uriForNotificationAlbumArt(t);
+      }
+      return YoutubePlaybackResolver.instance.resolve(
+        streamVideoId,
+        tag: MediaItem(
+          id: streamVideoId,
+          title: t.title,
+          artist: t.artist,
+          album: t.metaLine,
+          artUri: artUri,
+        ),
+      );
+    }
+
     final resolved = _resolveMigratedFilePath(fp);
     Uri? artUri;
     if (notificationArtUris != null &&
@@ -2861,7 +2935,8 @@ class PlayerController {
     if (_libraryPathMigrations.isNotEmpty || _loadCurrentPathOverride != null) {
       return false;
     }
-    if (_playbackOriginTab == LibraryTabId.youtube) {
+    if (_playbackOriginTab == LibraryTabId.youtube ||
+        _playbackOriginTab == LibraryTabId.youtubeSearch) {
       return false;
     }
     if (_libraryCatalog.isEmpty) return false;
@@ -2876,6 +2951,10 @@ class PlayerController {
     final pruned = <String>[];
     for (final path in _playlistPaths) {
       if (isYoutubeDownloadStoragePath(path)) {
+        pruned.add(path);
+        continue;
+      }
+      if (isYoutubeStreamPath(path)) {
         pruned.add(path);
         continue;
       }
@@ -3094,6 +3173,7 @@ class PlayerController {
     // run [skipNext] in the gap after [stopForExternalFileEdit] (see [_suppressTrackCompletedAdvance]).
     _loadCurrentDepth++;
     _isLoadingSource = true;
+    playback.notifyNow();
     try {
       _syncPlaylistPathsFromMigrations();
       if (_prunePlaylistPathsNotInCatalog() && _playlistPaths.isNotEmpty) {
@@ -3251,6 +3331,7 @@ class PlayerController {
       if (_loadCurrentDepth <= 0) {
         _loadCurrentDepth = 0;
         _isLoadingSource = false;
+        playback.notifyNow();
         _suppressTrackCompletedAdvance = false;
         _ignoreSpuriousPlaybackCompletedUntil = null;
         _scheduleNotificationArtRefresh();

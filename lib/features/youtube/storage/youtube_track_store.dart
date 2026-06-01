@@ -87,6 +87,15 @@ class YoutubeTrackStore {
     return null;
   }
 
+  /// Local audio path when the file exists, else null.
+  Future<String?> filePathForVideoId(String videoId) async {
+    final row = await get(videoId);
+    final path = row?.localPath?.trim();
+    if (path == null || path.isEmpty) return null;
+    if (!await _youtubeAudioFileExists(path)) return null;
+    return path;
+  }
+
   Future<YoutubeTrackRecord?> get(String videoId) async {
     if (videoId.trim().isEmpty) return null;
     try {
@@ -156,19 +165,11 @@ class YoutubeTrackStore {
 
   Future<List<TrackItem>> getAllAsTrackItems() async {
     final dirPath = await youtubeAudioStorageDirectoryPath();
-    final dir = Directory(dirPath);
-    if (!await dir.exists()) {
-      return _trackItemsFromDownloadedRecords();
-    }
-
     final out = <TrackItem>[];
     final seenKeys = <String>{};
 
-    await for (final entity in dir.list(recursive: false, followLinks: false)) {
-      if (entity is! File) continue;
-      if (!isYoutubeStorageAudioExtension(entity.path)) continue;
-
-      final path = await stableYoutubeStoragePath(entity.path);
+    final paths = await listAudioPathsInStorageFolder(dirPath);
+    for (final path in paths) {
       final key = canonicalMusicLibraryPathKey(path);
       if (key.isEmpty || !seenKeys.add(key)) continue;
 
@@ -177,9 +178,67 @@ class YoutubeTrackStore {
       out.add(trackItemFromYoutubeRecord(record));
     }
 
+    for (final r in await getAllDownloaded()) {
+      final path = r.localPath?.trim();
+      if (path == null || path.isEmpty) continue;
+      final key = canonicalMusicLibraryPathKey(path);
+      if (key.isEmpty || seenKeys.contains(key)) continue;
+      if (!await _youtubeAudioFileExists(path)) continue;
+      seenKeys.add(key);
+      out.add(trackItemFromYoutubeRecord(r));
+    }
+
     out.sort(
       (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
     );
+    return out;
+  }
+
+  /// All playable audio files under [dirPath] (recursive).
+  Future<List<String>> listAudioPathsInStorageFolder(String dirPath) async {
+    final dir = Directory(p.normalize(dirPath));
+    if (!await dir.exists()) return const [];
+
+    try {
+      final paths = <String>[];
+      await for (final entity in dir.list(recursive: true, followLinks: false)) {
+        if (entity is! File) continue;
+        if (!isYoutubeStorageAudioExtension(entity.path)) continue;
+        paths.add(await stableYoutubeStoragePath(entity.path));
+      }
+      return paths;
+    } catch (e, st) {
+      debugPrint('YoutubeTrackStore.list (async): $e\n$st');
+      return _listAudioPathsSyncRecursive(dir);
+    }
+  }
+
+  Future<List<String>> _listAudioPathsSyncRecursive(Directory root) async {
+    final raw = <String>[];
+    void walk(Directory dir) {
+      List<FileSystemEntity> entries;
+      try {
+        entries = dir.listSync(followLinks: false);
+      } catch (e, st) {
+        debugPrint('YoutubeTrackStore.listSync ${dir.path}: $e\n$st');
+        return;
+      }
+      for (final entity in entries) {
+        if (entity is File) {
+          if (isYoutubeStorageAudioExtension(entity.path)) {
+            raw.add(entity.path);
+          }
+        } else if (entity is Directory) {
+          walk(entity);
+        }
+      }
+    }
+
+    walk(root);
+    final out = <String>[];
+    for (final path in raw) {
+      out.add(await stableYoutubeStoragePath(path));
+    }
     return out;
   }
 
@@ -245,22 +304,6 @@ class YoutubeTrackStore {
 
     await save(record);
     return record;
-  }
-
-  Future<List<TrackItem>> _trackItemsFromDownloadedRecords() async {
-    final out = <TrackItem>[];
-    for (final r in await getAllDownloaded()) {
-      final path = r.localPath?.trim();
-      if (path == null || path.isEmpty) continue;
-      if (!await _youtubeAudioFileExists(path)) {
-        debugPrint(
-          'YoutubeTrackStore: missing file for ${r.videoId} at $path',
-        );
-        continue;
-      }
-      out.add(trackItemFromYoutubeRecord(r));
-    }
-    return out;
   }
 
   /// Wipes the YouTube Isar database (factory reset).

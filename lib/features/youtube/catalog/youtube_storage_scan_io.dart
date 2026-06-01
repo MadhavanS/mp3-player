@@ -25,7 +25,7 @@ Future<YoutubeStorageScanResult> scanYoutubeStorageFolder({
   var alreadyRegistered = 0;
   final outTracks = <TrackItem>[];
 
-  await for (final entity in dir.list(recursive: false, followLinks: false)) {
+  await for (final entity in dir.list(recursive: true, followLinks: false)) {
     if (entity is! File) continue;
     if (!isYoutubeStorageAudioExtension(entity.path)) continue;
 
@@ -45,8 +45,6 @@ Future<YoutubeStorageScanResult> scanYoutubeStorageFolder({
   outTracks.sort(
     (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
   );
-
-  await YoutubeLibraryCatalog.instance.reload();
 
   return YoutubeStorageScanResult(
     directoryPath: dirPath,
