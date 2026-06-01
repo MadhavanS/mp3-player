@@ -39,6 +39,7 @@ import '../player/track_overflow_actions.dart';
 import '../help/help_screen.dart';
 import '../settings/settings_screen.dart';
 import '../youtube/catalog/youtube_catalog_merge.dart';
+import '../youtube/catalog/youtube_storage_scan.dart';
 import '../youtube/download/youtube_download_manager.dart';
 import 'now_playing_escape_bridge.dart';
 
@@ -1509,6 +1510,22 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                               onYoutubeMergeIntoSongsChanged: kIsWeb
                                   ? null
                                   : (_) async {
+                                      final player = PlayerController.of(
+                                        context,
+                                      );
+                                      await _applyYoutubeMergeSetting(player);
+                                    },
+                              onYoutubeStorageRefreshed: kIsWeb
+                                  ? null
+                                  : () async {
+                                      try {
+                                        await scanYoutubeStorageFolder();
+                                      } catch (e, st) {
+                                        debugPrint(
+                                          'onYoutubeStorageRefreshed scan: $e\n$st',
+                                        );
+                                      }
+                                      if (!context.mounted) return;
                                       final player = PlayerController.of(
                                         context,
                                       );

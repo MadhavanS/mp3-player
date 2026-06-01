@@ -237,7 +237,7 @@ class YoutubeDownloadManager extends ChangeNotifier {
       await YoutubeDownloadNotifications.showComplete(job.title);
       notifyListeners();
 
-      unawaited(YoutubeLibraryCatalog.instance.reload());
+      await YoutubeLibraryCatalog.instance.reload();
     } catch (e) {
       debugPrint('[YoutubeDownloadManager] failed ${job.videoId}: $e');
       job.applyUpdate(
@@ -343,8 +343,14 @@ class YoutubeDownloadManager extends ChangeNotifier {
     if (await File(finalPath).exists()) {
       await File(finalPath).delete();
     }
-    await tempFile.rename(finalPath);
-    return finalPath;
+    try {
+      await tempFile.rename(finalPath);
+    } catch (e) {
+      debugPrint('[YoutubeDownloadManager] rename failed, copying: $e');
+      await tempFile.copy(finalPath);
+      await tempFile.delete();
+    }
+    return p.normalize(File(finalPath).absolute.path);
   }
 
   Future<void> _writeTags(

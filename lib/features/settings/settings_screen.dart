@@ -45,6 +45,7 @@ class SettingsScreen extends StatefulWidget {
     required this.onPlayerChromeCustomBackgroundChanged,
     required this.onEraseAllAppData,
     this.onYoutubeMergeIntoSongsChanged,
+    this.onYoutubeStorageRefreshed,
   });
 
   final List<String> folderPaths;
@@ -65,6 +66,7 @@ class SettingsScreen extends StatefulWidget {
   final ValueChanged<Color> onPlayerChromeCustomBackgroundChanged;
   final Future<void> Function() onEraseAllAppData;
   final Future<void> Function(bool enabled)? onYoutubeMergeIntoSongsChanged;
+  final Future<void> Function()? onYoutubeStorageRefreshed;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -96,6 +98,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _songsAlphaIndexExperiment = false;
   bool _youtubeMergeIntoSongs = false;
   String? _youtubeStoragePath;
+  bool _youtubeStorageIsDefault = true;
+  VoidCallback? _youtubeSettingsRevisionListener;
 
   static bool get _isWindowsDesktop =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -110,17 +114,130 @@ class _SettingsScreenState extends State<SettingsScreen> {
     unawaited(_loadWindowsWindowPrefs());
     unawaited(_loadSongsAlphaExperiment());
     unawaited(_loadYoutubeSettings());
+    _youtubeSettingsRevisionListener = () {
+      unawaited(_loadYoutubeSettings());
+    };
+    YoutubeSettingsStore.revision.addListener(_youtubeSettingsRevisionListener!);
   }
 
   Future<void> _loadYoutubeSettings() async {
     if (kIsWeb) return;
     final merge = await YoutubeSettingsStore.loadMergeIntoSongs();
     final storagePath = await youtubeAudioStorageDirectoryPath();
+    final isDefault = await usesDefaultYoutubeAudioStoragePath();
     if (mounted) {
       setState(() {
         _youtubeMergeIntoSongs = merge;
         _youtubeStoragePath = storagePath;
+        _youtubeStorageIsDefault = isDefault;
       });
+    }
+  }
+
+  Future<void> _pickYoutubeStorageFolder() async {
+    if (kIsWeb || _busy) return;
+
+    final allowed = await ensureCanReadMusicFiles(context);
+    if (!allowed || !mounted) return;
+
+    final picked = await pickMusicDirectory();
+    if (!mounted || picked == null) return;
+
+    final trimmed = picked.trim();
+    if (trimmed.startsWith('content:')) {
+      if (!mounted) return;
+      await _showContentUriFolderDialog();
+      return;
+    }
+
+    final normalized = _normalizePickPath(trimmed);
+    if (normalized == null) {
+      if (!mounted) return;
+      await _showContentUriFolderDialog();
+      return;
+    }
+
+    if (!await isYoutubeStoragePathInAppSandbox(normalized)) {
+      if (!mounted) return;
+      if (!await ensureCanWriteLibraryFiles(
+        context,
+        settingsHint:
+            'To save YouTube downloads to this folder on Android, allow '
+            '"All files access" for MadPlayer in system settings.',
+      )) {
+        return;
+      }
+    }
+
+    if (!await probeYoutubeStorageDirectoryWritable(normalized)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not write to that folder. Try another location.'),
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final current = _youtubeStoragePath?.trim();
+    if (current != null &&
+        current.isNotEmpty &&
+        p.normalize(current) != p.normalize(normalized)) {
+      final proceed = await showPlayerConfirmDialog(
+        context: context,
+        title: 'Change download folder?',
+        message:
+            'New YouTube downloads will be saved to:\n$normalized\n\n'
+            'Tracks already downloaded stay in their current folders and '
+            'remain playable from Library › YouTube.',
+        cancelLabel: 'Cancel',
+        confirmLabel: 'Use this folder',
+      );
+      if (proceed != true || !mounted) return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await YoutubeSettingsStore.saveCustomStoragePath(normalized);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('YouTube download folder updated.')),
+        );
+      }
+      await _loadYoutubeSettings();
+      await widget.onYoutubeStorageRefreshed?.call();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetYoutubeStorageFolder() async {
+    if (kIsWeb || _busy || _youtubeStorageIsDefault) return;
+
+    final proceed = await showPlayerConfirmDialog(
+      context: context,
+      title: 'Use default download folder?',
+      message:
+          'New downloads will go back to the app folder under Documents.\n\n'
+          'Existing files in your custom folder are not moved or deleted.',
+      cancelLabel: 'Cancel',
+      confirmLabel: 'Use default',
+    );
+    if (proceed != true || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await YoutubeSettingsStore.clearCustomStoragePath();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Using default YouTube download folder.')),
+        );
+      }
+      await _loadYoutubeSettings();
+      await widget.onYoutubeStorageRefreshed?.call();
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -151,6 +268,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   void dispose() {
+    if (_youtubeSettingsRevisionListener != null) {
+      YoutubeSettingsStore.revision.removeListener(
+        _youtubeSettingsRevisionListener!,
+      );
+    }
     _recentlyAddedLimitController.dispose();
     _recentlyPlayedLimitController.dispose();
     super.dispose();
@@ -1578,7 +1700,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             subtitle: Text(
-              'Downloaded YouTube audio (.m4a / .webm) is saved in this app folder.',
+              _youtubeStorageIsDefault
+                  ? 'Downloaded YouTube audio (.m4a / .webm) is saved in this app folder. '
+                      'Existing files here appear under Library › YouTube.'
+                  : 'Custom folder for new downloads. Playable files here appear under Library › YouTube.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: pal.textMuted.withValues(alpha: 0.95),
               ),
@@ -1592,6 +1717,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : () => unawaited(_copyYoutubeStoragePath()),
             ),
           ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => unawaited(_pickYoutubeStorageFolder()),
+              icon: const Icon(Icons.folder_open_outlined, size: 18),
+              label: const Text('Choose folder'),
+            ),
+            if (!_youtubeStorageIsDefault)
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => unawaited(_resetYoutubeStorageFolder()),
+                child: const Text('Use default app folder'),
+              ),
+          ],
         ),
       ],
     );

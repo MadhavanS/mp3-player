@@ -2,11 +2,15 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:isar/isar.dart';
+import 'package:metadata_god/metadata_god.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../../models/track_item.dart';
+import '../../../services/metadata_god_reader_io.dart';
 import '../../../services/music_library_path_key.dart';
+import '../youtube_storage_paths.dart';
+import '../youtube_video_id.dart';
 import '../youtube_duration_format.dart';
 import 'youtube_track_record.dart';
 
@@ -53,14 +57,18 @@ class YoutubeTrackStore {
 
   Future<List<YoutubeTrackRecord>> getAllDownloaded() async {
     try {
-      final db = await openYoutubeTrackIsar();
-      final rows = db.youtubeTrackRecords.where().findAll();
+      final rows = await _getAllRecords();
       rows.sort((a, b) => b.downloadedAtMs.compareTo(a.downloadedAtMs));
       return rows.where((r) => r.isDownloaded).toList(growable: false);
     } catch (e, st) {
       debugPrint('YoutubeTrackStore.getAllDownloaded: $e\n$st');
       return const [];
     }
+  }
+
+  Future<List<YoutubeTrackRecord>> _getAllRecords() async {
+    final db = await openYoutubeTrackIsar();
+    return db.youtubeTrackRecords.where().findAll();
   }
 
   Future<Set<String>> downloadedVideoIds() async {
@@ -71,8 +79,7 @@ class YoutubeTrackStore {
   Future<YoutubeTrackRecord?> findByLocalPath(String filePath) async {
     final key = canonicalMusicLibraryPathKey(filePath);
     if (key.isEmpty) return null;
-    final rows = await getAllDownloaded();
-    for (final row in rows) {
+    for (final row in await _getAllRecords()) {
       final path = row.localPath?.trim();
       if (path == null || path.isEmpty) continue;
       if (canonicalMusicLibraryPathKey(path) == key) return row;
@@ -95,6 +102,27 @@ class YoutubeTrackStore {
   }
 
   Future<void> save(YoutubeTrackRecord record) async {
+    final videoId = record.videoId.trim();
+    if (videoId.isEmpty) return;
+
+    final path = record.localPath?.trim();
+    if (path != null && path.isNotEmpty) {
+      if (await File(path).exists()) {
+        record.localPath = p.normalize(path);
+      } else {
+        try {
+          record.localPath = p.normalize(File(path).absolute.path);
+        } catch (_) {
+          record.localPath = p.normalize(path);
+        }
+      }
+    }
+
+    final existing = await get(videoId);
+    if (existing != null) {
+      record.id = existing.id;
+    }
+
     final db = await openYoutubeTrackIsar();
     await db.writeAsync((isar) {
       isar.youtubeTrackRecords.put(record);
@@ -127,12 +155,109 @@ class YoutubeTrackStore {
   }
 
   Future<List<TrackItem>> getAllAsTrackItems() async {
-    final records = await getAllDownloaded();
+    final dirPath = await youtubeAudioStorageDirectoryPath();
+    final dir = Directory(dirPath);
+    if (!await dir.exists()) {
+      return _trackItemsFromDownloadedRecords();
+    }
+
     final out = <TrackItem>[];
-    for (final r in records) {
+    final seenKeys = <String>{};
+
+    await for (final entity in dir.list(recursive: false, followLinks: false)) {
+      if (entity is! File) continue;
+      if (!isYoutubeStorageAudioExtension(entity.path)) continue;
+
+      final path = await stableYoutubeStoragePath(entity.path);
+      final key = canonicalMusicLibraryPathKey(path);
+      if (key.isEmpty || !seenKeys.add(key)) continue;
+
+      final record = await registerStorageFile(path);
+      if (record == null) continue;
+      out.add(trackItemFromYoutubeRecord(record));
+    }
+
+    out.sort(
+      (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+    );
+    return out;
+  }
+
+  /// Registers or updates one on-disk file from the active YouTube folder.
+  Future<YoutubeTrackRecord?> registerStorageFile(String rawPath) async {
+    if (!isYoutubeStorageAudioExtension(rawPath)) return null;
+
+    final path = await stableYoutubeStoragePath(rawPath);
+    if (!await _youtubeAudioFileExists(path)) return null;
+
+    final pathKey = canonicalMusicLibraryPathKey(path);
+    if (pathKey.isEmpty) return null;
+
+    final stat = await File(path).stat();
+
+    final existingByPath = await findByLocalPath(path);
+    if (existingByPath != null) {
+      if (existingByPath.fileSizeBytes != stat.size) {
+        existingByPath.fileSizeBytes = stat.size;
+        await save(existingByPath);
+      }
+      return existingByPath;
+    }
+
+    final parsed = await _trackAndDurationFromFile(path);
+    final track = parsed.track;
+    final durationMs = parsed.durationMs;
+
+    var videoId = videoIdForStorageFile(path);
+    var record = await get(videoId);
+    if (record != null) {
+      final existingKey = canonicalMusicLibraryPathKey(record.localPath ?? '');
+      if (existingKey.isNotEmpty && existingKey != pathKey) {
+        videoId = pathBasedVideoId(path);
+        record = await get(videoId);
+      }
+    }
+
+    if (record != null) {
+      record
+        ..localPath = path
+        ..title = track.title.trim().isNotEmpty ? track.title : record.title
+        ..artist = track.artist.trim().isNotEmpty &&
+                track.artist != 'Unknown artist'
+            ? track.artist
+            : record.artist
+        ..fileSizeBytes = stat.size
+        ..downloadedAtMs = stat.modified.millisecondsSinceEpoch;
+      if (durationMs != null) record.durationMs = durationMs;
+    } else {
+      record = YoutubeTrackRecord()
+        ..videoId = videoId
+        ..title = track.title.trim().isNotEmpty ? track.title : videoId
+        ..artist = track.artist.trim().isNotEmpty &&
+                track.artist != 'Unknown artist'
+            ? track.artist
+            : 'Unknown artist'
+        ..localPath = path
+        ..downloadedAtMs = stat.modified.millisecondsSinceEpoch
+        ..fileSizeBytes = stat.size
+        ..durationMs = durationMs;
+    }
+
+    await save(record);
+    return record;
+  }
+
+  Future<List<TrackItem>> _trackItemsFromDownloadedRecords() async {
+    final out = <TrackItem>[];
+    for (final r in await getAllDownloaded()) {
       final path = r.localPath?.trim();
       if (path == null || path.isEmpty) continue;
-      if (!await File(path).exists()) continue;
+      if (!await _youtubeAudioFileExists(path)) {
+        debugPrint(
+          'YoutubeTrackStore: missing file for ${r.videoId} at $path',
+        );
+        continue;
+      }
       out.add(trackItemFromYoutubeRecord(r));
     }
     return out;
@@ -160,6 +285,62 @@ class YoutubeTrackStore {
     } catch (e, st) {
       debugPrint('YoutubeTrackStore.clearAll delete: $e\n$st');
     }
+  }
+}
+
+bool isYoutubeStorageAudioExtension(String path) {
+  switch (p.extension(path).toLowerCase()) {
+    case '.m4a':
+    case '.webm':
+    case '.mp3':
+    case '.opus':
+    case '.ogg':
+      return true;
+    default:
+      return false;
+  }
+}
+
+String pathBasedVideoId(String filePath) {
+  final key = canonicalMusicLibraryPathKey(filePath);
+  if (key.isEmpty) return 'local_file';
+  return 'path_${key.hashCode.abs().toRadixString(36)}';
+}
+
+Future<String> stableYoutubeStoragePath(String rawPath) async {
+  final trimmed = rawPath.trim();
+  if (trimmed.isEmpty) return trimmed;
+  if (await File(trimmed).exists()) return p.normalize(trimmed);
+  try {
+    final absolute = p.normalize(File(trimmed).absolute.path);
+    if (await File(absolute).exists()) return absolute;
+  } catch (_) {}
+  return p.normalize(trimmed);
+}
+
+Future<({TrackItem track, int? durationMs})> _trackAndDurationFromFile(
+  String path,
+) async {
+  final base = TrackItem.fromFilePath(path);
+  try {
+    final meta = await MetadataGod.readMetadata(file: path);
+    final track = trackFromMetadataGod(base, meta);
+    final ms = meta.durationMs;
+    return (
+      track: track,
+      durationMs: ms != null && ms > 0 ? ms.round() : null,
+    );
+  } catch (_) {
+    return (track: base, durationMs: null);
+  }
+}
+
+Future<bool> _youtubeAudioFileExists(String rawPath) async {
+  if (await File(rawPath).exists()) return true;
+  try {
+    return await File(p.normalize(File(rawPath).absolute.path)).exists();
+  } catch (_) {
+    return false;
   }
 }
 

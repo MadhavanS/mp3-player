@@ -13,15 +13,20 @@ class YoutubeLibraryCatalog extends ChangeNotifier {
 
   List<TrackItem> _tracks = const [];
   bool _loading = false;
+  int _reloadGeneration = 0;
 
   List<TrackItem> get tracks => _tracks;
   bool get loading => _loading;
 
   Future<void> reload() async {
+    final generation = ++_reloadGeneration;
     _loading = true;
     notifyListeners();
 
-    _tracks = await YoutubeTrackStore.instance.getAllAsTrackItems();
+    final tracks = await YoutubeTrackStore.instance.getAllAsTrackItems();
+    if (generation != _reloadGeneration) return;
+
+    _tracks = tracks;
     _loading = false;
     notifyListeners();
 

@@ -475,8 +475,8 @@ class PlayerController {
     final path = _playlistPaths[playlistIndex];
     final fromLib = _libraryCatalog.trackForPath(path);
     if (fromLib != null) return fromLib;
-    if (isYoutubeDownloadStoragePath(path)) {
-      final key = canonicalMusicLibraryPathKey(path);
+    final key = canonicalMusicLibraryPathKey(path);
+    if (key.isNotEmpty) {
       for (final t in YoutubeLibraryCatalog.instance.tracks) {
         final fp = t.filePath?.trim();
         if (fp == null || fp.isEmpty) continue;
