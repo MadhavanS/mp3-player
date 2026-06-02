@@ -66,7 +66,12 @@ class EscapeToSongsLibraryHub {
 void dispatchEscapeToSongsLibrary() {
   final nav = appNavigatorKey.currentState;
   if (nav != null && nav.canPop()) {
-    nav.popUntil((route) => route.isFirst);
+    // When Now Playing is open, pop once — popUntil can over-pop on some stacks.
+    if (NowPlayingRouteMark.isOpen) {
+      nav.pop();
+    } else {
+      nav.popUntil((route) => route.isFirst);
+    }
   }
   EscapeToSongsLibraryHub.completeNavigationToSongs();
 }
@@ -121,6 +126,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   _ShellPage _page = _ShellPage.library;
   List<String> _folderPaths = [];
   bool _scanning = false;
+  Timer? _scanningWatchdog;
 
   /// Set after filesystem scan completes; `null` means still enumerating MP3 paths.
   int? _scanDetectedMp3Count;
@@ -667,6 +673,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
     WidgetsBinding.instance.removeObserver(this);
     _idleRescanTimer?.cancel();
+    _scanningWatchdog?.cancel();
     _persistPlaybackDebounceTimer?.cancel();
     _albumArtWarmupRetryTimer?.cancel();
     unawaited(_persistSession());
@@ -731,6 +738,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
 
     if (showProgressOverlay) {
+      _scanningWatchdog?.cancel();
+      _scanningWatchdog = Timer(const Duration(minutes: 3), () {
+        if (!mounted || !_scanning) return;
+        debugPrint('Library scan overlay watchdog: clearing stuck scan UI');
+        setState(() {
+          _scanning = false;
+          _scanDetectedMp3Count = null;
+        });
+      });
       setState(() {
         _scanning = true;
         _scanDetectedMp3Count = null;
@@ -903,11 +919,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
 
       startForegroundEnrich();
     } finally {
-      if (showProgressOverlay && mounted) {
-        setState(() {
-          _scanning = false;
-          _scanDetectedMp3Count = null;
-        });
+      if (showProgressOverlay) {
+        _scanningWatchdog?.cancel();
+        _scanningWatchdog = null;
+        if (mounted) {
+          setState(() {
+            _scanning = false;
+            _scanDetectedMp3Count = null;
+          });
+        }
       }
     }
   }
@@ -1342,12 +1362,15 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _nowPlayingOpenedFromTab = openedFromTab;
     Navigator.of(context).push(
       PageRouteBuilder<void>(
+        opaque: false,
+        barrierColor: Colors.transparent,
         pageBuilder: (context, animation, secondaryAnimation) {
           return FadeTransition(
             opacity: animation,
             child: NowPlayingScreen(
               onCollapse: () {
-                Navigator.of(context).pop();
+                final nav = Navigator.of(context);
+                if (nav.canPop()) nav.pop();
                 _applyLibraryAfterClosingNowPlaying(_nowPlayingOpenedFromTab);
                 _nowPlayingOpenedFromTab = null;
               },

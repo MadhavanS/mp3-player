@@ -366,8 +366,19 @@ class LibraryScreenState extends State<LibraryScreen>
     unawaited(_syncTabsFromStore());
   }
 
+  static List<LibraryTabId> _libraryTabsWithoutYoutube(Iterable<LibraryTabId> ids) {
+    return [
+      for (final id in ids)
+        if (id != LibraryTabId.youtube && id != LibraryTabId.youtubeSearch)
+          id,
+    ];
+  }
+
   void _replaceVisibleTabs(List<LibraryTabId> next) {
-    final use = next.isEmpty ? [LibraryTabId.songs] : next;
+    var use = _libraryTabsWithoutYoutube(
+      next.isEmpty ? const [LibraryTabId.songs] : next,
+    );
+    if (use.isEmpty) use = const [LibraryTabId.songs];
     if (listEquals(_visibleTabs, use)) return;
     final oldLen = _visibleTabs.length;
     final oldIx = oldLen == 0 ? 0 : _tabController.index.clamp(0, oldLen - 1);
@@ -2146,8 +2157,24 @@ class LibraryScreenState extends State<LibraryScreen>
         browsePathKeys,
       ),
       LibraryTabId.youtube || LibraryTabId.youtubeSearch =>
-        const SizedBox.shrink(),
+        _youtubeMovedToSidebarHint(theme, pal),
     };
+  }
+
+  Widget _youtubeMovedToSidebarHint(ThemeData theme, AppPalette pal) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Text(
+          'YouTube moved to the menu (☰) → YouTube.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: pal.textSecondary,
+            height: 1.45,
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildFavoritesTab(

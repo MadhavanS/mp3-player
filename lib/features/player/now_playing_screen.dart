@@ -87,6 +87,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   double? _dragPositionFraction;
   double _pullDismissPx = 0;
   bool _collapseRequested = false;
+  PlayerController? _player;
+  VoidCallback? _trackListener;
 
   @override
   void initState() {
@@ -95,14 +97,40 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final player = PlayerController.of(context);
+    if (identical(_player, player)) return;
+    if (_player != null && _trackListener != null) {
+      _player!.track.removeListener(_trackListener!);
+    }
+    _player = player;
+    _trackListener ??= () {
+      if (!mounted || _player?.currentTrack != null) return;
+      _safeCollapse(force: true);
+    };
+    player.track.addListener(_trackListener!);
+    if (player.currentTrack == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _safeCollapse(force: true);
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    if (_player != null && _trackListener != null) {
+      _player!.track.removeListener(_trackListener!);
+    }
     NowPlayingRouteMark.leave();
     super.dispose();
   }
 
-  void _safeCollapse() {
+  void _safeCollapse({bool force = false}) {
     if (_collapseRequested || !mounted) return;
-    if (NowPlayingEscDuplicatePopGuard.blockShortcutCollapse) return;
+    if (!force && NowPlayingEscDuplicatePopGuard.blockShortcutCollapse) {
+      return;
+    }
     _collapseRequested = true;
     widget.onCollapse();
   }
@@ -1626,7 +1654,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         final track = player.currentTrack;
         if (track == null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) _safeCollapse();
+            if (mounted) _safeCollapse(force: true);
           });
           return const SizedBox.shrink();
         }
