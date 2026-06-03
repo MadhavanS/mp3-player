@@ -6,10 +6,23 @@ import 'package:window_manager/window_manager.dart';
 
 import 'windows_window_constants.dart';
 
-Future<void> initWindowsWindowOnLaunchImpl() async {
-  if (!Platform.isWindows) return;
+bool _windowManagerReady = false;
+bool _windowShown = false;
 
+/// Only [windowManager.ensureInitialized] — safe before [runApp].
+Future<void> prepareWindowsWindowManagerImpl() async {
+  if (!Platform.isWindows) return;
+  if (_windowManagerReady) return;
   await windowManager.ensureInitialized();
+  _windowManagerReady = true;
+}
+
+/// Shows the native window once Flutter has painted at least one frame.
+Future<void> showWindowsWindowWhenReadyImpl() async {
+  if (!Platform.isWindows || _windowShown) return;
+  if (!_windowManagerReady) {
+    await prepareWindowsWindowManagerImpl();
+  }
 
   final prefs = await SharedPreferences.getInstance();
   final alwaysOnTop = prefs.getBool(kWindowsAlwaysOnTopPrefKey) ?? false;
@@ -27,6 +40,7 @@ Future<void> initWindowsWindowOnLaunchImpl() async {
       await windowManager.focus();
     },
   );
+  _windowShown = true;
 }
 
 Future<void> setWindowsAlwaysOnTopImpl(bool value) async {

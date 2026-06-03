@@ -12,13 +12,24 @@ import 'thumbnail/youtube_thumbnail_cache.dart';
 import 'youtube_settings_store.dart';
 import 'youtube_storage_paths.dart';
 
-/// Initializes YouTube storage and reloads the downloaded library catalog.
-Future<void> initYoutubeFeature() async {
+/// Opens YouTube persistence only (fast; safe during app bootstrap).
+Future<void> initYoutubeStorage() async {
   if (kIsWeb) return;
   await YoutubeTrackStore.instance.init();
+}
+
+/// Notifications, folder scan, and pending downloads (defer until after first UI).
+Future<void> initYoutubeFeatureHeavy() async {
+  if (kIsWeb) return;
   await YoutubeDownloadNotifications.init();
   await YoutubeLibraryCatalog.instance.reload();
   await YoutubeDownloadManager.instance.resumePendingDownloads();
+}
+
+/// Full YouTube init (storage + heavy). Prefer [initYoutubeStorage] at boot.
+Future<void> initYoutubeFeature() async {
+  await initYoutubeStorage();
+  await initYoutubeFeatureHeavy();
 }
 
 /// Deletes YouTube downloads, thumbnails, and Isar index (factory reset).

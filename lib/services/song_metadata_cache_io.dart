@@ -45,7 +45,8 @@ Future<Isar> _openIsar() async {
     name: 'mp3_player_metadata_v4',
   );
   _isar = db;
-  await _maybeBackfillArtDiskCacheFlags(db);
+  // Disk art backfill can scan thousands of files — never block library open/UI.
+  unawaited(_maybeBackfillArtDiskCacheFlags(db));
   return db;
 }
 

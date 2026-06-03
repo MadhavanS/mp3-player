@@ -43,6 +43,8 @@ import '../youtube/ui/youtube_hub_screen.dart';
 import '../youtube/catalog/youtube_catalog_merge.dart';
 import '../youtube/catalog/youtube_library_catalog.dart';
 import '../youtube/download/youtube_download_manager.dart';
+import '../youtube/youtube_init_stub.dart'
+    if (dart.library.io) '../youtube/youtube_init.dart';
 import 'now_playing_escape_bridge.dart';
 
 /// During folder scan, skip building a huge native playback queue until the user
@@ -127,6 +129,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   List<String> _folderPaths = [];
   bool _scanning = false;
   Timer? _scanningWatchdog;
+  bool _shellBootstrapDone = false;
 
   /// Set after filesystem scan completes; `null` means still enumerating MP3 paths.
   int? _scanDetectedMp3Count;
@@ -155,6 +158,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    if (!kIsWeb) {
+      unawaited(initYoutubeStorage());
+    }
     EscapeToSongsLibraryHub.register(_onEscapeToSongsLibrary);
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
       NowPlayingWindowsEsc.handler = _windowsEscapeCloseNowPlaying;
@@ -273,57 +279,82 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   Future<void> _bootstrapShellAsync() async {
-    // Request audio/storage permission before doing any file I/O on Android.
-    final permGranted = await ensureCanReadMusicFiles(context);
+    final permFuture = ensureCanReadMusicFiles(context, showDialogIfDenied: false);
+    final settingsFuture = PlaybackSessionStore.loadShellPageIsSettings();
+    final browseFuture = PlaybackSessionStore.loadBrowsePathKeys();
+    final foldersFuture = SavedMusicFolders.load();
+
+    final permGranted = await permFuture;
     if (!mounted) return;
     _storagePermissionGranted = permGranted;
 
-    final showSettings = await PlaybackSessionStore.loadShellPageIsSettings();
-    final browseKeys = await PlaybackSessionStore.loadBrowsePathKeys();
-    var paths = await SavedMusicFolders.load();
+    final results = await Future.wait<Object?>([
+      settingsFuture,
+      browseFuture,
+      foldersFuture,
+    ]);
     if (!mounted) return;
 
-    // Prune saved folder paths whose directory no longer exists on disk so that
-    // stale cached tracks from deleted folders are never loaded or played.
-    if (!kIsWeb &&
-        (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS ||
-            defaultTargetPlatform == TargetPlatform.linux ||
-            defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.windows)) {
-      final live = <String>[];
-      for (final p in paths) {
-        try {
-          if (await Directory(p).exists()) live.add(p);
-        } catch (_) {
-          live.add(p); // keep on error — don't silently remove
-        }
-      }
-      if (live.length != paths.length) {
-        paths = live;
-        await SavedMusicFolders.save(paths);
-      }
-    }
-    if (!mounted) return;
+    final showSettings = results[0]! as bool;
+    final browseKeys = results[1] as Set<String>?;
+    var paths = List<String>.from(results[2]! as List<String>);
 
     setState(() {
-      _folderPaths = List<String>.from(paths);
+      _folderPaths = paths;
       _page = showSettings ? _ShellPage.settings : _ShellPage.library;
+      _shellBootstrapDone = true;
       if (browseKeys != null && browseKeys.isNotEmpty) {
         _songsBrowsePathKeysNotifier.value = browseKeys;
       }
     });
+
     final player = PlayerController.of(context);
     if (browseKeys != null && browseKeys.isNotEmpty) {
       player.setPlaybackPathKeyScope(browseKeys);
     }
+
+    if (!kIsWeb) {
+      unawaited(initYoutubeFeatureHeavy());
+    }
+
     if (paths.isEmpty) {
       unawaited(_maybeShowFirstRunLibraryHint());
       return;
     }
-    await _restoreLibraryFromCacheAndSession(player, paths);
+
+    unawaited(_pruneMissingMusicFolders(paths));
+    unawaited(_restoreLibraryFromCacheAndSession(player, paths));
     _scheduleBackgroundSync(delay: const Duration(milliseconds: 500));
     _scheduleIdleRescan();
+  }
+
+  /// Drops folder paths that no longer exist (runs after UI is visible).
+  Future<void> _pruneMissingMusicFolders(List<String> paths) async {
+    if (kIsWeb ||
+        !(defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.linux ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.windows)) {
+      return;
+    }
+    final checks = await Future.wait<bool>(
+      paths.map((p) async {
+        try {
+          return await Directory(p).exists();
+        } catch (_) {
+          return true;
+        }
+      }),
+    );
+    final live = <String>[];
+    for (var i = 0; i < paths.length; i++) {
+      if (checks[i]) live.add(paths[i]);
+    }
+    if (live.length == paths.length) return;
+    await SavedMusicFolders.save(live);
+    if (!mounted) return;
+    setState(() => _folderPaths = List<String>.from(live));
   }
 
   void _scheduleBackgroundSync({Duration delay = Duration.zero}) {
@@ -577,6 +608,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     }
     _albumArtWarmupInProgress = true;
     unawaited(() async {
+      // Let the first frame paint before scanning covers (metadata_god / lofty).
+      await Future<void>.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
       try {
         final candidates = player.metadataLibrary
             .where((t) {
@@ -1601,6 +1635,13 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
                       MiniPlayerBar(controller: player, onTap: _openNowPlaying),
                   ],
                 ),
+                if (!_shellBootstrapDone)
+                  const Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: LinearProgressIndicator(minHeight: 3),
+                  ),
                 if (_scanning)
                   Positioned.fill(
                     child: DecoratedBox(

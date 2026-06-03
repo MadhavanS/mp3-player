@@ -14,6 +14,7 @@ import 'audio/player_controller.dart';
 import 'audio/sleep_timer_controller.dart';
 import 'features/shell/main_shell.dart';
 import 'features/shell/now_playing_escape_bridge.dart';
+import 'services/app_startup.dart';
 import 'platform/android_home_widget_bridge.dart';
 import 'services/accent_settings_store.dart';
 import 'services/font_settings_store.dart';
@@ -81,6 +82,9 @@ class _MadPlayerAppState extends State<MadPlayerApp> with WidgetsBindingObserver
     _attachAndroidWidgetProgressTicker();
     unawaited(ensureMediaNotificationPermission());
     _loadTheme();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(runDeferredAppStartup());
+    });
   }
 
   @override

@@ -4,6 +4,7 @@ import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:metadata_god/metadata_god.dart';
 import 'package:path/path.dart' as p;
 
+import 'metadata_backend_config.dart';
 import 'song_file_info.dart';
 
 Future<SongFileInfo> readSongFileInfo(String? filePath) async {
@@ -97,6 +98,9 @@ String? _nonEmptyTag(String? value) {
 Future<({int? durationMs, int? bitrateKbps})> _readWithMetadataGod(
   String path,
 ) async {
+  if (!pathUsesMetadataGodReader(path)) {
+    return (durationMs: null, bitrateKbps: null);
+  }
   try {
     final meta = await MetadataGod.readMetadata(file: path);
     final d = meta as dynamic;

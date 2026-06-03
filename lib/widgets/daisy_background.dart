@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -28,6 +30,7 @@ class DaisyBackground extends StatelessWidget {
     if (ivy) {
       return _IvyLiquidGlassBackground(
         baseColor: baseColor,
+        useBackdropBlur: _ivyBackdropBlurSupported,
         child: child,
       );
     }
@@ -50,14 +53,23 @@ class DaisyBackground extends StatelessWidget {
   }
 }
 
+/// Desktop Windows/Linux often paint [BackdropFilter] as solid black without a backdrop.
+bool get _ivyBackdropBlurSupported {
+  if (kIsWeb) return false;
+  return defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+}
+
 /// Ivy scaffold: organic liquid layer → frosted blur veil → specular glass → UI.
 class _IvyLiquidGlassBackground extends StatefulWidget {
   const _IvyLiquidGlassBackground({
     required this.baseColor,
+    required this.useBackdropBlur,
     required this.child,
   });
 
   final Color baseColor;
+  final bool useBackdropBlur;
   final Widget child;
 
   @override
@@ -84,6 +96,33 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
     super.dispose();
   }
 
+  Widget _frostedVeil({
+    required List<Color> colors,
+    required List<double> stops,
+    BorderRadius? borderRadius,
+    BoxBorder? border,
+  }) {
+    final decoration = BoxDecoration(
+      borderRadius: borderRadius,
+      border: border,
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: colors,
+        stops: stops,
+      ),
+    );
+    if (!widget.useBackdropBlur) {
+      return DecoratedBox(decoration: decoration);
+    }
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 36, sigmaY: 32),
+        child: DecoratedBox(decoration: decoration),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -102,24 +141,13 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
           },
         ),
         // Glass Layer 1: Screen-wide frosted plate
-        ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 36, sigmaY: 32),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white.withValues(alpha: 0.48),
-                    Colors.white.withValues(alpha: 0.14),
-                    Colors.white.withValues(alpha: 0.32),
-                  ],
-                  stops: const [0.0, 0.5, 1.0],
-                ),
-              ),
-            ),
-          ),
+        _frostedVeil(
+          colors: [
+            Colors.white.withValues(alpha: 0.48),
+            Colors.white.withValues(alpha: 0.14),
+            Colors.white.withValues(alpha: 0.32),
+          ],
+          stops: const [0.0, 0.5, 1.0],
         ),
         // Glass Layer 2: Inner floating pane (ambient occlusion shadows)
         Center(
@@ -144,26 +172,44 @@ class _IvyLiquidGlassBackgroundState extends State<_IvyLiquidGlassBackground>
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(48),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(48),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.white.withValues(alpha: 0.18),
-                          Colors.white.withValues(alpha: 0.05),
-                        ],
+                child: widget.useBackdropBlur
+                    ? BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(48),
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.white.withValues(alpha: 0.18),
+                                Colors.white.withValues(alpha: 0.05),
+                              ],
+                            ),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.25),
+                              width: 0.8,
+                            ),
+                          ),
+                        ),
+                      )
+                    : DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(48),
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.white.withValues(alpha: 0.22),
+                              Colors.white.withValues(alpha: 0.08),
+                            ],
+                          ),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            width: 0.8,
+                          ),
+                        ),
                       ),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.25),
-                        width: 0.8,
-                      ),
-                    ),
-                  ),
-                ),
               ),
             ),
           ),

@@ -7,7 +7,9 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../../models/track_item.dart';
+import '../../../services/metadata_backend_config.dart';
 import '../../../services/metadata_god_reader_io.dart';
+import '../../../services/track_metadata.dart';
 import '../../../services/music_library_path_key.dart';
 import '../youtube_storage_paths.dart';
 import '../youtube_video_id.dart';
@@ -366,13 +368,17 @@ Future<({TrackItem track, int? durationMs})> _trackAndDurationFromFile(
 ) async {
   final base = TrackItem.fromFilePath(path);
   try {
-    final meta = await MetadataGod.readMetadata(file: path);
-    final track = trackFromMetadataGod(base, meta);
-    final ms = meta.durationMs;
-    return (
-      track: track,
-      durationMs: ms != null && ms > 0 ? ms.round() : null,
-    );
+    if (pathUsesMetadataGodReader(path)) {
+      final meta = await MetadataGod.readMetadata(file: path);
+      final track = trackFromMetadataGod(base, meta);
+      final ms = meta.durationMs;
+      return (
+        track: track,
+        durationMs: ms != null && ms > 0 ? ms.round() : null,
+      );
+    }
+    final track = await readAudioMetadata(base);
+    return (track: track, durationMs: null);
   } catch (_) {
     return (track: base, durationMs: null);
   }

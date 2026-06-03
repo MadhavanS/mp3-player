@@ -3,9 +3,13 @@ import 'windows_window_impl_stub.dart'
 
 export 'windows_window_constants.dart';
 
-/// Initializes desktop window chrome on Windows before [runApp].
-/// No-op on web and non-Windows [dart:io] platforms.
-Future<void> initWindowsWindowOnLaunch() => impl.initWindowsWindowOnLaunchImpl();
+/// Fast sync setup before [runApp] (does not wait to show the window).
+Future<void> prepareWindowsWindowManager() =>
+    impl.prepareWindowsWindowManagerImpl();
+
+/// Shows the window after the first frame (call from a post-frame callback).
+Future<void> showWindowsWindowWhenReady() =>
+    impl.showWindowsWindowWhenReadyImpl();
 
 /// Persists and applies always-on-top (Windows only).
 Future<void> setWindowsAlwaysOnTop(bool value) =>

@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:metadata_god/metadata_god.dart';
-
 import '../models/track_item.dart';
 import 'metadata_backend_config.dart';
 
@@ -30,6 +29,7 @@ TrackItem trackFromMetadataGod(TrackItem base, Metadata meta) {
 Future<TrackItem?> tryReadAudioMetadataWithGod(TrackItem base) async {
   final path = base.filePath?.trim();
   if (path == null || path.isEmpty) return null;
+  if (!pathUsesMetadataGodReader(path)) return null;
 
   final stopwatch = kMetadataReadTimingLogs ? (Stopwatch()..start()) : null;
   try {
