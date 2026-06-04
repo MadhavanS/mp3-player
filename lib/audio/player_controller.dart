@@ -106,6 +106,13 @@ class PlayerController {
     }
   }
 
+  /// After [JustAudioBackground.init] or a native-player recreate, reattach streams.
+  static Future<void> rebindActiveCoordinatorToNativePlayer() async {
+    final coordinator = _activeCoordinator;
+    if (coordinator == null) return;
+    await coordinator._rebindNativePlayerStreams();
+  }
+
   /// Stops playback and drops in-memory library/queue before [wipeAllLocalAppData].
   Future<void> prepareForAppDataWipe() async {
     try {
@@ -125,6 +132,12 @@ class PlayerController {
     final code = error.code.toLowerCase();
     final message = (error.message ?? '').toLowerCase();
     return code == 'abort' && message.contains('loading interrupted');
+  }
+
+  static bool _isSinglePlayerInstanceError(Object error) {
+    if (error is! PlatformException) return false;
+    final message = error.message ?? '';
+    return message.contains('single player instance');
   }
 
   Future<void> _playSafely({String context = 'play'}) async {
@@ -337,6 +350,47 @@ class PlayerController {
     _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
   }
 
+  Future<void> _rebindNativePlayerStreams() async {
+    await shutdownNativePlayer();
+    _playerStateSub.cancel();
+    _concatIndexSub?.cancel();
+    _concatIndexSub = null;
+    positionNotifier.detach();
+    _playerStateSub = _player.playerStateStream.listen((state) {
+      _onProcessingState(state.processingState);
+      final playing = state.playing;
+      final proc = state.processingState;
+      if (!playing &&
+          _lastDispatchedPlaying &&
+          !_isLoadingSource &&
+          !_manualQueueAdvance &&
+          !_ignoreSpuriousTransportPause &&
+          proc != ProcessingState.completed) {
+        _invalidatePlayResumeRetries();
+        _playbackPausedByUser = true;
+        if (!kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.android ||
+                defaultTargetPlatform == TargetPlatform.iOS)) {
+          unawaited(JustAudioBackground.ensureNativePaused());
+        }
+      }
+      if (playing && !_lastDispatchedPlaying) {
+        _playbackPausedByUser = false;
+        unawaited(_activateAudioSessionForPlayback());
+      }
+      if (!_playerUiDispatchInitialized ||
+          playing != _lastDispatchedPlaying ||
+          proc != _lastDispatchedProcessing) {
+        _playerUiDispatchInitialized = true;
+        _lastDispatchedPlaying = playing;
+        _lastDispatchedProcessing = proc;
+        _schedulePlayerUiNotify();
+      }
+    });
+    _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
+    positionNotifier.attach();
+  }
+
   Future<void> _initAudioEffects() async {
     await _equalizerService.init();
     await _replayGainService.init();
@@ -374,7 +428,7 @@ class PlayerController {
   /// [just_audio] can subscribe to [AudioSession] interruptions internally, but
   /// we disable that and handle focus here so phone calls / mic use reliably pause
   /// and transient focus loss can resume after the call.
-  late final AudioPlayer _player = _sharedNativePlayer ??= AudioPlayer(
+  AudioPlayer get _player => _sharedNativePlayer ??= AudioPlayer(
     handleInterruptions: false,
     audioPipeline: EqualizerService.sharedPipeline,
   );
@@ -382,7 +436,7 @@ class PlayerController {
   /// Android loudness/EQ/ReplayGain controls (no-op on other platforms).
   EqualizerService get equalizerService => _equalizerService;
   ReplayGainService get replayGainService => _replayGainService;
-  late final PositionNotifier positionNotifier = PositionNotifier(_player);
+  late final PositionNotifier positionNotifier = PositionNotifier(() => _player);
   final TrackNotifier track = TrackNotifier();
   final PlaybackNotifier playback = PlaybackNotifier();
   final QueueNotifier queue = QueueNotifier();
@@ -1305,6 +1359,16 @@ class PlayerController {
           }
           return;
         } catch (e, st) {
+          if (attempt < 3 && _isSinglePlayerInstanceError(e)) {
+            debugPrint(
+              '$context: stale just_audio_background player slot — rebinding',
+            );
+            await _rebindNativePlayerStreams();
+            await Future<void>.delayed(
+              Duration(milliseconds: 120 * (attempt + 1)),
+            );
+            continue;
+          }
           if (_isInterruptedAbort(e) && attempt < 3) {
             await Future<void>.delayed(
               Duration(milliseconds: 100 * (attempt + 1)),
@@ -2908,25 +2972,84 @@ class PlayerController {
       return;
     }
 
-    _sourceNeedsReload = true;
     if (!shouldReloadPlayer) {
+      _sourceNeedsReload = true;
       _notifyTrackPlaybackQueue();
       return;
     }
 
     // Reload only the playing row — rebuilding a large concat can still open the
     // pre-rename URI (ENOENT) while the native player is settling after [stop].
+    // Do not await here — [setAudioSource] can block the rename UI for tens of seconds.
+    _schedulePlayingTrackReloadAfterPathChange(
+      updated: updated,
+      initialPosition: resumePositionAfterReload,
+      resumePlaying: resumePlayingAfterReload,
+      context: 'replaceTrackPath',
+    );
+  }
+
+  void _schedulePlayingTrackReloadAfterPathChange({
+    required TrackItem updated,
+    required Duration initialPosition,
+    required bool resumePlaying,
+    required String context,
+  }) {
     _loadCurrentPathOverride = updated;
+    unawaited(() async {
+      try {
+        await _reloadPlayingTrackOnly(
+          initialPosition: initialPosition,
+          resumePlaying: resumePlaying,
+          context: context,
+          stopBeforeLoad: true,
+        ).timeout(const Duration(seconds: 25));
+      } on TimeoutException {
+        debugPrint(
+          '$context: reload timed out; resyncing queue at current index',
+        );
+        await _recoverPlaybackAfterFailedSingleTrackReload(
+          initialPosition: initialPosition,
+          resumePlaying: resumePlaying,
+          context: '$context.timeout',
+        );
+      } catch (e, st) {
+        if (!_isInterruptedAbort(e)) {
+          debugPrint('$context: $e\n$st');
+        }
+        await _recoverPlaybackAfterFailedSingleTrackReload(
+          initialPosition: initialPosition,
+          resumePlaying: resumePlaying,
+          context: '$context.fallback',
+        );
+      } finally {
+        _loadCurrentPathOverride = null;
+        _notifyTrackPlaybackQueue();
+      }
+    }());
+  }
+
+  Future<void> _recoverPlaybackAfterFailedSingleTrackReload({
+    required Duration initialPosition,
+    required bool resumePlaying,
+    required String context,
+  }) async {
+    if (_playlistPaths.isEmpty) {
+      _sourceNeedsReload = false;
+      return;
+    }
+    _sourceNeedsReload = false;
     try {
-      await _reloadPlayingTrackOnly(
-        initialPosition: resumePositionAfterReload,
-        resumePlaying: resumePlayingAfterReload,
-        context: 'replaceTrackPath',
-        stopBeforeLoad: true,
+      await _loadCurrent(
+        initialPosition: initialPosition,
+        stopBeforeLoad: false,
       );
-    } finally {
-      _loadCurrentPathOverride = null;
-      _notifyTrackPlaybackQueue();
+      if (resumePlaying) {
+        _playbackPausedByUser = false;
+        await _resumePlaybackAfterLoad(context: '$context.play');
+      }
+    } catch (e, st) {
+      debugPrint('$context: $e\n$st');
     }
   }
 
@@ -3465,9 +3588,17 @@ class PlayerController {
     _isLoadingSource = true;
     try {
       final logical = _logicalPlaylistIndex();
-      final source = await _audioSourceForPlaylistIndex(logical);
+      final source = await _audioSourceForPlaylistIndex(
+        logical,
+        resolveArtUri: false,
+      );
       if (source == null) {
         debugPrint('$context: no AudioSource for playlist index $logical');
+        await _recoverPlaybackAfterFailedSingleTrackReload(
+          initialPosition: initialPosition,
+          resumePlaying: resumePlaying,
+          context: '$context.noSource',
+        );
         return;
       }
 
@@ -3492,8 +3623,12 @@ class PlayerController {
       _postLoadConcatGuardUntil = DateTime.now().add(
         const Duration(milliseconds: 650),
       );
-      // Next skip rebuilds the full queue (shuffle-safe full [_loadCurrent]).
-      _sourceNeedsReload = true;
+      _sourceNeedsReload = false;
+      final order = _effectiveQueueOrder();
+      if (!_useSingleTrackAudioSourceForPlatform() &&
+          order.length > _activeSourceOrder.length) {
+        unawaited(_expandConcatToFullOrder(order, logical));
+      }
       _notifyTrack();
       if (resumePlaying) {
         _playbackPausedByUser = false;
@@ -3513,6 +3648,11 @@ class PlayerController {
         );
         return;
       }
+      await _recoverPlaybackAfterFailedSingleTrackReload(
+        initialPosition: initialPosition,
+        resumePlaying: resumePlaying,
+        context: '$context.error',
+      );
     } finally {
       _loadCurrentDepth--;
       if (_loadCurrentDepth <= 0) {
@@ -3555,8 +3695,12 @@ class PlayerController {
         ).timeout(const Duration(seconds: 25));
       } on TimeoutException {
         debugPrint(
-          'reloadCurrentSourceAfterTagWriteUnawaited: timed out; '
-          'playback may need play/skip to resync',
+          'reloadCurrentSourceAfterTagWriteUnawaited: timed out; resyncing queue',
+        );
+        await _recoverPlaybackAfterFailedSingleTrackReload(
+          initialPosition: resumePosition,
+          resumePlaying: resumePlaying,
+          context: 'reloadCurrentSourceAfterTagWriteUnawaited.timeout',
         );
       } catch (e, st) {
         debugPrint('reloadCurrentSourceAfterTagWriteUnawaited: $e\n$st');
@@ -3674,6 +3818,38 @@ class PlayerController {
     positionNotifier.flush();
   }
 
+  /// After rename/tag reload left a single-track source, load the seek target
+  /// without rebuilding the entire library queue (avoids UI hangs on skip).
+  Future<void> _loadCurrentForPlaylistSeek(
+    int playlistIndex, {
+    required String playContext,
+  }) async {
+    await _guardedTransport(() async {
+      _syncPlaylistPathsFromMigrations();
+      final order = _effectiveQueueOrder();
+      final useFastStart =
+          !_useSingleTrackAudioSourceForPlatform() &&
+          order.length > _fastStartConcatThreshold &&
+          !_shuffle &&
+          order.contains(playlistIndex);
+      if (useFastStart) {
+        await _loadCurrentFastStart(
+          logical: playlistIndex,
+          sourceOrder: order,
+          initialPosition: Duration.zero,
+        );
+      } else {
+        await _loadCurrent(
+          initialPosition: Duration.zero,
+          stopBeforeLoad: true,
+        );
+      }
+      _sourceNeedsReload = false;
+      _playbackPausedByUser = false;
+      await _resumePlaybackAfterLoad(context: playContext);
+    });
+  }
+
   Future<void> _seekToPlaylistIndexFast(
     int playlistIndex, {
     required String playContext,
@@ -3701,6 +3877,16 @@ class PlayerController {
       debugPrint(
         '[seekFast] defer pending reload for current track '
         'target=$playlistIndex nativeLogical=$nativeLogical',
+      );
+      return;
+    }
+
+    if (_sourceNeedsReload &&
+        _manualQueueAdvance &&
+        playlistIndex != currentLogical) {
+      await _loadCurrentForPlaylistSeek(
+        playlistIndex,
+        playContext: playContext,
       );
       return;
     }

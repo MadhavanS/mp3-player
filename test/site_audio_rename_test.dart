@@ -74,4 +74,18 @@ void main() {
     expect(resolved.genre, '');
     expect(resolved.composer, '');
   });
+
+  test('computeSiteRename compacts generic Album - Title basenames', () {
+    final suggestion = computeSiteRename(
+      filePath: '/music/Aalavandhan - Kadavul Paathi.mp3',
+      albumFromTags: null,
+      artistFromTags: '',
+      titleFromTags: '',
+      genreFromTags: '',
+    );
+    expect(suggestion.filenameChanged, isTrue);
+    expect(suggestion.newBasenameWithoutExt, 'Aalavandhan - KadavulPaathi');
+    expect(suggestion.suggestedAlbum, 'Aalavandhan');
+    expect(suggestion.suggestedTitle, 'Kadavul Paathi');
+  });
 }

@@ -382,7 +382,15 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   Future<void> _pickCoverFromAudioFile() async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: const ['mp3', 'm4a', 'flac', 'ogg', 'opus', 'wav'],
+      allowedExtensions: const [
+        'mp3',
+        'm4a',
+        'flac',
+        'ogg',
+        'opus',
+        'wav',
+        'ape',
+      ],
       allowMultiple: false,
     );
     if (result == null || result.files.isEmpty) return;
@@ -467,28 +475,45 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     try {
       final snap = await readAudioMetadata(widget.track);
       if (!mounted) return;
-      final albumTag = snap.metaLine == 'mp3' ? null : snap.metaLine;
-      final artistTag = snap.artist == 'Unknown artist' ? '' : snap.artist;
+      final ctx = siteRenameContextFromTrack(snap);
       final suggestion = computeSiteRename(
         filePath: path,
-        albumFromTags: albumTag,
-        artistFromTags: artistTag,
-        titleFromTags: snap.title,
-        genreFromTags: _genreTextFromTrack(snap),
-        composerFromTags: _composerTextFromTrack(snap),
+        albumFromTags: _album.text.trim().isNotEmpty
+            ? _album.text.trim()
+            : ctx.album,
+        artistFromTags: _artist.text.trim().isNotEmpty
+            ? _artist.text.trim()
+            : ctx.artist,
+        titleFromTags: _title.text.trim().isNotEmpty
+            ? _title.text.trim()
+            : ctx.title,
+        genreFromTags: _genre.text.trim().isNotEmpty
+            ? _genre.text.trim()
+            : ctx.genre,
+        composerFromTags: _composer.text.trim().isNotEmpty
+            ? _composer.text.trim()
+            : ctx.composer,
+        filenameBasenameOverride: _fileName.text.trim(),
       );
       if (!mounted) return;
-      final noOpSuggestion =
-          !suggestion.filenameChanged &&
-          suggestion.suggestedTitle.trim() == snap.title.trim() &&
-          suggestion.suggestedArtist.trim() == artistTag.trim() &&
-          suggestion.suggestedAlbum.trim() == (albumTag ?? '').trim() &&
-          suggestion.suggestedGenre.trim() == _genreTextFromTrack(snap).trim() &&
-          suggestion.suggestedComposer.trim() ==
-              _composerTextFromTrack(snap).trim();
-      if (!suggestion.hasSuggestion || noOpSuggestion) {
+      if (!suggestion.hasSuggestion) {
         ActionPillToast.showUsingRootNavigator(
-          'No Auto Rename',
+          'No cleanup rule matched',
+          icon: Icons.auto_fix_high_outlined,
+          uppercaseLabel: true,
+        );
+        return;
+      }
+      if (suggestion.matchesCurrent(
+        title: _title.text,
+        artist: _artist.text,
+        album: _album.text,
+        genre: _genre.text,
+        composer: _composer.text,
+        checkFilename: !tagOnlyFlow,
+      )) {
+        ActionPillToast.showUsingRootNavigator(
+          'Already clean',
           icon: Icons.auto_fix_high_outlined,
           uppercaseLabel: true,
         );

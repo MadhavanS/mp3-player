@@ -26,6 +26,8 @@ lib/
     song_metadata_cache_io.dart    # Isar tag cache (fingerprints, no art bytes)
     album_art_cache_io.dart        # Path-keyed PNG disk cache for list art
     track_metadata_io.dart         # metadata_god → Dart fallback reads
+    track_tag_writer_io.dart       # Embedded tag writes (dispatches by format)
+    ape_tag_writer_io.dart         # APEv2 footer rewrite (not in upstream reader)
   platform/
     android_home_widget_bridge.dart
 android/.../Mp3Player*.kt           # Home widgets + MethodChannel sync
@@ -219,6 +221,37 @@ Surfaces: TrackListAlbumArt | TrackAlbumArt | notification | home widget
 - Default: `audio_metadata_reader`
 - Optional: `metadata_god` (Rust) with Dart fallback — see README for Windows build policy.
 - `metadata_backend_config.dart` / `--dart-define=USE_METADATA_GOD`
+
+### Embedded tag writes (`writeEmbeddedAudioTags`)
+
+All tag edits (Edit tags sheet, site rename, YouTube rename) funnel through
+`lib/services/track_tag_writer_io.dart` on IO platforms (stub on web).
+
+| Detected tag (`readAllMetadata`) | Write path |
+|----------------------------------|------------|
+| `Mp3Metadata` (ID3v2) | `_writeMp3Id3v2Safe` — strips old ID3v2, `Id3v4Writer`, replaces file |
+| `ApeMetadata` (APEv2 footer) | `ApeTagWriter.write` — rebuilds footer tag; keeps audio + trailing ID3v1 |
+| `Mp4Metadata`, `VorbisMetadata`, `RiffMetadata`, … | `audio_metadata_reader` `writeMetadata()` |
+
+**APEv2 detection priority:** `readAllMetadata` checks `ApeParser` **before** MP3/ID3 so
+files with an APE footer (common on some `.mp3`, `.mpc`, `.wv`, `.ape`) are treated as
+APE, not ID3-only.
+
+**APE write layout (MadPlayer-specific):**
+
+```
+[audio bytes …][APE items…][32-byte APETAGEX footer][optional 128-byte ID3v1]
+```
+
+`ApeTagWriter` locates the existing footer, replaces only the tag region, and preserves
+`unknowns` plus non-edited fields still on `ApeMetadata` after read. Cover art uses
+`Cover Art (Front)` / `(Back)` binary items. Not supported: creating a first APE tag on
+a file that has none (read would already fail).
+
+**Read/write alignment:** `readAudioMetadata` skips `metadata_god` and reads APE first
+when an APE footer is present (common on `.mp3` + APE). After an APE save, if the file
+also has ID3v2 at the front, `_syncId3v2AfterApeWrite` mirrors the same tags into ID3v2
+so other tools and the Isar cache see the update.
 
 ### Refresh without stopping playback
 

@@ -1805,7 +1805,7 @@ class _GlossyDrawer extends StatelessWidget {
                       if (onYoutube != null)
                         _GlossyDrawerTile(
                           icon: Icons.video_library_outlined,
-                          label: 'YouTube',
+                          label: 'OnlineStream',
                           onTap: onYoutube,
                           selected: currentPage == _ShellPage.youtube,
                         ),

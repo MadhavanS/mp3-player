@@ -6,9 +6,11 @@ import 'package:just_audio/just_audio.dart';
 
 /// Throttled position/duration for seek bars (~2 updates/sec).
 class PositionNotifier extends ChangeNotifier {
-  PositionNotifier(this._player);
+  PositionNotifier(this._playerLookup);
 
-  final AudioPlayer _player;
+  final AudioPlayer Function() _playerLookup;
+
+  AudioPlayer get _player => _playerLookup();
   static const _notifyInterval = Duration(milliseconds: 500);
 
   StreamSubscription<Duration>? _positionSub;

@@ -18,7 +18,7 @@ A Flutter Android app that scans user-chosen music folders, plays local `.mp3` f
 | **Flutter** | Android primary; Windows/desktop supported with playback caveats. |
 | **Audio** | [`just_audio`](https://pub.dev/packages/just_audio), [`just_audio_background`](https://pub.dev/packages/just_audio_background) (local fork under `packages/`) |
 | **Folders** | [`file_picker`](https://pub.dev/packages/file_picker), [`permission_handler`](https://pub.dev/packages/permission_handler) |
-| **Metadata** | [`audio_metadata_reader`](https://pub.dev/packages/audio_metadata_reader); optional [`metadata_god`](https://pub.dev/packages/metadata_god) (Rust) with Dart fallback |
+| **Metadata** | [`audio_metadata_reader`](https://pub.dev/packages/audio_metadata_reader); optional [`metadata_god`](https://pub.dev/packages/metadata_god) (Rust) with Dart fallback. **Tag edits:** ID3v2 (MP3), Vorbis/FLAC/MP4 via the reader; **APEv2** via `lib/services/ape_tag_writer_io.dart` (see architecture doc). |
 | **Persistence** | SharedPreferences (`*Store`), Isar (`SongMetadataCache`) |
 | **State** | `PlayerController` + split notifiers (`positionNotifier`, `track`, `playback`, `queue`) — see architecture doc |
 

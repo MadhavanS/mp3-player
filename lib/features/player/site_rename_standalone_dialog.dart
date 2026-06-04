@@ -13,10 +13,6 @@ import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
 import '../../widgets/action_pill_toast.dart';
 
-String _genrePlain(TrackItem t) {
-  return t.genres.replaceAll('#', ' ').trim().replaceAll(RegExp(r'\s+'), ' ');
-}
-
 String _composerPlain(TrackItem t) => (t.composer ?? '').trim();
 
 /// Shows only the “Clean site-style filename” confirmation (no tag editor sheet).
@@ -55,20 +51,34 @@ Future<void> showStandaloneSiteRenameDialog(
 
   if (!context.mounted) return;
 
-  final albumTag = snap.metaLine == 'mp3' ? null : snap.metaLine;
-  final artistTag = snap.artist == 'Unknown artist' ? '' : snap.artist;
+  final ctx = siteRenameContextFromTrack(snap);
   final suggestion = computeSiteRename(
     filePath: path,
-    albumFromTags: albumTag,
-    artistFromTags: artistTag,
-    titleFromTags: snap.title,
-    genreFromTags: _genrePlain(snap),
-    composerFromTags: _composerPlain(snap),
+    albumFromTags: ctx.album,
+    artistFromTags: ctx.artist,
+    titleFromTags: ctx.title,
+    genreFromTags: ctx.genre,
+    composerFromTags: ctx.composer,
   );
 
   if (!suggestion.hasSuggestion) {
     ActionPillToast.showUsingRootNavigator(
-      'No Auto Rename',
+      'No cleanup rule matched',
+      icon: Icons.auto_fix_high_outlined,
+      uppercaseLabel: true,
+    );
+    return;
+  }
+
+  if (suggestion.matchesCurrent(
+    title: ctx.title,
+    artist: ctx.artist,
+    album: ctx.album ?? '',
+    genre: ctx.genre,
+    composer: ctx.composer,
+  )) {
+    ActionPillToast.showUsingRootNavigator(
+      'Already clean',
       icon: Icons.auto_fix_high_outlined,
       uppercaseLabel: true,
     );

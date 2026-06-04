@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../models/track_item.dart';
+
 /// Result of [computeSiteRename]; user may confirm before rename + tag write.
 class SiteRenameSuggestion {
   SiteRenameSuggestion({
@@ -35,6 +37,46 @@ class SiteRenameSuggestion {
           suggestedTitle.isNotEmpty ||
           suggestedGenre.isNotEmpty ||
           suggestedComposer.isNotEmpty);
+
+  /// True when [suggestion] would not change the given tag/filename values.
+  bool matchesCurrent({
+    required String title,
+    required String artist,
+    required String album,
+    required String genre,
+    required String composer,
+    bool checkFilename = true,
+  }) {
+    if (checkFilename && filenameChanged) return false;
+    return suggestedTitle.trim() == title.trim() &&
+        suggestedArtist.trim() == artist.trim() &&
+        suggestedAlbum.trim() == album.trim() &&
+        suggestedGenre.trim() == genre.trim() &&
+        suggestedComposer.trim() == composer.trim();
+  }
+}
+
+/// Tag/album strings from a [TrackItem] after [readAudioMetadata].
+({String? album, String artist, String title, String genre, String composer})
+siteRenameContextFromTrack(TrackItem track) {
+  final album =
+      track.metaLine.trim().isEmpty || track.metaLine == 'mp3'
+          ? null
+          : track.metaLine.trim();
+  final artist =
+      track.artist.trim().isEmpty || track.artist == 'Unknown artist'
+          ? ''
+          : track.artist.trim();
+  return (
+    album: album,
+    artist: artist,
+    title: track.title.trim(),
+    genre: track.genres.replaceAll('#', ' ').trim().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    ),
+    composer: (track.composer ?? '').trim(),
+  );
 }
 
 abstract final class SiteTextConst {
@@ -709,13 +751,13 @@ bool _matchesWhenTagsContain(
 ) {
   final eff = triggers.map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
   if (eff.isEmpty) return true;
-  for (final value in fields.values) {
-    final lower = value.toLowerCase();
-    if (eff.any((t) => lower.contains(t.toLowerCase()))) {
-      return true;
-    }
-  }
-  return false;
+  final probe = [
+    fields['path'] ?? '',
+    fields['filename'] ?? '',
+    fields['stem'] ?? '',
+    for (final key in _allFieldKeys) fields[key] ?? '',
+  ].join('\n').toLowerCase();
+  return eff.any((t) => probe.contains(t.toLowerCase()));
 }
 
 void _applySetTags(_Rule rule, Map<String, String> fields, RegExpMatch? match) {
@@ -810,6 +852,23 @@ String? _resolveRename(
   return p.basenameWithoutExtension(target);
 }
 
+/// When no site rule matched, still offer `Album - Title` → compact basename.
+String? _proposeCompactBasename(String originalBase, String album, String title) {
+  var a = album.trim();
+  var t = title.trim();
+  if (a.isEmpty || t.isEmpty) {
+    final fromName = _albumTitleFromBasename(originalBase);
+    if (a.isEmpty) a = fromName.$1;
+    if (t.isEmpty) t = fromName.$2;
+  }
+  if (a.isEmpty || t.isEmpty) return null;
+  final compact =
+      '${_titleTitleCompact(_albumDropYearBrackets(_albumRenameBase(a)))} - ${_titleTitleCompact(t)}';
+  final sanitized = _sanitizeFilename(compact);
+  if (sanitized.isEmpty || sanitized == originalBase) return null;
+  return sanitized;
+}
+
 /// Computes a clean filename + album/title split (Java SiteAudioRenamer + TagEdit.setTag).
 SiteRenameSuggestion computeSiteRename({
   required String filePath,
@@ -818,18 +877,23 @@ SiteRenameSuggestion computeSiteRename({
   required String titleFromTags,
   required String genreFromTags,
   String composerFromTags = '',
+  String? filenameBasenameOverride,
 }) {
   final filename = p.basename(filePath);
-  final originalBase = _stripExtension(filename);
+  final originalBase = filenameBasenameOverride?.trim().isNotEmpty == true
+      ? filenameBasenameOverride!.trim()
+      : _stripExtension(filename);
+  final effectiveFilename = originalBase + p.extension(filename);
   final sourceFields = <String, String>{
     SiteTextConst.title: titleFromTags.trim(),
     SiteTextConst.artist: artistFromTags.trim(),
     SiteTextConst.album: (albumFromTags ?? '').trim(),
     SiteTextConst.genre: genreFromTags.trim(),
     SiteTextConst.composer: composerFromTags.trim(),
-    'filename': filename,
+    'filename': effectiveFilename,
     'stem': originalBase,
-    'ext': '.mp3',
+    'path': filePath,
+    'ext': p.extension(filename).isEmpty ? '.mp3' : p.extension(filename),
     'title_noleadtrack': _titleDropLeadingTrackNum(titleFromTags.trim()),
   };
 
@@ -848,7 +912,7 @@ SiteRenameSuggestion computeSiteRename({
     RegExpMatch? match;
     if (rule.filenameRegex.trim().isNotEmpty) {
       final regex = RegExp(rule.filenameRegex);
-      match = regex.firstMatch(filename);
+      match = regex.firstMatch(effectiveFilename);
       if (match == null) continue;
     }
 
@@ -858,9 +922,10 @@ SiteRenameSuggestion computeSiteRename({
       SiteTextConst.album: sourceFields[SiteTextConst.album] ?? '',
       SiteTextConst.genre: sourceFields[SiteTextConst.genre] ?? '',
       SiteTextConst.composer: sourceFields[SiteTextConst.composer] ?? '',
-      'filename': filename,
+      'filename': effectiveFilename,
       'stem': originalBase,
-      'ext': '.mp3',
+      'path': filePath,
+      'ext': sourceFields['ext'] ?? '.mp3',
       'title_noleadtrack': sourceFields['title_noleadtrack'] ?? '',
     };
 
@@ -900,13 +965,21 @@ SiteRenameSuggestion computeSiteRename({
 
   if (!matchedRule) {
     final fromName = _albumTitleFromBasename(originalBase);
+    var album = sourceFields[SiteTextConst.album] ?? '';
+    var title = sourceFields[SiteTextConst.title] ?? '';
+    var artist = sourceFields[SiteTextConst.artist] ?? '';
+    var genre = sourceFields[SiteTextConst.genre] ?? '';
+    var composer = sourceFields[SiteTextConst.composer] ?? '';
+    if (title.trim().isEmpty) title = fromName.$2;
+    if (album.trim().isEmpty) album = fromName.$1;
+    final compactName = _proposeCompactBasename(originalBase, album, title);
     return SiteRenameSuggestion(
-      newBasenameWithoutExt: originalBase,
-      suggestedArtist: sourceFields[SiteTextConst.artist] ?? '',
-      suggestedAlbum: fromName.$1,
-      suggestedTitle: fromName.$2,
-      suggestedGenre: sourceFields[SiteTextConst.genre] ?? '',
-      suggestedComposer: sourceFields[SiteTextConst.composer] ?? '',
+      newBasenameWithoutExt: compactName ?? originalBase,
+      suggestedArtist: artist,
+      suggestedAlbum: album,
+      suggestedTitle: title,
+      suggestedGenre: genre,
+      suggestedComposer: composer,
       originalBasenameWithoutExt: originalBase,
     );
   }

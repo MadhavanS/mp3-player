@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:path/path.dart' as p;
 
+import 'ape_tag_writer_io.dart';
+
 enum AlbumArtEditKind { keep, replace, remove }
 
 Uint8List _stripLeadingId3v2(Uint8List raw) {
@@ -136,9 +138,9 @@ Future<void> writeEmbeddedAudioTags({
   }
 
   if (metadata is ApeMetadata) {
-    throw UnsupportedError(
-      'This file uses APE tags. Saving from this app is not supported yet.',
-    );
+    await ApeTagWriter.write(file, metadata);
+    await _syncId3v2AfterApeWrite(file, metadata);
+    return;
   }
 
   if (metadata is Mp3Metadata) {
@@ -147,4 +149,44 @@ Future<void> writeEmbeddedAudioTags({
   }
 
   writeMetadata(file, metadata);
+}
+
+/// MP3+APE files often keep a parallel ID3v2 block at the front. After an APE
+/// rewrite, mirror the same values into ID3v2 so players and [metadata_god] agree.
+Future<void> _syncId3v2AfterApeWrite(File file, ApeMetadata ape) async {
+  RandomAccessFile? raf;
+  try {
+    raf = await file.open();
+    if (!MP3Parser.hasID3v2Tag(raf)) return;
+  } catch (_) {
+    return;
+  } finally {
+    try {
+      await raf?.close();
+    } catch (_) {}
+  }
+
+  Mp3Metadata mp3;
+  try {
+    final reader = await file.open();
+    try {
+      mp3 = MP3Parser(fetchImage: ape.pictures.isNotEmpty).parse(reader);
+    } finally {
+      await reader.close();
+    }
+  } catch (_) {
+    return;
+  }
+
+  mp3.setTitle(ape.title);
+  mp3.setArtist(ape.artist);
+  mp3.setAlbum(ape.album);
+  mp3.setGenres(List<String>.from(ape.genres));
+  final comp = ape.composer?.trim() ?? '';
+  mp3.composer = comp.isEmpty ? null : comp;
+  mp3.setPictures(List<Picture>.from(ape.pictures));
+  mp3.bandOrOrchestra = null;
+  mp3.contentType = null;
+
+  await _writeMp3Id3v2Safe(file, mp3);
 }

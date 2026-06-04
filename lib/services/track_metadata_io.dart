@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../audio/notification_art_uri.dart';
 import '../models/track_item.dart';
 import 'album_art_cache.dart';
+import 'ape_tag_writer_io.dart';
 import 'metadata_backend_config.dart';
 import 'song_metadata_cache.dart';
 import 'metadata_god_init_io.dart';
@@ -98,6 +99,44 @@ TrackItem _trackFromMp3Metadata(TrackItem base, Mp3Metadata mp3) {
   );
 }
 
+TrackItem _trackFromApeMetadata(TrackItem base, ApeMetadata ape) {
+  Uint8List? art = _albumArtFromParserTag(ape);
+
+  String? artist = ape.artist?.trim();
+  if (artist == null || artist.isEmpty) {
+    artist = ape.performer.isNotEmpty ? ape.performer.first.trim() : null;
+  }
+
+  String? genreStr;
+  if (ape.genres.isNotEmpty) genreStr = ape.genres.first;
+
+  return base.withEmbeddedMetadata(
+    title: ape.title?.trim(),
+    artist: artist,
+    album: ape.album?.trim(),
+    genre: genreStr,
+    composer: ape.composer?.trim(),
+    albumArtBytes: art,
+    replaceGenreFromFile: true,
+    replaceComposerFromFile: true,
+    replaceAlbumArtFromFile: true,
+    replayGain: replayGainFromParserTag(ape),
+    replaceReplayGainFromFile: true,
+  );
+}
+
+Future<TrackItem?> _readApeMetadataIfPresent(TrackItem base, File file) async {
+  if (!await fileHasApeFooter(file)) return null;
+  try {
+    final meta = readAllMetadata(file, getImage: true);
+    if (meta is! ApeMetadata) return null;
+    return _trackFromApeMetadata(base, meta);
+  } catch (e) {
+    _logMetadataSkipOnce(base.filePath ?? file.path, e);
+    return null;
+  }
+}
+
 /// Pure-Dart reader (existing path). Kept for fallback and MP3 TPE1 accuracy.
 Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
   final path = base.filePath;
@@ -109,6 +148,17 @@ Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
   final stopwatch = kMetadataReadTimingLogs ? (Stopwatch()..start()) : null;
 
   try {
+    final fromApe = await _readApeMetadataIfPresent(base, file);
+    if (fromApe != null) {
+      stopwatch?.stop();
+      if (kMetadataReadTimingLogs) {
+        debugPrint(
+          'audio_metadata_reader APE read ${stopwatch!.elapsedMilliseconds}ms: $path',
+        );
+      }
+      return fromApe;
+    }
+
     if (path.toLowerCase().endsWith('.mp3')) {
       final raf = file.openSync();
       try {
@@ -248,6 +298,14 @@ Future<Uint8List?> _readCoverBytesWithDartReader(String path) async {
   if (!await file.exists()) return null;
 
   try {
+    final fromApe = await _readApeMetadataIfPresent(
+      TrackItem.fromFilePath(path),
+      file,
+    );
+    if (fromApe?.albumArtBytes != null && fromApe!.albumArtBytes!.isNotEmpty) {
+      return fromApe.albumArtBytes;
+    }
+
     if (path.toLowerCase().endsWith('.mp3')) {
       final raf = file.openSync();
       try {
@@ -278,7 +336,21 @@ Future<Uint8List?> _readCoverBytesWithDartReader(String path) async {
 
 /// Reads embedded tags + cover. On this branch tries [metadata_god] first when
 /// [kUseMetadataGod] is true, then falls back to [audio_metadata_reader].
+///
+/// Files with an APEv2 footer always use the Dart APE reader so tag edits match
+/// what [writeEmbeddedAudioTags] writes (MP3+APE often also has stale ID3).
 Future<TrackItem> readAudioMetadata(TrackItem base) async {
+  final path = base.filePath?.trim();
+  if (path != null && path.isNotEmpty) {
+    final file = File(path);
+    if (await file.exists()) {
+      final fromApe = await _readApeMetadataIfPresent(base, file);
+      if (fromApe != null) {
+        return _finalizeMetadataRead(fromApe);
+      }
+    }
+  }
+
   if (kUseMetadataGod && metadataGodAvailable) {
     final fromGod = await tryReadAudioMetadataWithGod(base);
     if (fromGod != null) return _finalizeMetadataRead(fromGod);

@@ -7,5 +7,6 @@ import 'services/app_startup.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await prepareWindowsWindowManager();
+  await ensureJustAudioBackgroundInitialized();
   runApp(const MadPlayerApp());
 }
