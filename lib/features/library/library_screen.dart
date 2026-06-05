@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show min;
+import 'dart:math' show Random, min;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -613,12 +613,13 @@ class LibraryScreenState extends State<LibraryScreen>
     List<TrackItem> tracks,
     LibrarySearchQuery query,
     Set<String>? browsePathKeys,
+    PlayerController player,
   ) {
     final key = _songsTabIndicesCacheFingerprint(tracks, query, browsePathKeys);
     if (_songsTabIndicesCache != null && _songsTabIndicesCacheKey == key) {
       return _songsTabIndicesCache!;
     }
-    final result = _sortedSongsTabIndices(tracks, query, browsePathKeys);
+    final result = _sortedSongsTabIndices(tracks, query, browsePathKeys, player);
     _songsTabIndicesCache = result;
     _songsTabIndicesCacheKey = key;
     return result;
@@ -651,6 +652,7 @@ class LibraryScreenState extends State<LibraryScreen>
     List<TrackItem> tracks,
     LibrarySearchQuery query,
     Set<String>? browsePathKeys,
+    PlayerController player,
   ) {
     final baseFilteredIndices = tracks.isEmpty
         ? <int>[]
@@ -659,6 +661,7 @@ class LibraryScreenState extends State<LibraryScreen>
       baseFilteredIndices,
       tracks,
       browsePathKeys,
+      player,
     );
     return sortFilteredTrackIndices(
       scoped,
@@ -681,11 +684,13 @@ class LibraryScreenState extends State<LibraryScreen>
     Set<String>? browsePathKeys,
     LibrarySearchQuery query,
     String pathKey,
+    PlayerController player,
   ) {
     final songsTabIndices = _sortedSongsTabIndices(
       tracks,
       query,
       browsePathKeys,
+      player,
     );
     for (var i = 0; i < songsTabIndices.length; i++) {
       final fp = tracks[songsTabIndices[i]].filePath;
@@ -884,6 +889,7 @@ class LibraryScreenState extends State<LibraryScreen>
           browsePathKeys,
           searchQuery,
           pathKey,
+          player,
         );
         if (idx == null) return;
         await _coaxLazyListThenEnsureVisible(
@@ -1045,9 +1051,11 @@ class LibraryScreenState extends State<LibraryScreen>
   ) {
     if (browsePathKeys == null) return paths;
     if (browsePathKeys.isEmpty) return <String>[];
+    final player = PlayerController.of(context);
     return paths.where((path) {
       final k = canonicalMusicLibraryPathKey(path);
-      return k.isNotEmpty && browsePathKeys.contains(k);
+      return k.isNotEmpty &&
+          player.pathKeyMatchesAllowedKeySet(k, browsePathKeys);
     }).toList();
   }
 
@@ -1112,10 +1120,80 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  static List<int> _playlistIndicesInPathKeySet(
+  /// Plays the visible Songs rows (search + folder filter) in shuffled order.
+  Future<void> _shufflePlayVisibleSongs(
+    BuildContext context,
+    List<String> orderedPaths, {
+    Set<String>? pathKeyScope,
+  }) async {
+    if (orderedPaths.isEmpty) return;
+    final player = PlayerController.of(context);
+    final startIndex = orderedPaths.length > 1
+        ? Random().nextInt(orderedPaths.length)
+        : 0;
+    if (pathKeyScope != null) {
+      player.setPlaybackPathKeyScope(pathKeyScope, reloadQueue: false);
+    } else {
+      player.setPlaybackPathKeyScope(null, reloadQueue: false);
+    }
+    await player.setPlaylistPathsAndPlay(
+      orderedPaths,
+      startIndex: startIndex,
+      playbackOriginTab: LibraryTabId.songs,
+      keepShuffleMode: false,
+      enableShuffle: true,
+    );
+    await player.seek(Duration.zero);
+  }
+
+  Widget _wrapSongsListWithShuffleFab(
+    BuildContext context,
+    Widget scrollList, {
+    required List<String> orderedPaths,
+    Set<String>? browsePathKeys,
+    required bool alphabetIndexVisible,
+  }) {
+    final accent = context.controlAccent;
+    return Stack(
+      clipBehavior: Clip.none,
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(child: scrollList),
+        Positioned(
+          right: alphabetIndexVisible ? 40 : 16,
+          bottom: 16,
+          child: SafeArea(
+            minimum: const EdgeInsets.only(right: 4, bottom: 4),
+            child: Tooltip(
+              message: 'Shuffle play',
+              child: FloatingActionButton(
+                heroTag: 'library_songs_shuffle',
+                elevation: 3,
+                backgroundColor: accent,
+                foregroundColor: Colors.white,
+                onPressed: orderedPaths.isEmpty
+                    ? null
+                    : () => unawaited(
+                        _shufflePlayVisibleSongs(
+                          context,
+                          orderedPaths,
+                          pathKeyScope: browsePathKeys,
+                        ),
+                      ),
+                child: const Icon(Icons.shuffle_rounded),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<int> _playlistIndicesInPathKeySet(
     List<int> playlistIndices,
     List<TrackItem> tracks,
     Set<String>? allowedPathKeys,
+    PlayerController player,
   ) {
     if (allowedPathKeys == null) return playlistIndices;
     if (allowedPathKeys.isEmpty) return <int>[];
@@ -1124,7 +1202,8 @@ class LibraryScreenState extends State<LibraryScreen>
       final fp = tracks[i].filePath;
       if (fp == null || fp.trim().isEmpty) return false;
       final key = canonicalMusicLibraryPathKey(fp);
-      return key.isNotEmpty && allowedPathKeys.contains(key);
+      return key.isNotEmpty &&
+          player.pathKeyMatchesAllowedKeySet(key, allowedPathKeys);
     }).toList();
   }
 
@@ -1774,6 +1853,7 @@ class LibraryScreenState extends State<LibraryScreen>
                     tracks,
                     searchQuery,
                     browsePathKeys,
+                    player,
                   );
                   final libraryByPathKey = libraryTracksByPathKey(tracks);
                   final queueIndexByPathKey = playlistIndexByPathKey(
@@ -3036,7 +3116,16 @@ class LibraryScreenState extends State<LibraryScreen>
       );
     }
 
-    if (!inSelect) return scrollList;
+    if (!inSelect) {
+      return _wrapSongsListWithShuffleFab(
+        context,
+        scrollList,
+        orderedPaths: orderedPaths,
+        browsePathKeys: browsePathKeys,
+        alphabetIndexVisible:
+            _songsAlphabetQuickIndexVisible && !inSelect,
+      );
+    }
 
     return Stack(
       alignment: Alignment.bottomCenter,

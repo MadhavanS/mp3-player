@@ -227,6 +227,17 @@ class PlayerController {
     await _ensurePlayingWithRetries(context: context, generation: generation);
   }
 
+  /// Some platforms ignore [initialPosition] on [setAudioSource]; verify and seek.
+  Future<void> _syncPlayerPositionAfterSourceLoad(Duration target) async {
+    if (target <= Duration.zero) return;
+    await _waitForPlayerPreparedAfterSourceChange();
+    final drift = (_player.position - target).abs();
+    if (drift > const Duration(seconds: 1)) {
+      await _player.seek(target);
+      positionNotifier.flush();
+    }
+  }
+
   Future<void> _waitForPlayerPreparedAfterSourceChange() async {
     const step = Duration(milliseconds: 40);
     final deadline = DateTime.now().add(const Duration(seconds: 15));
@@ -268,7 +279,14 @@ class PlayerController {
       if (_playbackPausedByUser || _playControlGeneration != generation) return;
       try {
         if (_player.processingState == ProcessingState.completed) {
-          await _player.seek(Duration.zero);
+          final dur = _player.duration;
+          final pos = _player.position;
+          // Stale [completed] after [stop]/reload must not rewind a mid-track resume.
+          if (dur != null &&
+              dur > Duration.zero &&
+              pos >= dur - const Duration(milliseconds: 500)) {
+            await _player.seek(Duration.zero);
+          }
         }
         await _playSafely(context: context);
       } catch (e, st) {
@@ -724,6 +742,13 @@ class PlayerController {
   /// While set, [_loadCurrent] uses this row for the logical track (post-rename reload).
   TrackItem? _loadCurrentPathOverride;
 
+  /// Bumped when a playing-track reload is scheduled; stale in-flight reloads bail out.
+  int _playingTrackReloadGeneration = 0;
+
+  /// Set by [stopForExternalFileEdit] until the post-edit reload finishes — forces a
+  /// native stop/settle so the old ExoPlayer [AudioTrack] cannot overlap the new URI.
+  bool _pendingExternalFileEditReload = false;
+
   /// While [skipNext]/[skipPrevious] update [_index] and reload/seek, ignore
   /// [currentIndexStream] so the UI is not advanced before audio catches up.
   bool _manualQueueAdvance = false;
@@ -800,6 +825,9 @@ class PlayerController {
   /// When non-null, [skipNext], [skipPrevious], [upcomingTrack], and repeat-all wrap
   /// only among tracks whose path key is in this set (same as Songs tab folder filter).
   Set<String>? _playbackPathKeysScope;
+
+  /// Optional hook for shell UI (Songs folder filter, persisted browse keys).
+  void Function(String oldPath, String newPath)? onLibraryPathKeyMigrated;
 
   /// Last full-library scan (Songs tab + metadata); not cleared when the queue is
   /// replaced by Favourites / a user playlist / etc.
@@ -1137,13 +1165,25 @@ class PlayerController {
     unawaited(_loadCurrent(initialPosition: _player.position));
   }
 
+  bool _pathKeyMatchesPlaybackScope(String pathKey) {
+    if (_playbackPathKeysScope == null) return true;
+    if (pathKey.isEmpty) return false;
+    final scope = _playbackPathKeysScope!;
+    if (scope.contains(pathKey)) return true;
+    // Folder scope may still list pre-rename keys after an on-disk rename.
+    for (final scoped in scope) {
+      if (_resolveMigratedLibraryPathKey(scoped) == pathKey) return true;
+    }
+    return false;
+  }
+
   bool _playlistIndexMatchesScope(int i) {
     if (_playbackPathKeysScope == null) return true;
     if (i < 0 || i >= _playlistPaths.length) return false;
     final fp = _pathAt(i);
     if (fp == null || fp.trim().isEmpty) return false;
     final k = canonicalMusicLibraryPathKey(fp);
-    return k.isNotEmpty && _playbackPathKeysScope!.contains(k);
+    return _pathKeyMatchesPlaybackScope(k);
   }
 
   List<int> _playbackScopedIndices() {
@@ -1162,7 +1202,7 @@ class PlayerController {
         continue;
       }
       final k = canonicalMusicLibraryPathKey(fp);
-      if (k.isNotEmpty && scope.contains(k)) {
+      if (k.isNotEmpty && _pathKeyMatchesPlaybackScope(k)) {
         out.add(i);
       }
     }
@@ -1307,6 +1347,39 @@ class PlayerController {
       return await action();
     } finally {
       if (!gate.isCompleted) gate.complete();
+    }
+  }
+
+  /// After [stopForExternalFileEdit], wait for the background handler / ExoPlayer to
+  /// release its [AudioTrack] before [setAudioSource] on the renamed file.
+  /// Bounded — must never block the tag-edit sheet indefinitely.
+  Future<void> _ensureNativeDecoderFullyStopped() async {
+    try {
+      await _player
+          .stop()
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
+    } catch (_) {}
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      try {
+        await JustAudioBackground.ensureNativePaused().timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {},
+        );
+      } catch (_) {}
+    }
+    final deadline = DateTime.now().add(const Duration(milliseconds: 400));
+    while (DateTime.now().isBefore(deadline)) {
+      final ps = _player.processingState;
+      if (ps == ProcessingState.idle || ps == ProcessingState.completed) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        if (_player.processingState == ProcessingState.idle ||
+            _player.processingState == ProcessingState.completed) {
+          return;
+        }
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 40));
     }
   }
 
@@ -2036,6 +2109,17 @@ class PlayerController {
     return _resolveMigratedLibraryPathKey(k);
   }
 
+  /// Whether [trackPathKey] belongs to a browse/filter set that may still list
+  /// pre-rename keys after an on-disk rename.
+  bool pathKeyMatchesAllowedKeySet(String trackPathKey, Set<String> allowedKeys) {
+    if (trackPathKey.isEmpty || allowedKeys.isEmpty) return false;
+    if (allowedKeys.contains(trackPathKey)) return true;
+    for (final allowed in allowedKeys) {
+      if (_resolveMigratedLibraryPathKey(allowed) == trackPathKey) return true;
+    }
+    return false;
+  }
+
   /// Call as soon as the file is renamed on disk so concurrent loads resolve the new path.
   void registerLibraryPathRename(String oldPath, String newPath) {
     _registerLibraryPathMigration(oldPath, newPath);
@@ -2050,6 +2134,11 @@ class PlayerController {
     _libraryPathMigrations[oldKey] = kIsWeb
         ? newPath.trim()
         : _normalizeLocalFilePath(newPath);
+    final scope = _playbackPathKeysScope;
+    if (scope != null && scope.remove(oldKey)) {
+      scope.add(newKey);
+    }
+    onLibraryPathKeyMigrated?.call(oldPath, newPath);
   }
 
   String _normalizeLocalFilePath(String path) {
@@ -2974,8 +3063,15 @@ class PlayerController {
 
     if (!shouldReloadPlayer) {
       _sourceNeedsReload = true;
+      if (changed) {
+        _notifyCatalogListeners(CatalogNotifyMode.immediate);
+      }
       _notifyTrackPlaybackQueue();
       return;
+    }
+
+    if (changed) {
+      _notifyCatalogListeners(CatalogNotifyMode.immediate);
     }
 
     // Reload only the playing row — rebuilding a large concat can still open the
@@ -2995,7 +3091,10 @@ class PlayerController {
     required bool resumePlaying,
     required String context,
   }) {
+    final gen = ++_playingTrackReloadGeneration;
+    _sourceNeedsReload = true;
     _loadCurrentPathOverride = updated;
+    playback.notifyNow();
     unawaited(() async {
       try {
         await _reloadPlayingTrackOnly(
@@ -3003,8 +3102,10 @@ class PlayerController {
           resumePlaying: resumePlaying,
           context: context,
           stopBeforeLoad: true,
+          reloadGeneration: gen,
         ).timeout(const Duration(seconds: 25));
       } on TimeoutException {
+        if (gen != _playingTrackReloadGeneration) return;
         debugPrint(
           '$context: reload timed out; resyncing queue at current index',
         );
@@ -3014,6 +3115,7 @@ class PlayerController {
           context: '$context.timeout',
         );
       } catch (e, st) {
+        if (gen != _playingTrackReloadGeneration) return;
         if (!_isInterruptedAbort(e)) {
           debugPrint('$context: $e\n$st');
         }
@@ -3023,7 +3125,9 @@ class PlayerController {
           context: '$context.fallback',
         );
       } finally {
-        _loadCurrentPathOverride = null;
+        if (gen == _playingTrackReloadGeneration) {
+          _loadCurrentPathOverride = null;
+        }
         _notifyTrackPlaybackQueue();
       }
     }());
@@ -3038,18 +3142,40 @@ class PlayerController {
       _sourceNeedsReload = false;
       return;
     }
-    _sourceNeedsReload = false;
-    try {
-      await _loadCurrent(
-        initialPosition: initialPosition,
-        stopBeforeLoad: false,
-      );
-      if (resumePlaying) {
-        _playbackPausedByUser = false;
-        await _resumePlaybackAfterLoad(context: '$context.play');
+
+    final logical = _logicalPlaylistIndex();
+    _sourceNeedsReload = true;
+
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(Duration(milliseconds: 220 * attempt));
       }
+      try {
+        await _reloadPlayingTrackOnly(
+          initialPosition: initialPosition,
+          resumePlaying: resumePlaying,
+          context: '$context.retry$attempt',
+          stopBeforeLoad: attempt > 0,
+          allowShuffleRecovery: false,
+          allowRecovery: false,
+        );
+        return;
+      } catch (e, st) {
+        if (!_isInterruptedAbort(e)) {
+          debugPrint('$context.retry$attempt: $e\n$st');
+        }
+      }
+    }
+
+    try {
+      await _loadCurrentForPlaylistSeek(
+        logical,
+        playContext: '$context.fallback',
+        initialPosition: initialPosition,
+      );
+      _pendingExternalFileEditReload = false;
     } catch (e, st) {
-      debugPrint('$context: $e\n$st');
+      debugPrint('$context.fallback: $e\n$st');
     }
   }
 
@@ -3580,12 +3706,31 @@ class PlayerController {
     required bool resumePlaying,
     String context = 'reloadPlayingTrackOnly',
     bool allowShuffleRecovery = true,
+    bool allowRecovery = true,
     bool stopBeforeLoad = true,
+    int? reloadGeneration,
   }) async {
     if (_playlistPaths.isEmpty) return;
+    if (reloadGeneration != null &&
+        reloadGeneration != _playingTrackReloadGeneration) {
+      return;
+    }
+
+    final effectiveStopBeforeLoad =
+        stopBeforeLoad || _pendingExternalFileEditReload;
+    if (_pendingExternalFileEditReload) {
+      try {
+        await _ensureNativeDecoderFullyStopped().timeout(
+          const Duration(milliseconds: 1200),
+        );
+      } on TimeoutException {
+        debugPrint('$context: native decoder settle timed out before reload');
+      } catch (_) {}
+    }
 
     _loadCurrentDepth++;
     _isLoadingSource = true;
+    playback.notifyNow();
     try {
       final logical = _logicalPlaylistIndex();
       final source = await _audioSourceForPlaylistIndex(
@@ -3594,11 +3739,13 @@ class PlayerController {
       );
       if (source == null) {
         debugPrint('$context: no AudioSource for playlist index $logical');
-        await _recoverPlaybackAfterFailedSingleTrackReload(
-          initialPosition: initialPosition,
-          resumePlaying: resumePlaying,
-          context: '$context.noSource',
-        );
+        if (allowRecovery) {
+          await _recoverPlaybackAfterFailedSingleTrackReload(
+            initialPosition: initialPosition,
+            resumePlaying: resumePlaying,
+            context: '$context.noSource',
+          );
+        }
         return;
       }
 
@@ -3609,9 +3756,10 @@ class PlayerController {
         source,
         initialPosition: initialPosition,
         context: context,
-        stopBeforeLoad: stopBeforeLoad,
+        stopBeforeLoad: effectiveStopBeforeLoad,
       );
       await _applyPreferredVolume();
+      await _syncPlayerPositionAfterSourceLoad(initialPosition);
       if (_useSingleTrackAudioSourceForPlatform()) {
         final fp = _trackAt(logical).filePath?.trim() ?? '';
         final resolved = fp.isEmpty ? '' : _resolveMigratedFilePath(fp);
@@ -3623,14 +3771,19 @@ class PlayerController {
       _postLoadConcatGuardUntil = DateTime.now().add(
         const Duration(milliseconds: 650),
       );
-      _sourceNeedsReload = false;
+      _pendingExternalFileEditReload = false;
       final order = _effectiveQueueOrder();
+      // Single-track reload leaves no live concat; next skip must rebuild the queue.
+      _sourceNeedsReload =
+          !_useSingleTrackAudioSourceForPlatform() && order.length > 1;
       if (!_useSingleTrackAudioSourceForPlatform() &&
           order.length > _activeSourceOrder.length) {
         unawaited(_expandConcatToFullOrder(order, logical));
       }
       _notifyTrack();
-      if (resumePlaying) {
+      if (resumePlaying &&
+          (reloadGeneration == null ||
+              reloadGeneration == _playingTrackReloadGeneration)) {
         _playbackPausedByUser = false;
         await _guardedTransport(() async {
           await _resumePlaybackAfterLoad(context: '$context.play');
@@ -3648,6 +3801,7 @@ class PlayerController {
         );
         return;
       }
+      if (!allowRecovery) rethrow;
       await _recoverPlaybackAfterFailedSingleTrackReload(
         initialPosition: initialPosition,
         resumePlaying: resumePlaying,
@@ -3658,6 +3812,7 @@ class PlayerController {
       if (_loadCurrentDepth <= 0) {
         _loadCurrentDepth = 0;
         _isLoadingSource = false;
+        playback.notifyNow();
         _suppressTrackCompletedAdvance = false;
         _ignoreSpuriousPlaybackCompletedUntil = null;
         _scheduleNotificationArtRefresh();
@@ -3675,10 +3830,13 @@ class PlayerController {
   Future<void> reloadCurrentSourceAfterTagWrite({
     required Duration resumePosition,
     required bool resumePlaying,
+    int? reloadGeneration,
   }) => _reloadPlayingTrackOnly(
     initialPosition: resumePosition,
     resumePlaying: resumePlaying,
     context: 'reloadCurrentSourceAfterTagWrite',
+    stopBeforeLoad: true,
+    reloadGeneration: reloadGeneration,
   );
 
   /// Tag sheets must not [await] reload — [setAudioSource] can wait on the audio
@@ -3687,13 +3845,18 @@ class PlayerController {
     required Duration resumePosition,
     required bool resumePlaying,
   }) {
+    final gen = ++_playingTrackReloadGeneration;
+    _sourceNeedsReload = true;
+    playback.notifyNow();
     unawaited(() async {
       try {
         await reloadCurrentSourceAfterTagWrite(
           resumePosition: resumePosition,
           resumePlaying: resumePlaying,
+          reloadGeneration: gen,
         ).timeout(const Duration(seconds: 25));
       } on TimeoutException {
+        if (gen != _playingTrackReloadGeneration) return;
         debugPrint(
           'reloadCurrentSourceAfterTagWriteUnawaited: timed out; resyncing queue',
         );
@@ -3703,6 +3866,7 @@ class PlayerController {
           context: 'reloadCurrentSourceAfterTagWriteUnawaited.timeout',
         );
       } catch (e, st) {
+        if (gen != _playingTrackReloadGeneration) return;
         debugPrint('reloadCurrentSourceAfterTagWriteUnawaited: $e\n$st');
       }
     }());
@@ -3735,11 +3899,30 @@ class PlayerController {
       const Duration(milliseconds: 900),
     );
     _concatExpandGeneration++;
+    _playingTrackReloadGeneration++;
     _concatSource = null;
+    _activeSourceOrder = <int>[];
     _loadedWindowsSingleTrackPathKey = null;
+    _sourceNeedsReload = true;
+    _pendingExternalFileEditReload = true;
     try {
-      await _player.stop();
+      await _player
+          .stop()
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
     } catch (_) {}
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      unawaited(() async {
+        try {
+          await JustAudioBackground.ensureNativePaused().timeout(
+            const Duration(seconds: 2),
+            onTimeout: () {},
+          );
+        } catch (_) {}
+      }());
+    }
+    playback.notifyNow();
   }
 
   /// Coalesce stream-driven UI updates (e.g. notification play/pause) to one frame.
@@ -3823,9 +4006,25 @@ class PlayerController {
   Future<void> _loadCurrentForPlaylistSeek(
     int playlistIndex, {
     required String playContext,
+    Duration initialPosition = Duration.zero,
   }) async {
     await _guardedTransport(() async {
       _syncPlaylistPathsFromMigrations();
+      if (!_shuffle) {
+        _index = playlistIndex.clamp(0, _playlistPaths.length - 1);
+      } else {
+        final spi = _shuffleOrder.indexOf(playlistIndex);
+        if (spi >= 0) _shufflePos = spi;
+      }
+      // Post-rename single-track reload leaves the native decoder on the old row;
+      // stop before loading the seek target so UI and audio stay aligned.
+      _concatExpandGeneration++;
+      _concatSource = null;
+      _activeSourceOrder = <int>[];
+      _loadedWindowsSingleTrackPathKey = null;
+      try {
+        await _player.stop();
+      } catch (_) {}
       final order = _effectiveQueueOrder();
       final useFastStart =
           !_useSingleTrackAudioSourceForPlatform() &&
@@ -3836,11 +4035,11 @@ class PlayerController {
         await _loadCurrentFastStart(
           logical: playlistIndex,
           sourceOrder: order,
-          initialPosition: Duration.zero,
+          initialPosition: initialPosition,
         );
       } else {
         await _loadCurrent(
-          initialPosition: Duration.zero,
+          initialPosition: initialPosition,
           stopBeforeLoad: true,
         );
       }
@@ -3854,11 +4053,10 @@ class PlayerController {
     int playlistIndex, {
     required String playContext,
   }) async {
-    Future<void> reloadAndPlay() => _guardedTransport(() async {
-      await _loadCurrent();
-      _sourceNeedsReload = false;
-      await _resumePlaybackAfterLoad(context: playContext);
-    });
+    Future<void> reloadAndPlay() => _loadCurrentForPlaylistSeek(
+      playlistIndex,
+      playContext: playContext,
+    );
 
     final currentLogical = _logicalPlaylistIndex();
     final nativeConcat = _player.currentIndex;
@@ -3869,6 +4067,7 @@ class PlayerController {
         : null;
     if (_sourceNeedsReload &&
         _player.playing &&
+        !_manualQueueAdvance &&
         currentLogical == playlistIndex &&
         nativeLogical == playlistIndex &&
         !_useSingleTrackAudioSourceForPlatform()) {
@@ -3881,9 +4080,14 @@ class PlayerController {
       return;
     }
 
-    if (_sourceNeedsReload &&
-        _manualQueueAdvance &&
-        playlistIndex != currentLogical) {
+    // After rename/tag reload [_activeSourceOrder] is often a single row while
+    // [_index] already points at the skip target — must load [playlistIndex] explicitly.
+    if ((_sourceNeedsReload || _isLoadingSource) && _manualQueueAdvance) {
+      debugPrint(
+        '[seekFast] explicit load after queue advance '
+        'target=$playlistIndex nativeLogical=$nativeLogical '
+        'dartLogical=$currentLogical',
+      );
       await _loadCurrentForPlaylistSeek(
         playlistIndex,
         playContext: playContext,
@@ -3892,6 +4096,19 @@ class PlayerController {
     }
 
     if (_sourceNeedsReload || _useSingleTrackAudioSourceForPlatform()) {
+      await reloadAndPlay();
+      return;
+    }
+
+    // Decoder out of sync with Dart queue (single-track reload, stopped concat, …).
+    if (_concatSource == null ||
+        (_activeSourceOrder.length == 1 &&
+            nativeLogical != null &&
+            nativeLogical != playlistIndex)) {
+      debugPrint(
+        '[seekFast] decoder/queue mismatch — reloading '
+        'target=$playlistIndex nativeLogical=$nativeLogical',
+      );
       await reloadAndPlay();
       return;
     }

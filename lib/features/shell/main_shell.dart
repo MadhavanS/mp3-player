@@ -192,6 +192,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       player.track.addListener(_schedulePlaybackSessionPersist);
       player.playback.addListener(_schedulePlaybackSessionPersist);
     }
+    player.onLibraryPathKeyMigrated = _onLibraryPathKeyMigrated;
     _wireYoutubeShellHooks(player);
   }
 
@@ -209,6 +210,20 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       player,
       stripYoutubeTracksFromCatalog(player.metadataLibrary),
     );
+  }
+
+  void _onLibraryPathKeyMigrated(String oldPath, String newPath) {
+    final oldKey = canonicalMusicLibraryPathKey(oldPath);
+    final newKey = canonicalMusicLibraryPathKey(newPath);
+    if (oldKey.isEmpty || newKey.isEmpty || oldKey == newKey) return;
+
+    final keys = _songsBrowsePathKeysNotifier.value;
+    if (keys != null && keys.remove(oldKey)) {
+      final updated = Set<String>.from(keys)..add(newKey);
+      _songsBrowsePathKeysNotifier.value = updated;
+      unawaited(PlaybackSessionStore.saveBrowsePathKeys(updated));
+      _playerRef?.setPlaybackPathKeyScope(updated, reloadQueue: false);
+    }
   }
 
   void _wireYoutubeShellHooks(PlayerController player) {

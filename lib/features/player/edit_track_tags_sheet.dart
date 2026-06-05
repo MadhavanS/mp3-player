@@ -744,7 +744,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           resumePosition: isCurrent ? resumePos : null,
           resumePlaying: isCurrent ? wasPlaying : null,
         );
-        await SongMetadataCache.deletePaths([path]);
+        unawaited(() async {
+          await SongMetadataCache.deletePaths([path]);
+          await SongMetadataCache.saveTracks([refreshed]);
+        }());
       } else {
         player.updateTrackByPath(
           path,
@@ -758,6 +761,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
             resumePlaying: wasPlaying,
           );
         }
+        unawaited(SongMetadataCache.saveTracks([refreshed]));
       }
 
       saveSucceeded = true;
@@ -770,7 +774,6 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
-      unawaited(SongMetadataCache.saveTracks([refreshed]));
     } on StateError catch (e) {
       if (mounted) {
         final msg = e.toString();
@@ -907,7 +910,10 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           resumePosition: isCurrent ? resumePos : null,
           resumePlaying: isCurrent ? wasPlaying : null,
         );
-        await SongMetadataCache.deletePaths([path]);
+        unawaited(() async {
+          await SongMetadataCache.deletePaths([path]);
+          await SongMetadataCache.saveTracks([refreshed]);
+        }());
       } else {
         player.updateTrackByPath(
           path,
@@ -921,6 +927,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
             resumePlaying: wasPlaying,
           );
         }
+        unawaited(SongMetadataCache.saveTracks([refreshed]));
       }
       saveSucceeded = true;
       if (mounted) {
@@ -932,7 +939,6 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           );
         });
       }
-      unawaited(SongMetadataCache.saveTracks([refreshed]));
     } on UnsupportedError catch (e) {
       if (mounted) {
         final detail = (e.message ?? '').trim();

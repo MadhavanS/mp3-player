@@ -262,7 +262,10 @@ Future<void> _applySiteRenameStandalone(
       );
       // Await DB writes so a concurrent background sync doesn't read stale
       // data and overwrite the in-memory update with the old metadata.
-      await SongMetadataCache.deletePaths([originalPath]);
+      unawaited(() async {
+        await SongMetadataCache.deletePaths([originalPath]);
+        await SongMetadataCache.saveTracks([refreshed]);
+      }());
     } else {
       player.updateTrackByPath(
         originalPath,
@@ -276,7 +279,9 @@ Future<void> _applySiteRenameStandalone(
         );
       }
     }
-    unawaited(SongMetadataCache.saveTracks([refreshed]));
+    if (!suggestion.filenameChanged) {
+      unawaited(SongMetadataCache.saveTracks([refreshed]));
+    }
 
     saveSucceeded = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
