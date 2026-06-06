@@ -1,5 +1,6 @@
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import 'youtube_api_clients.dart';
 import 'youtube_stream_format.dart';
 
 /// Resolves the best audio-only stream for a YouTube video id.
@@ -18,10 +19,7 @@ class YoutubeManifestResolver {
     try {
       final manifest = await _yt.videos.streamsClient.getManifest(
         id,
-        ytClients: [
-          YoutubeApiClient.androidVr,
-          YoutubeApiClient.ios,
-        ],
+        ytClients: kYoutubeManifestClientPriority,
       );
       if (manifest.audioOnly.isEmpty) return null;
       return pickPreferredAudioStream(manifest.audioOnly);

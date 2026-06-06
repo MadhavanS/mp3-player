@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import '../download/youtube_api_clients.dart';
 import '../download/youtube_manifest_resolver.dart';
 import '../download/youtube_stream_format.dart';
 
@@ -13,6 +14,7 @@ class YoutubeStreamInfo {
     required this.bitrateKbps,
     required this.contentLength,
     required this.resolvedAtMs,
+    required this.requestHeaders,
   });
 
   final String videoId;
@@ -21,6 +23,7 @@ class YoutubeStreamInfo {
   final int bitrateKbps;
   final int contentLength;
   final int resolvedAtMs;
+  final Map<String, String> requestHeaders;
 }
 
 /// Manifest + URL resolution with client rotation (streaming playback).
@@ -31,15 +34,12 @@ class YoutubeStreamResolver {
 
   static final instance = YoutubeStreamResolver._();
 
-  static const _manifestTtlMs = 20 * 60 * 1000;
+  static const _manifestTtlMs = 5 * 60 * 1000;
 
   final _cache = <String, YoutubeStreamInfo>{};
   final _resolvedAt = <String, int>{};
 
-  static final _clientPriority = [
-    YoutubeApiClient.androidVr,
-    YoutubeApiClient.ios,
-  ];
+  static final _clientPriority = kYoutubeManifestClientPriority;
 
   Future<YoutubeStreamInfo?> resolve(
     String videoId, {
@@ -62,7 +62,12 @@ class YoutubeStreamResolver {
           return info;
         }
       } catch (e, st) {
-        debugPrint('[YoutubeStreamResolver] $client failed: $e\n$st');
+        debugPrint(
+          '[YoutubeStreamResolver] $client failed for $id: $e',
+        );
+        if (e is! YoutubeExplodeException) {
+          debugPrint('$st');
+        }
       }
     }
     return null;
@@ -88,6 +93,7 @@ class YoutubeStreamResolver {
       bitrateKbps: stream.bitrate.kiloBitsPerSecond.round(),
       contentLength: stream.size.totalBytes,
       resolvedAtMs: now,
+      requestHeaders: youtubeStreamRequestHeaders(client),
     );
   }
 
