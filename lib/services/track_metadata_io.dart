@@ -62,6 +62,32 @@ void _logMetadataSkipOnce(String path, Object error) {
   }
 }
 
+/// [MP3Parser.parse] closes [reader] itself — callers must not close again.
+Mp3Metadata? _parseMp3FileSync(File file, {required bool fetchImage}) {
+  final raf = file.openSync();
+  if (!MP3Parser.canUserParser(raf)) {
+    try {
+      raf.closeSync();
+    } catch (_) {}
+    return null;
+  }
+  return MP3Parser(fetchImage: fetchImage).parse(raf);
+}
+
+Future<Mp3Metadata?> _parseMp3FileAsync(
+  File file, {
+  required bool fetchImage,
+}) async {
+  final raf = await file.open();
+  if (!MP3Parser.canUserParser(raf)) {
+    try {
+      await raf.close();
+    } catch (_) {}
+    return null;
+  }
+  return MP3Parser(fetchImage: fetchImage).parse(raf);
+}
+
 TrackItem _trackFromMp3Metadata(TrackItem base, Mp3Metadata mp3) {
   Uint8List? art;
   if (mp3.pictures.isNotEmpty) {
@@ -160,25 +186,18 @@ Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
     }
 
     if (path.toLowerCase().endsWith('.mp3')) {
-      final raf = file.openSync();
-      try {
-        if (MP3Parser.canUserParser(raf)) {
-          final mp3 = MP3Parser(fetchImage: true).parse(raf);
-          stopwatch?.stop();
-          if (kMetadataReadTimingLogs) {
-            debugPrint(
-              'audio_metadata_reader read ${stopwatch!.elapsedMilliseconds}ms: $path',
-            );
-          }
-          return _trackFromMp3Metadata(base, mp3);
+      final mp3 = _parseMp3FileSync(file, fetchImage: true);
+      if (mp3 != null) {
+        stopwatch?.stop();
+        if (kMetadataReadTimingLogs) {
+          debugPrint(
+            'audio_metadata_reader read ${stopwatch!.elapsedMilliseconds}ms: $path',
+          );
         }
-        _logMetadataSkipOnce(path, 'NoMetadataParserException');
-        return base;
-      } finally {
-        try {
-          raf.closeSync();
-        } catch (_) {}
+        return _trackFromMp3Metadata(base, mp3);
       }
+      _logMetadataSkipOnce(path, 'NoMetadataParserException');
+      return base;
     }
 
     final meta = readAllMetadata(file, getImage: true);
@@ -260,6 +279,18 @@ Future<TrackItem> _readAudioMetadataWithDartReader(TrackItem base) async {
 Future<TrackItem> _finalizeMetadataRead(TrackItem result) async {
   final path = result.filePath?.trim();
   var out = result;
+  if (path != null && path.isNotEmpty) {
+    final composer = out.composer?.trim();
+    if (composer == null || composer.isEmpty) {
+      final fromFile = await readEmbeddedComposer(path);
+      if (fromFile != null && fromFile.isNotEmpty) {
+        out = out.withEmbeddedMetadata(
+          composer: fromFile,
+          replaceComposerFromFile: true,
+        );
+      }
+    }
+  }
   if (path != null && path.isNotEmpty && !out.replayGainAdjustment.hasTags) {
     final rg = await readReplayGainTags(path);
     if (rg.hasTags) {
@@ -276,6 +307,38 @@ Future<TrackItem> _finalizeMetadataRead(TrackItem result) async {
     await evictNotificationArtCacheForPath(path);
   }
   return out;
+}
+
+/// Reads embedded TCOM / COMPOSER without loading cover art.
+///
+/// [metadata_god] does not expose composer; MP3 library reads use it first, so
+/// callers merge this when [TrackItem.composer] is still empty.
+Future<String?> readEmbeddedComposer(String filePath) async {
+  final path = filePath.trim();
+  if (path.isEmpty) return null;
+
+  final file = File(path);
+  if (!await file.exists()) return null;
+
+  try {
+    if (await fileHasApeFooter(file)) {
+      final meta = readAllMetadata(file, getImage: false);
+      if (meta is ApeMetadata) {
+        return meta.composer?.trim();
+      }
+    }
+
+    if (path.toLowerCase().endsWith('.mp3')) {
+      final mp3 = await _parseMp3FileAsync(file, fetchImage: false);
+      return mp3?.composer?.trim();
+    }
+
+    final meta = readAllMetadata(file, getImage: false);
+    return _composerFromParserTag(meta);
+  } catch (e) {
+    _logMetadataSkipOnce(path, e);
+    return null;
+  }
 }
 
 /// Cover bytes only (warmup). Still reads the file; skips tag merge overhead.
@@ -307,19 +370,10 @@ Future<Uint8List?> _readCoverBytesWithDartReader(String path) async {
     }
 
     if (path.toLowerCase().endsWith('.mp3')) {
-      final raf = file.openSync();
-      try {
-        if (MP3Parser.canUserParser(raf)) {
-          final mp3 = MP3Parser(fetchImage: true).parse(raf);
-          if (mp3.pictures.isNotEmpty) {
-            final raw = mp3.pictures.first.bytes;
-            if (raw.isNotEmpty) return raw;
-          }
-        }
-      } finally {
-        try {
-          raf.closeSync();
-        } catch (_) {}
+      final mp3 = _parseMp3FileSync(file, fetchImage: true);
+      if (mp3 != null && mp3.pictures.isNotEmpty) {
+        final raw = mp3.pictures.first.bytes;
+        if (raw.isNotEmpty) return raw;
       }
     }
 

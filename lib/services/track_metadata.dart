@@ -10,6 +10,9 @@ Future<TrackItem> readAudioMetadata(TrackItem base) => impl.readAudioMetadata(ba
 Future<Uint8List?> readCoverBytesOnly(String filePath) =>
     impl.readCoverBytesOnly(filePath);
 
+Future<String?> readEmbeddedComposer(String filePath) =>
+    impl.readEmbeddedComposer(filePath);
+
 int _adaptiveBatchSize({required bool isPlaying, required int libraryLength}) {
   if (isPlaying) return 1;
   if (libraryLength > 2000) return 6;

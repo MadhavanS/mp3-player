@@ -42,7 +42,7 @@ Future<Isar> _openIsar() async {
   final db = await Isar.openAsync(
     schemas: [SongMetadataCacheRowSchema],
     directory: dbPath,
-    name: 'mp3_player_metadata_v4',
+    name: 'mp3_player_metadata_v5',
   );
   _isar = db;
   // Disk art backfill can scan thousands of files — never block library open/UI.
@@ -133,21 +133,7 @@ Future<Map<String, TrackItem>> loadTracksByPaths(List<String> paths) async {
         .findAll();
     final out = <String, TrackItem>{};
     for (final row in rows) {
-      out[row.path] = TrackItem(
-        title: row.title.trim().isNotEmpty
-            ? row.title
-            : p.basenameWithoutExtension(row.path),
-        artist: row.artist.trim().isNotEmpty ? row.artist : 'Unknown artist',
-        metaLine: row.album.trim().isNotEmpty ? row.album : 'mp3',
-        genres: row.genres,
-        artColors: row.artColorValues
-            .map((v) => Color(v))
-            .toList(growable: false),
-        filePath: row.path,
-        albumArtBytes: null,
-        replayGainTrackDb: row.hasReplayGainTrack ? row.replayGainTrackDb : null,
-        replayGainAlbumDb: row.hasReplayGainAlbum ? row.replayGainAlbumDb : null,
-      );
+      out[row.path] = _trackItemFromCacheRow(row);
     }
     return out;
   } catch (e, st) {
@@ -185,6 +171,7 @@ Future<void> saveTracks(Iterable<TrackItem> tracks) async {
         ..artist = t.artist
         ..album = t.metaLine
         ..genres = t.genres
+        ..composer = _composerForSaveTracks(t, prev)
         ..artColorValues = t.artColors
             .map((c) => c.toARGB32())
             .toList(growable: false)
@@ -221,23 +208,8 @@ Future<Map<String, CachedTrackSnapshot>> loadSnapshotsForRoots(
     final out = <String, CachedTrackSnapshot>{};
     for (final row in rows) {
       if (!_isPathUnderRoots(row.path, roots)) continue;
-      final track = TrackItem(
-        title: row.title.trim().isNotEmpty
-            ? row.title
-            : p.basenameWithoutExtension(row.path),
-        artist: row.artist.trim().isNotEmpty ? row.artist : 'Unknown artist',
-        metaLine: row.album.trim().isNotEmpty ? row.album : 'mp3',
-        genres: row.genres,
-        artColors: row.artColorValues
-            .map((v) => Color(v))
-            .toList(growable: false),
-        filePath: row.path,
-        albumArtBytes: null,
-        replayGainTrackDb: row.hasReplayGainTrack ? row.replayGainTrackDb : null,
-        replayGainAlbumDb: row.hasReplayGainAlbum ? row.replayGainAlbumDb : null,
-      );
       out[row.path] = CachedTrackSnapshot(
-        track: track,
+        track: _trackItemFromCacheRow(row),
         fileModifiedMs: row.updatedAtMs,
         fileSizeBytes: row.fileSizeBytes,
       );
@@ -286,6 +258,7 @@ Future<void> saveTrackSnapshots(Iterable<CachedTrackSnapshot> tracks) async {
         ..artist = s.track.artist
         ..album = s.track.metaLine
         ..genres = s.track.genres
+        ..composer = (s.track.composer ?? '').trim()
         ..artColorValues = s.track.artColors
             .map((c) => c.toARGB32())
             .toList(growable: false)
@@ -447,6 +420,30 @@ int _stablePathId(String value) {
     hash = (hash * 0x01000193) & 0x7fffffff;
   }
   return hash == 0 ? 1 : hash;
+}
+
+String _composerForSaveTracks(TrackItem t, SongMetadataCacheRow? prev) {
+  final fromTrack = (t.composer ?? '').trim();
+  if (fromTrack.isNotEmpty) return fromTrack;
+  return prev?.composer.trim() ?? '';
+}
+
+TrackItem _trackItemFromCacheRow(SongMetadataCacheRow row) {
+  final composer = row.composer.trim();
+  return TrackItem(
+    title: row.title.trim().isNotEmpty
+        ? row.title
+        : p.basenameWithoutExtension(row.path),
+    artist: row.artist.trim().isNotEmpty ? row.artist : 'Unknown artist',
+    metaLine: row.album.trim().isNotEmpty ? row.album : 'mp3',
+    genres: row.genres,
+    artColors: row.artColorValues.map((v) => Color(v)).toList(growable: false),
+    filePath: row.path,
+    albumArtBytes: null,
+    composer: composer.isEmpty ? null : composer,
+    replayGainTrackDb: row.hasReplayGainTrack ? row.replayGainTrackDb : null,
+    replayGainAlbumDb: row.hasReplayGainAlbum ? row.replayGainAlbumDb : null,
+  );
 }
 
 bool _isPathUnderRoots(String path, List<String> roots) {

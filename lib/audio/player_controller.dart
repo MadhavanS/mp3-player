@@ -21,12 +21,16 @@ import '../services/album_art_cache.dart';
 import '../services/album_art_dimensions.dart';
 import '../services/library_path_migration.dart';
 import '../services/music_library_path_key.dart';
+import '../services/playback_platform_gate.dart';
 import '../services/song_metadata_cache.dart';
 import '../services/track_metadata.dart';
 import '../services/volume_settings_store.dart';
 import '../features/youtube/catalog/youtube_library_catalog.dart';
 import '../features/youtube/streaming/youtube_playback_resolver.dart';
+import '../features/youtube/streaming/youtube_stream_resolver.dart';
+import '../features/youtube/youtube_playback_persistence.dart';
 import '../features/youtube/youtube_stream_paths.dart';
+import '../features/youtube/youtube_watch_url.dart';
 import 'art_availability_notifier.dart';
 import 'equalizer_service.dart';
 import 'replay_gain_service.dart';
@@ -103,6 +107,8 @@ class PlayerController {
       await player.dispose();
     } catch (e, st) {
       debugPrint('PlayerController.shutdownNativePlayer: $e\n$st');
+    } finally {
+      EqualizerService.resetSharedEffectsForNativePlayerRecreate();
     }
   }
 
@@ -215,8 +221,8 @@ class PlayerController {
   Future<void> _resumePlaybackAfterLoad({
     String context = 'resumeAfterLoad',
   }) async {
-    // Explicit play-after-load (tap track, setPlaylistAndPlay, skip, …). Clear stale
-    // pause flag from a late stop() event that arrived after [_loadCurrent] finished.
+    if (_handlerTransportPaused) return;
+    // Clear stale pause from [stop] during source load (not notification pause).
     _playbackPausedByUser = false;
     final generation = _playControlGeneration;
     await _waitForPlayerPreparedAfterSourceChange();
@@ -225,6 +231,16 @@ class PlayerController {
     await Future<void>.delayed(Duration.zero);
     if (_playbackPausedByUser || _playControlGeneration != generation) return;
     await _ensurePlayingWithRetries(context: context, generation: generation);
+  }
+
+  /// Resume after delete / missing-file advance (clears notification-pause latch).
+  Future<void> _resumePlaybackAfterIntentionalAdvance({
+    String context = 'resumeAfterAdvance',
+  }) async {
+    _handlerTransportPaused = false;
+    _playbackPausedByUser = false;
+    _pendingExternalFileEditReload = false;
+    await _resumePlaybackAfterLoad(context: context);
   }
 
   /// Some platforms ignore [initialPosition] on [setAudioSource]; verify and seek.
@@ -309,6 +325,103 @@ class PlayerController {
     );
   }
 
+  void _onHandlerTransportPause() {
+    _handlerTransportPaused = true;
+    _playbackPausedByUser = true;
+    final pos = _player.position;
+    if (pos > _playbackResumePosition) {
+      _playbackResumePosition = pos;
+    }
+    _invalidatePlayResumeRetries();
+    _schedulePlayerUiNotify();
+  }
+
+  void _onHandlerTransportPlay() {
+    _handlerTransportPaused = false;
+    _playbackPausedByUser = false;
+    _schedulePlayerUiNotify();
+  }
+
+  static void _dispatchHandlerTransportPause() {
+    _activeCoordinator?._onHandlerTransportPause();
+  }
+
+  static void _dispatchHandlerTransportPlay() {
+    _activeCoordinator?._onHandlerTransportPlay();
+  }
+
+  void _bindHandlerTransportCallbacks() {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    JustAudioBackground.onHandlerTransportPause = _dispatchHandlerTransportPause;
+    JustAudioBackground.onHandlerTransportPlay = _dispatchHandlerTransportPlay;
+  }
+
+  void _applyPlayerStateStream(PlayerState state) {
+    _onProcessingState(state.processingState);
+    final playing = state.playing;
+    final proc = state.processingState;
+
+    // Invalidate retry loops on user/external pause. Ignore [stop] during loads
+    // ([_ignoreSpuriousTransportPause]) and unguarded source swaps ([_isLoadingSource]).
+    final spuriousLoadStop =
+        _ignoreSpuriousTransportPause || _isLoadingSource;
+    if (!playing &&
+        _lastDispatchedPlaying &&
+        !_manualQueueAdvance &&
+        !spuriousLoadStop &&
+        proc != ProcessingState.completed) {
+      _invalidatePlayResumeRetries();
+      _playbackPausedByUser = true;
+    }
+    if (playing && !_lastDispatchedPlaying) {
+      _playbackPausedByUser = false;
+      unawaited(_activateAudioSessionForPlayback());
+    }
+
+    if (!_playerUiDispatchInitialized ||
+        playing != _lastDispatchedPlaying ||
+        proc != _lastDispatchedProcessing) {
+      _playerUiDispatchInitialized = true;
+      _lastDispatchedPlaying = playing;
+      _lastDispatchedProcessing = proc;
+      _schedulePlayerUiNotify();
+    }
+  }
+
+  void _attachPositionCheckpoint() {
+    _positionCheckpointSub?.cancel();
+    _positionCheckpointSub = _player.positionStream.listen((pos) {
+      if (!_player.playing || pos <= Duration.zero) return;
+      if (pos > _playbackResumePosition) {
+        _playbackResumePosition = pos;
+      }
+    });
+  }
+
+  Duration _resumePositionForSourceReload() {
+    final live = _player.position;
+    if (live > Duration.zero) return live;
+    return _playbackResumePosition;
+  }
+
+  void _wireNativePlayerIfNeeded() {
+    if (_nativePlayerWired) return;
+    _nativePlayerWired = true;
+    positionNotifier.attach();
+    _bindHandlerTransportCallbacks();
+    _attachPositionCheckpoint();
+    _playerStateSub?.cancel();
+    _playerStateSub = _player.playerStateStream.listen(_applyPlayerStateStream);
+    _concatIndexSub?.cancel();
+    _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
+    unawaited(_loadPersistedVolume());
+    unawaited(_initAudioEffects());
+  }
+
   PlayerController() {
     final previous = _activeCoordinator;
     _activeCoordinator = this;
@@ -318,95 +431,21 @@ class PlayerController {
       );
       previous.dispose();
     }
-    positionNotifier.attach();
-    unawaited(_loadPersistedVolume());
     _audioSessionInit = _initAudioSessionInterruptions();
-    unawaited(_initAudioEffects());
-    // Single subscription: listening to [processingStateStream] and
-    // [playerStateStream] both triggered platform init; concurrent inits caused
-    // "Platform player … already exists" on some devices (just_audio / Android).
-    _playerStateSub = _player.playerStateStream.listen((state) {
-      _onProcessingState(state.processingState);
-      final playing = state.playing;
-      final proc = state.processingState;
-
-      // When the player becomes paused (e.g. via notification button or auto-pause),
-      // invalidate any in-flight retry loops so they don't overwrite the pause.
-      // Ignore pauses caused by [_loadCurrent]'s stop() or manual skip seeks — those
-      // emit playing=false after load and used to set [_playbackPausedByUser], so
-      // [_resumePlaybackAfterLoad] never called [play] (songs appeared "stuck").
-      // Natural track end reports playing=false + completed; must not look like a
-      // user pause or repeat-one / skipNext will not call [play].
-      if (!playing &&
-          _lastDispatchedPlaying &&
-          !_isLoadingSource &&
-          !_manualQueueAdvance &&
-          !_ignoreSpuriousTransportPause &&
-          proc != ProcessingState.completed) {
-        _invalidatePlayResumeRetries();
-        _playbackPausedByUser = true;
-        if (!kIsWeb &&
-            (defaultTargetPlatform == TargetPlatform.android ||
-                defaultTargetPlatform == TargetPlatform.iOS)) {
-          unawaited(JustAudioBackground.ensureNativePaused());
-        }
-      }
-      if (playing && !_lastDispatchedPlaying) {
-        _playbackPausedByUser = false;
-        unawaited(_activateAudioSessionForPlayback());
-      }
-
-      if (!_playerUiDispatchInitialized ||
-          playing != _lastDispatchedPlaying ||
-          proc != _lastDispatchedProcessing) {
-        _playerUiDispatchInitialized = true;
-        _lastDispatchedPlaying = playing;
-        _lastDispatchedProcessing = proc;
-        _schedulePlayerUiNotify();
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!identical(_activeCoordinator, this)) return;
+      _wireNativePlayerIfNeeded();
     });
-    _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
   }
 
   Future<void> _rebindNativePlayerStreams() async {
     await shutdownNativePlayer();
-    _playerStateSub.cancel();
+    _playerStateSub?.cancel();
     _concatIndexSub?.cancel();
     _concatIndexSub = null;
     positionNotifier.detach();
-    _playerStateSub = _player.playerStateStream.listen((state) {
-      _onProcessingState(state.processingState);
-      final playing = state.playing;
-      final proc = state.processingState;
-      if (!playing &&
-          _lastDispatchedPlaying &&
-          !_isLoadingSource &&
-          !_manualQueueAdvance &&
-          !_ignoreSpuriousTransportPause &&
-          proc != ProcessingState.completed) {
-        _invalidatePlayResumeRetries();
-        _playbackPausedByUser = true;
-        if (!kIsWeb &&
-            (defaultTargetPlatform == TargetPlatform.android ||
-                defaultTargetPlatform == TargetPlatform.iOS)) {
-          unawaited(JustAudioBackground.ensureNativePaused());
-        }
-      }
-      if (playing && !_lastDispatchedPlaying) {
-        _playbackPausedByUser = false;
-        unawaited(_activateAudioSessionForPlayback());
-      }
-      if (!_playerUiDispatchInitialized ||
-          playing != _lastDispatchedPlaying ||
-          proc != _lastDispatchedProcessing) {
-        _playerUiDispatchInitialized = true;
-        _lastDispatchedPlaying = playing;
-        _lastDispatchedProcessing = proc;
-        _schedulePlayerUiNotify();
-      }
-    });
-    _concatIndexSub = _player.currentIndexStream.listen(_onConcatIndexChanged);
-    positionNotifier.attach();
+    _nativePlayerWired = false;
+    _wireNativePlayerIfNeeded();
   }
 
   Future<void> _initAudioEffects() async {
@@ -446,10 +485,27 @@ class PlayerController {
   /// [just_audio] can subscribe to [AudioSession] interruptions internally, but
   /// we disable that and handle focus here so phone calls / mic use reliably pause
   /// and transient focus loss can resume after the call.
-  AudioPlayer get _player => _sharedNativePlayer ??= AudioPlayer(
-    handleInterruptions: false,
-    audioPipeline: EqualizerService.sharedPipeline,
-  );
+  bool get nativePlayerReady => _sharedNativePlayer != null;
+
+  AudioPlayer get _player {
+    final existing = _sharedNativePlayer;
+    if (existing != null) return existing;
+    try {
+      return _sharedNativePlayer = AudioPlayer(
+        handleInterruptions: false,
+        audioPipeline: EqualizerService.sharedPipeline,
+      );
+    } catch (e, st) {
+      debugPrint(
+        '[PlayerController._player] create failed, resetting EQ effects: $e\n$st',
+      );
+      EqualizerService.resetSharedEffectsForNativePlayerRecreate();
+      return _sharedNativePlayer = AudioPlayer(
+        handleInterruptions: false,
+        audioPipeline: EqualizerService.sharedPipeline,
+      );
+    }
+  }
 
   /// Android loudness/EQ/ReplayGain controls (no-op on other platforms).
   EqualizerService get equalizerService => _equalizerService;
@@ -473,8 +529,9 @@ class PlayerController {
 
   /// [canSkipNext] / [canSkipPrevious] depend on queue boundaries and current index.
   Listenable get trackAndQueueListenable => Listenable.merge([track, queue]);
-  late final StreamSubscription<PlayerState> _playerStateSub;
+  StreamSubscription<PlayerState>? _playerStateSub;
   StreamSubscription<int?>? _concatIndexSub;
+  var _nativePlayerWired = false;
   StreamSubscription<AudioInterruptionEvent>? _audioInterruptionSub;
   StreamSubscription<void>? _becomingNoisySub;
   StreamSubscription<AudioDevicesChangedEvent>? _devicesChangedSub;
@@ -486,6 +543,17 @@ class PlayerController {
 
   /// Set when the user explicitly pauses; blocks [_resumePlaybackAfterLoad] until play.
   bool _playbackPausedByUser = false;
+
+  /// True after notification/lock-screen pause until notification play.
+  bool _handlerTransportPaused = false;
+
+  /// Last known mid-track position while playing (survives native idle after pause).
+  Duration _playbackResumePosition = Duration.zero;
+  StreamSubscription<Duration>? _positionCheckpointSub;
+
+  /// Bumped when the user starts playback so a late session-restore [pause] cannot
+  /// stomp an in-flight [play].
+  int _playbackRestoreGeneration = 0;
 
   /// True when we paused because another app (or the OS) took transient audio focus
   /// (e.g. phone call). Cleared after we attempt resume.
@@ -598,6 +666,7 @@ class PlayerController {
     List<TrackItem> tracks, {
     bool validateIndexNow = true,
   }) {
+    _playbackResumePosition = Duration.zero;
     _playlistTrackByPath = {
       for (final t in tracks)
         if (t.filePath != null && t.filePath!.trim().isNotEmpty)
@@ -825,6 +894,9 @@ class PlayerController {
   /// When non-null, [skipNext], [skipPrevious], [upcomingTrack], and repeat-all wrap
   /// only among tracks whose path key is in this set (same as Songs tab folder filter).
   Set<String>? _playbackPathKeysScope;
+
+  /// Songs tab folder browse filter (mirrors [MainShell] notifier).
+  Set<String>? _songsBrowsePathKeys;
 
   /// Optional hook for shell UI (Songs folder filter, persisted browse keys).
   void Function(String oldPath, String newPath)? onLibraryPathKeyMigrated;
@@ -1165,6 +1237,20 @@ class PlayerController {
     unawaited(_loadCurrent(initialPosition: _player.position));
   }
 
+  /// Mirrors the Library › Songs folder browse filter from the shell.
+  void setSongsBrowsePathKeys(Set<String>? pathKeys) {
+    _songsBrowsePathKeys = pathKeys == null ? null : Set<String>.from(pathKeys);
+  }
+
+  /// Folder scope for Artist/Album tracks sheets (browse filter, then playback scope).
+  Set<String>? resolveFolderPathKeysForGroupTracks() {
+    final browse = _songsBrowsePathKeys;
+    if (browse != null && browse.isNotEmpty) return browse;
+    final scope = _playbackPathKeysScope;
+    if (scope != null && scope.isNotEmpty) return Set<String>.from(scope);
+    return null;
+  }
+
   bool _pathKeyMatchesPlaybackScope(String pathKey) {
     if (_playbackPathKeysScope == null) return true;
     if (pathKey.isEmpty) return false;
@@ -1209,13 +1295,22 @@ class PlayerController {
     return out;
   }
 
-  bool get isPlaying => _player.playing || _retainPlayingUiForShuffleReload;
+  bool get isPlaying {
+    if (_sharedNativePlayer == null) return _retainPlayingUiForShuffleReload;
+    return _player.playing || _retainPlayingUiForShuffleReload;
+  }
 
   /// True while the queue item is being prepared or buffered (not yet ready to hear).
   bool get isTrackLoading {
     if (currentTrack == null) return false;
+    // If the UI shows active playback, never keep the loading subtitle — covers
+    // stuck [_isLoadingSource] from a background full-queue rebuild after tag edit.
+    if (isPlaying) return false;
     if (_isLoadingSource) return true;
     final state = _player.processingState;
+    if (state == ProcessingState.ready || state == ProcessingState.completed) {
+      return false;
+    }
     return state == ProcessingState.loading ||
         state == ProcessingState.buffering;
   }
@@ -1412,6 +1507,7 @@ class PlayerController {
     String context = 'setAudioSource',
     bool stopBeforeLoad = true,
   }) async {
+    await waitForPlaybackPlatformReady();
     await _runExclusiveSourceMutation(() async {
       for (var attempt = 0; attempt < 4; attempt++) {
         try {
@@ -2138,6 +2234,10 @@ class PlayerController {
     if (scope != null && scope.remove(oldKey)) {
       scope.add(newKey);
     }
+    final browse = _songsBrowsePathKeys;
+    if (browse != null && browse.remove(oldKey)) {
+      browse.add(newKey);
+    }
     onLibraryPathKeyMigrated?.call(oldPath, newPath);
   }
 
@@ -2400,6 +2500,8 @@ class PlayerController {
   }) async {
     _debugTraceReloadOrigin('setPlaylistAndPlay');
     await _guardedTransport(() async {
+      _playbackRestoreGeneration++;
+      _handlerTransportPaused = false;
       _playbackPausedByUser = false;
       await setPlaylist(
         tracks,
@@ -2425,6 +2527,8 @@ class PlayerController {
     bool enableShuffle = false,
   }) async {
     await _guardedTransport(() async {
+      _playbackRestoreGeneration++;
+      _handlerTransportPaused = false;
       _playbackPausedByUser = false;
       await setPlaylistPaths(
         paths,
@@ -3246,7 +3350,7 @@ class PlayerController {
     }
 
     final isCurrent = i == _index;
-    if (isCurrent) {
+    if (isCurrent && !_pendingExternalFileEditReload) {
       await stopForExternalFileEdit();
     }
 
@@ -3261,6 +3365,7 @@ class PlayerController {
       _index = 0;
       _concatSource = null;
       _activeSourceOrder = <int>[];
+      _pendingExternalFileEditReload = false;
       _notifyTrackPlaybackQueue();
       return;
     }
@@ -3274,11 +3379,13 @@ class PlayerController {
     _notifyTrackPlaybackQueue();
     if (isCurrent) {
       await _guardedTransport(() async {
-        await _loadCurrent();
+        await _loadCurrent(stopBeforeLoad: !_pendingExternalFileEditReload);
         if (resumePlayingIfCurrentRemoved) {
-          await _resumePlaybackAfterLoad(
+          await _resumePlaybackAfterIntentionalAdvance(
             context: 'removePlaylistEntryAt.resume',
           );
+        } else {
+          _pendingExternalFileEditReload = false;
         }
       });
     } else if (removedViaConcat) {
@@ -3390,6 +3497,7 @@ class PlayerController {
     Duration initialPosition = Duration.zero,
     bool stopBeforeLoad = true,
     bool retryAfterMissingPath = true,
+    bool youtubeStreamRetried = false,
   }) async {
     debugPrint(
       '[_loadCurrent] start stopBeforeLoad=$stopBeforeLoad '
@@ -3422,6 +3530,8 @@ class PlayerController {
     // run [skipNext] in the gap after [stopForExternalFileEdit] (see [_suppressTrackCompletedAdvance]).
     _loadCurrentDepth++;
     _isLoadingSource = true;
+    final resumeAfterMissingPath =
+        !_playbackPausedByUser && !_handlerTransportPaused;
     playback.notifyNow();
     try {
       _syncPlaylistPathsFromMigrations();
@@ -3561,6 +3671,20 @@ class PlayerController {
     } catch (e, st) {
       _loadedWindowsSingleTrackPathKey = null;
       debugPrint('Playback load error: $e\n$st');
+      if (!youtubeStreamRetried && _isYoutubeStreamHttpError(e)) {
+        final fp = _pathAt(_logicalPlaylistIndex())?.trim();
+        final videoId = fp == null ? null : youtubeVideoIdFromStreamPath(fp);
+        if (videoId != null && videoId.isNotEmpty) {
+          YoutubeStreamResolver.instance.invalidate(videoId);
+          await _loadCurrent(
+            initialPosition: initialPosition,
+            stopBeforeLoad: stopBeforeLoad,
+            retryAfterMissingPath: retryAfterMissingPath,
+            youtubeStreamRetried: true,
+          );
+          return;
+        }
+      }
       if (retryAfterMissingPath) {
         final missingPath = _extractMissingPathFromLoadError(e);
         if (missingPath != null && missingPath.isNotEmpty) {
@@ -3571,6 +3695,11 @@ class PlayerController {
               stopBeforeLoad: true,
               retryAfterMissingPath: false,
             );
+            if (resumeAfterMissingPath) {
+              await _resumePlaybackAfterIntentionalAdvance(
+                context: '_loadCurrent.missingPath',
+              );
+            }
             return;
           }
         }
@@ -3604,6 +3733,15 @@ class PlayerController {
     positionNotifier.flush();
   }
 
+  bool _isYoutubeStreamHttpError(Object error) {
+    final fp = _pathAt(_logicalPlaylistIndex())?.trim();
+    if (fp == null || !isYoutubeStreamPath(fp)) return false;
+    final s = error.toString().toLowerCase();
+    return s.contains('403') ||
+        s.contains('invalidresponsecode') ||
+        s.contains('source error');
+  }
+
   String? _extractMissingPathFromLoadError(Object error) {
     final s = error.toString();
     final marker = 'FileNotFoundException:';
@@ -3618,10 +3756,24 @@ class PlayerController {
   }
 
   bool _removeMissingTrackPath(String path) {
+    final targetKey = canonicalMusicLibraryPathKey(path);
+    if (targetKey.isEmpty) return false;
+
     final beforePlaylist = _playlistPaths.length;
+    final curLogical = _logicalPlaylistIndex();
+    final removingCurrent = isCurrentTrackFilePath(path);
+    var removedBeforeCurrent = 0;
+    if (!removingCurrent) {
+      for (var i = 0; i < _playlistPaths.length; i++) {
+        if (i >= curLogical) break;
+        if (canonicalMusicLibraryPathKey(_playlistPaths[i]) == targetKey) {
+          removedBeforeCurrent++;
+        }
+      }
+    }
+
     _playlistPaths.removeWhere(
-      (p) =>
-          canonicalMusicLibraryPathKey(p) == canonicalMusicLibraryPathKey(path),
+      (p) => canonicalMusicLibraryPathKey(p) == targetKey,
     );
     _onPlaylistPathsMutated();
     final beforeCatalog = _libraryCatalog.length;
@@ -3630,15 +3782,19 @@ class PlayerController {
     if (_playlistPaths.isEmpty) {
       _index = 0;
       _resetShuffleState();
-    } else {
-      if (_index >= _playlistPaths.length) {
-        _index = _playlistPaths.length - 1;
+    } else if (removingCurrent) {
+      if (_shuffle) {
+        _index = curLogical.clamp(0, _playlistPaths.length - 1);
+        _resetShuffleState();
+      } else {
+        _index = curLogical.clamp(0, _playlistPaths.length - 1);
       }
+    } else {
+      _index = (curLogical - removedBeforeCurrent)
+          .clamp(0, _playlistPaths.length - 1);
       if (_shuffle) {
         _shuffleOrder = List<int>.generate(_playlistPaths.length, (i) => i);
-        if (_shufflePos >= _shuffleOrder.length) {
-          _shufflePos = _shuffleOrder.length - 1;
-        }
+        _shufflePos = _shufflePos.clamp(0, _shuffleOrder.length - 1);
       }
     }
 
@@ -3694,8 +3850,11 @@ class PlayerController {
     final pos = initialPosition ?? _player.position;
     await _loadCurrent(initialPosition: pos, stopBeforeLoad: stopBeforeLoad);
     if (resumePlaying) {
-      _playbackPausedByUser = false;
-      await _resumePlaybackAfterLoad(context: 'reloadCurrentSource.play');
+      await _guardedTransport(() async {
+        await _resumePlaybackAfterIntentionalAdvance(
+          context: 'reloadCurrentSource.play',
+        );
+      });
     }
   }
 
@@ -3721,7 +3880,7 @@ class PlayerController {
     if (_pendingExternalFileEditReload) {
       try {
         await _ensureNativeDecoderFullyStopped().timeout(
-          const Duration(milliseconds: 1200),
+          const Duration(milliseconds: 2500),
         );
       } on TimeoutException {
         debugPrint('$context: native decoder settle timed out before reload');
@@ -3784,9 +3943,10 @@ class PlayerController {
       if (resumePlaying &&
           (reloadGeneration == null ||
               reloadGeneration == _playingTrackReloadGeneration)) {
-        _playbackPausedByUser = false;
         await _guardedTransport(() async {
-          await _resumePlaybackAfterLoad(context: '$context.play');
+          await _resumePlaybackAfterIntentionalAdvance(
+            context: '$context.play',
+          );
         });
       }
     } catch (e, st) {
@@ -3835,7 +3995,7 @@ class PlayerController {
     initialPosition: resumePosition,
     resumePlaying: resumePlaying,
     context: 'reloadCurrentSourceAfterTagWrite',
-    stopBeforeLoad: true,
+    stopBeforeLoad: false,
     reloadGeneration: reloadGeneration,
   );
 
@@ -3931,11 +4091,32 @@ class PlayerController {
   }
 
   Future<void> play() async {
+    _playbackRestoreGeneration++;
+    _handlerTransportPaused = false;
     _playbackPausedByUser = false;
     _invalidatePlayResumeRetries();
     _schedulePlayerUiNotify();
     final generation = _playControlGeneration;
     try {
+      final idle = _player.processingState == ProcessingState.idle;
+      // Post tag/rename single-track reload leaves [_concatSource] null with
+      // [_sourceNeedsReload] true until skip — do not rebuild the whole queue on [play].
+      final deferQueueRebuild =
+          _sourceNeedsReload &&
+          _concatSource == null &&
+          !_useSingleTrackAudioSourceForPlatform() &&
+          !idle;
+      if (_playlistPaths.isNotEmpty &&
+          !_isLoadingSource &&
+          !deferQueueRebuild &&
+          (_sourceNeedsReload || idle)) {
+        await _loadCurrent(
+          initialPosition: _resumePositionForSourceReload(),
+        );
+        if (_playbackPausedByUser || _playControlGeneration != generation) {
+          return;
+        }
+      }
       await _playSafely(context: 'play');
       if (_playbackPausedByUser || _playControlGeneration != generation) return;
       if (!_player.playing) {
@@ -3960,18 +4141,12 @@ class PlayerController {
   }
 
   Future<void> pause() async {
+    _handlerTransportPaused = true;
     _playbackPausedByUser = true;
     _invalidatePlayResumeRetries();
     _schedulePlayerUiNotify();
     try {
-      // Always issue pause once; transport state can briefly lag around
-      // notification/widget taps and report !playing while audio is still running.
       await _player.pause();
-      if (!kIsWeb &&
-          (defaultTargetPlatform == TargetPlatform.android ||
-              defaultTargetPlatform == TargetPlatform.iOS)) {
-        await JustAudioBackground.ensureNativePaused();
-      }
       if (_player.playing) {
         await _player.pause();
       }
@@ -4342,6 +4517,24 @@ class PlayerController {
     final curKey = ct?.filePath == null
         ? ''
         : canonicalMusicLibraryPathKey(ct!.filePath!);
+
+    final youtubeByPath = <String, dynamic>{};
+    for (var i = 0; i < _playlistPaths.length; i++) {
+      final path = _playlistPaths[i].trim();
+      if (!isYoutubeStreamPath(path)) continue;
+      final meta = youtubePlaybackMetaJsonForTrack(path, _trackAt(i));
+      if (meta != null) youtubeByPath[path] = meta;
+    }
+
+    String? lastYoutubeWatchUrl;
+    final currentPath = ct?.filePath?.trim();
+    if (currentPath != null && currentPath.isNotEmpty) {
+      final fromStream = youtubeVideoIdFromStreamPath(currentPath);
+      if (fromStream != null && fromStream.isNotEmpty) {
+        lastYoutubeWatchUrl = youtubeWatchUrlForVideoId(fromStream);
+      }
+    }
+
     return <String, dynamic>{
       'v': 2,
       'paths': paths,
@@ -4353,9 +4546,12 @@ class PlayerController {
       'originTab': _playbackOriginTab?.wireValue,
       'originPlaylistId': _playbackOriginUserPlaylistId,
       'scopeKeys': _playbackPathKeysScope?.toList(),
-      'positionMs': _player.position.inMilliseconds,
-      'wasPlaying': _player.playing,
+      'positionMs': _sharedNativePlayer?.position.inMilliseconds ?? 0,
+      'wasPlaying': _sharedNativePlayer?.playing ?? false,
       'currentKey': curKey,
+      if (youtubeByPath.isNotEmpty) 'youtubeByPath': youtubeByPath,
+      if (lastYoutubeWatchUrl != null && lastYoutubeWatchUrl.isNotEmpty)
+        'lastYoutubeWatchUrl': lastYoutubeWatchUrl,
     };
   }
 
@@ -4373,6 +4569,7 @@ class PlayerController {
     required Duration position,
     required bool resumePlaying,
   }) async {
+    final restoreGeneration = ++_playbackRestoreGeneration;
     _playbackOriginTab = originTab;
     _playbackOriginUserPlaylistId = originTab == LibraryTabId.playlist
         ? originUserPlaylistId
@@ -4430,10 +4627,15 @@ class PlayerController {
     }
 
     if (resumePlaying) {
+      _playbackRestoreGeneration++;
       _playbackPausedByUser = false;
       await _playSafely(context: 'applyRestoredPlayback.play');
-    } else {
-      await pause();
+    } else if (restoreGeneration == _playbackRestoreGeneration &&
+        !_player.playing) {
+      _playbackPausedByUser = true;
+      try {
+        await _player.pause();
+      } catch (_) {}
     }
     _notifyTrackPlaybackQueue();
   }
@@ -4469,7 +4671,12 @@ class PlayerController {
     _devicesChangedSub = null;
     _concatIndexSub?.cancel();
     _concatIndexSub = null;
-    _playerStateSub.cancel();
+    _positionCheckpointSub?.cancel();
+    _positionCheckpointSub = null;
+    _positionCheckpointSub?.cancel();
+    _positionCheckpointSub = null;
+    _playerStateSub?.cancel();
+    _playerStateSub = null;
     positionNotifier.dispose();
     track.dispose();
     playback.dispose();

@@ -13,7 +13,9 @@ import 'package:synchronized/synchronized.dart';
 export 'package:audio_service/audio_service.dart' show MediaItem;
 
 late SwitchAudioHandler _audioHandler;
-late JustAudioPlatform _platform;
+JustAudioPlatform? _underlyingPlatform;
+bool _audioHandlerReady = false;
+Future<void>? _setupFuture;
 
 Future<void> _activateAudioSessionForHandlerTransport() async {
   if (kIsWeb) return;
@@ -94,10 +96,57 @@ class JustAudioBackground {
   /// Pauses the native decoder even when [AudioPlayer.playing] is already false
   /// (UI/handler desync). Use from app transport after [AudioPlayer.pause].
   static Future<void> ensureNativePaused() => _playerAudioHandler.pause();
+
+  /// Fired when the media notification / lock screen invokes play (before native play).
+  static VoidCallback? onHandlerTransportPlay;
+
+  /// Fired when the media notification / lock screen invokes pause (before native pause).
+  static VoidCallback? onHandlerTransportPause;
 }
 
 class _JustAudioBackgroundPlugin extends JustAudioPlatform {
   static Future<void> setup({
+    bool androidResumeOnClick = true,
+    String? androidNotificationChannelId,
+    String androidNotificationChannelName = 'Notifications',
+    String? androidNotificationChannelDescription,
+    Color? notificationColor,
+    String androidNotificationIcon = 'mipmap/ic_launcher',
+    bool androidShowNotificationBadge = false,
+    bool androidNotificationClickStartsActivity = true,
+    bool androidNotificationOngoing = false,
+    bool androidStopForegroundOnPause = true,
+    int? artDownscaleWidth,
+    int? artDownscaleHeight,
+    Duration fastForwardInterval = const Duration(seconds: 10),
+    Duration rewindInterval = const Duration(seconds: 10),
+    bool preloadArtwork = false,
+    Map<String, dynamic>? androidBrowsableRootExtras,
+  }) async {
+    _setupFuture ??= _setupOnce(
+      androidResumeOnClick: androidResumeOnClick,
+      androidNotificationChannelId: androidNotificationChannelId,
+      androidNotificationChannelName: androidNotificationChannelName,
+      androidNotificationChannelDescription:
+          androidNotificationChannelDescription,
+      notificationColor: notificationColor,
+      androidNotificationIcon: androidNotificationIcon,
+      androidShowNotificationBadge: androidShowNotificationBadge,
+      androidNotificationClickStartsActivity:
+          androidNotificationClickStartsActivity,
+      androidNotificationOngoing: androidNotificationOngoing,
+      androidStopForegroundOnPause: androidStopForegroundOnPause,
+      artDownscaleWidth: artDownscaleWidth,
+      artDownscaleHeight: artDownscaleHeight,
+      fastForwardInterval: fastForwardInterval,
+      rewindInterval: rewindInterval,
+      preloadArtwork: preloadArtwork,
+      androidBrowsableRootExtras: androidBrowsableRootExtras,
+    );
+    return _setupFuture!;
+  }
+
+  static Future<void> _setupOnce({
     bool androidResumeOnClick = true,
     String? androidNotificationChannelId,
     String androidNotificationChannelName = 'Notifications',
@@ -124,31 +173,42 @@ class _JustAudioBackgroundPlugin extends JustAudioPlatform {
     } catch (e, st) {
       debugPrint('just_audio_background: dispose stale players: $e\n$st');
     }
-    _platform = JustAudioPlatform.instance;
-    JustAudioPlatform.instance = _JustAudioBackgroundPlugin();
-    _audioHandler = await AudioService.init(
-      builder: () => SwitchAudioHandler(BaseAudioHandler()),
-      config: AudioServiceConfig(
-        androidResumeOnClick: androidResumeOnClick,
-        androidNotificationChannelId: androidNotificationChannelId,
-        androidNotificationChannelName: androidNotificationChannelName,
-        androidNotificationChannelDescription:
-            androidNotificationChannelDescription,
-        notificationColor: notificationColor,
-        androidNotificationIcon: androidNotificationIcon,
-        androidShowNotificationBadge: androidShowNotificationBadge,
-        androidNotificationClickStartsActivity:
-            androidNotificationClickStartsActivity,
-        androidNotificationOngoing: androidNotificationOngoing,
-        androidStopForegroundOnPause: androidStopForegroundOnPause,
-        artDownscaleWidth: artDownscaleWidth,
-        artDownscaleHeight: artDownscaleHeight,
-        fastForwardInterval: fastForwardInterval,
-        rewindInterval: rewindInterval,
-        preloadArtwork: preloadArtwork,
-        androidBrowsableRootExtras: androidBrowsableRootExtras,
-      ),
-    );
+    final current = JustAudioPlatform.instance;
+    if (current is! _JustAudioBackgroundPlugin) {
+      _underlyingPlatform = current;
+      JustAudioPlatform.instance = _JustAudioBackgroundPlugin();
+    } else if (_underlyingPlatform == null) {
+      throw StateError(
+        'just_audio_background: plugin active but underlying platform reference '
+        'was lost; stop the app and launch again.',
+      );
+    }
+    if (!_audioHandlerReady) {
+      _audioHandler = await AudioService.init(
+        builder: () => SwitchAudioHandler(BaseAudioHandler()),
+        config: AudioServiceConfig(
+          androidResumeOnClick: androidResumeOnClick,
+          androidNotificationChannelId: androidNotificationChannelId,
+          androidNotificationChannelName: androidNotificationChannelName,
+          androidNotificationChannelDescription:
+              androidNotificationChannelDescription,
+          notificationColor: notificationColor,
+          androidNotificationIcon: androidNotificationIcon,
+          androidShowNotificationBadge: androidShowNotificationBadge,
+          androidNotificationClickStartsActivity:
+              androidNotificationClickStartsActivity,
+          androidNotificationOngoing: androidNotificationOngoing,
+          androidStopForegroundOnPause: androidStopForegroundOnPause,
+          artDownscaleWidth: artDownscaleWidth,
+          artDownscaleHeight: artDownscaleHeight,
+          fastForwardInterval: fastForwardInterval,
+          rewindInterval: rewindInterval,
+          preloadArtwork: preloadArtwork,
+          androidBrowsableRootExtras: androidBrowsableRootExtras,
+        ),
+      );
+      _audioHandlerReady = true;
+    }
   }
 
   _JustAudioPlayer? _player;
@@ -203,7 +263,12 @@ class _JustAudioPlayer extends AudioPlayerPlatform {
 
   _JustAudioPlayer({required this.initRequest}) : super(initRequest.id) {
     eventController.onCancel = _playerAudioHandler.cancelStreamSubscriptions;
-    _playerAudioHandler._initPlayer(initRequest);
+    unawaited(_attachToAudioHandler(initRequest));
+  }
+
+  Future<void> _attachToAudioHandler(InitRequest initRequest) async {
+    await _playerAudioHandler._initPlayer(initRequest);
+    if (!_audioHandlerReady) return;
     _audioHandler.inner = _playerAudioHandler;
     _audioHandler.customEvent
         .whereType<PlaybackEventMessage>()
@@ -419,7 +484,13 @@ class _PlayerAudioHandler extends BaseAudioHandler
 
   Future<void> _initPlayer(InitRequest initRequest) =>
       _lock.synchronized(() async {
-        final player = await _platform.init(initRequest);
+        final underlying = _underlyingPlatform;
+        if (underlying == null) {
+          throw StateError(
+            'just_audio_background: setup() must complete before init',
+          );
+        }
+        final player = await underlying.init(initRequest);
         _playerCompleter.complete(player);
         final playbackEventMessageStream = player.playbackEventMessageStream;
         _trackInfoSubscription = playbackEventMessageStream
@@ -453,9 +524,8 @@ class _PlayerAudioHandler extends BaseAudioHandler
                     (index! < queue.nvalue!.length && track.duration != null)) {
                   currentQueue[index!] =
                       currentQueue[index!].copyWith(duration: track.duration);
-                  queue.add(currentQueue);
                 }
-                mediaItem.add(currentMediaItem!);
+                mediaItem.add(currentQueue[index!]);
               }
             }, onError: (Object e, [StackTrace? st]) {});
       });
@@ -472,7 +542,6 @@ class _PlayerAudioHandler extends BaseAudioHandler
     final item = currentQueue[queueIndex];
     if (item.duration == trackDuration) return;
     currentQueue[queueIndex] = item.copyWith(duration: trackDuration);
-    queue.add(currentQueue);
     if (queueIndex == index) {
       mediaItem.add(currentQueue[queueIndex]);
     }
@@ -518,9 +587,9 @@ class _PlayerAudioHandler extends BaseAudioHandler
     if (queueIndex != null &&
         queueIndex >= 0 &&
         queueIndex < currentQueue.length) {
-      final updatedQueue = List<MediaItem>.from(currentQueue);
-      updatedQueue[queueIndex] = merged;
-      queue.add(updatedQueue);
+      // Metadata-only refresh (e.g. late album art). Avoid republishing the full
+      // queue — some Android OEM media sessions restart playback on queue.replace.
+      currentQueue[queueIndex] = merged;
     }
     mediaItem.add(merged);
   }
@@ -762,14 +831,36 @@ class _PlayerAudioHandler extends BaseAudioHandler
     }
   }
 
+  Future<void> _seekBeforeHandlerPlay() async {
+    final proc = _justAudioEvent.processingState;
+    final resumeIndex = _justAudioEvent.currentIndex ?? index;
+    final resumePosition = currentPosition;
+    if (resumeIndex == null) return;
+
+    if (proc == ProcessingStateMessage.completed ||
+        proc == ProcessingStateMessage.idle) {
+      final dur = _justAudioEvent.duration ?? currentMediaItem?.duration;
+      final atEnd = dur != null &&
+          dur > Duration.zero &&
+          resumePosition >= dur - const Duration(milliseconds: 800);
+      if (atEnd) {
+        await (await _player).seek(
+          SeekRequest(position: Duration.zero, index: resumeIndex),
+        );
+      } else if (resumePosition > Duration.zero) {
+        // Spurious completed/idle after notification pause on some OEM builds.
+        await (await _player).seek(
+          SeekRequest(position: resumePosition, index: resumeIndex),
+        );
+      }
+    }
+  }
+
   @override
   Future<void> play() async {
+    JustAudioBackground.onHandlerTransportPlay?.call();
     await _activateAudioSessionForHandlerTransport();
-    if (_justAudioEvent.processingState == ProcessingStateMessage.completed) {
-      await (await _player).seek(
-        SeekRequest(position: Duration.zero, index: 0),
-      );
-    }
+    await _seekBeforeHandlerPlay();
     _streamBroadcastDebounce?.cancel();
     _streamBroadcastDebounce = null;
     if (!_playing) {
@@ -785,6 +876,7 @@ class _PlayerAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> pause() async {
+    JustAudioBackground.onHandlerTransportPause?.call();
     _streamBroadcastDebounce?.cancel();
     _streamBroadcastDebounce = null;
     _stopPositionBroadcastTimer();
@@ -861,7 +953,10 @@ class _PlayerAudioHandler extends BaseAudioHandler
         );
         _broadcastState();
         try {
-          await _platform.disposePlayer(DisposePlayerRequest(id: player.id));
+          final underlying = _underlyingPlatform;
+          if (underlying != null) {
+            await underlying.disposePlayer(DisposePlayerRequest(id: player.id));
+          }
         } finally {
           _playerCompleter = _ValueCompleter<AudioPlayerPlatform>();
         }

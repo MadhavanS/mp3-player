@@ -2,11 +2,107 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
+import 'package:audio_metadata_reader/src/metadata/base.dart' show ParserTag;
 import 'package:path/path.dart' as p;
 
 import 'ape_tag_writer_io.dart';
+import 'track_metadata.dart';
 
 enum AlbumArtEditKind { keep, replace, remove }
+
+String _coverMimeFromBytes(Uint8List bytes) {
+  if (bytes.length >= 4 &&
+      bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47) {
+    return 'image/png';
+  }
+  return 'image/jpeg';
+}
+
+bool _parserTagHasPictures(ParserTag metadata) {
+  return switch (metadata) {
+    Mp3Metadata m => m.pictures.isNotEmpty,
+    VorbisMetadata m => m.pictures.isNotEmpty,
+    ApeMetadata m => m.pictures.isNotEmpty,
+    Mp4Metadata m => m.picture != null,
+    RiffMetadata m => m.pictures.isNotEmpty,
+  };
+}
+
+/// [MP3Parser.parse] always closes [reader] before returning — never close again.
+Future<Mp3Metadata?> _tryParseMp3File(
+  File file, {
+  required bool fetchImage,
+}) async {
+  final raf = await file.open();
+  if (!MP3Parser.canUserParser(raf)) {
+    try {
+      await raf.close();
+    } catch (_) {}
+    return null;
+  }
+  return MP3Parser(fetchImage: fetchImage).parse(raf);
+}
+
+/// Matches [readAudioMetadata] parser choice so tag writes do not fail when
+/// library reads used [metadata_god] or skipped broken embedded art.
+Future<ParserTag> _readParserTagForWrite(
+  File file, {
+  required bool fetchImages,
+}) async {
+  Future<ParserTag> attempt(bool images) async {
+    if (await fileHasApeFooter(file)) {
+      return readAllMetadata(file, getImage: images);
+    }
+
+    if (p.extension(file.path).toLowerCase() == '.mp3') {
+      final mp3 = await _tryParseMp3File(file, fetchImage: images);
+      if (mp3 != null) return mp3;
+    }
+
+    return readAllMetadata(file, getImage: images);
+  }
+
+  try {
+    return await attempt(fetchImages);
+  } on MetadataParserException {
+    if (fetchImages) {
+      return await attempt(false);
+    }
+    rethrow;
+  }
+}
+
+Future<ParserTag> _readParserTagForWriteWithFallback(
+  File file, {
+  required bool fetchImages,
+}) async {
+  try {
+    return await _readParserTagForWrite(file, fetchImages: fetchImages);
+  } on MetadataParserException {
+    final hasApe = await fileHasApeFooter(file);
+    if (!hasApe && p.extension(file.path).toLowerCase() == '.mp3') {
+      return Mp3Metadata();
+    }
+    rethrow;
+  }
+}
+
+Future<void> _attachExistingCoverIfNeeded(
+  ParserTag metadata,
+  String filePath,
+) async {
+  if (_parserTagHasPictures(metadata)) return;
+
+  final art = await readCoverBytesOnly(filePath);
+  if (art == null || art.isEmpty) return;
+
+  metadata.setPictures([
+    Picture(art, _coverMimeFromBytes(art), PictureType.coverFront),
+  ]);
+}
 
 Uint8List _stripLeadingId3v2(Uint8List raw) {
   if (raw.length < 10) return raw;
@@ -76,7 +172,11 @@ Future<void> writeEmbeddedAudioTags({
     throw StateError('File not found.');
   }
 
-  final metadata = readAllMetadata(file);
+  final needExistingArt = artEdit == AlbumArtEditKind.keep;
+  final metadata = await _readParserTagForWriteWithFallback(
+    file,
+    fetchImages: needExistingArt,
+  );
 
   metadata.setTitle(title.trim().isEmpty ? null : title.trim());
   metadata.setArtist(artist.trim().isEmpty ? null : artist.trim());
@@ -97,19 +197,18 @@ Future<void> writeEmbeddedAudioTags({
   switch (metadata) {
     case Mp3Metadata m:
       m.composer = c.isEmpty ? null : c;
-      break;
     case VorbisMetadata m:
       m.composer = c.isEmpty ? [] : [c];
-      break;
     case ApeMetadata m:
       m.composer = c.isEmpty ? null : c;
-      break;
-    default:
+    case Mp4Metadata():
+    case RiffMetadata():
       break;
   }
 
   switch (artEdit) {
     case AlbumArtEditKind.keep:
+      await _attachExistingCoverIfNeeded(metadata, filePath);
       break;
     case AlbumArtEditKind.remove:
       metadata.setPictures([]);
@@ -168,12 +267,12 @@ Future<void> _syncId3v2AfterApeWrite(File file, ApeMetadata ape) async {
 
   Mp3Metadata mp3;
   try {
-    final reader = await file.open();
-    try {
-      mp3 = MP3Parser(fetchImage: ape.pictures.isNotEmpty).parse(reader);
-    } finally {
-      await reader.close();
-    }
+    final parsed = await _tryParseMp3File(
+      file,
+      fetchImage: ape.pictures.isNotEmpty,
+    );
+    if (parsed == null) return;
+    mp3 = parsed;
   } catch (_) {
     return;
   }

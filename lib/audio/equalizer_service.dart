@@ -14,9 +14,16 @@ class EqualizerService {
     defaultValue: true,
   );
 
-  static final AndroidLoudnessEnhancer _loudnessEnhancer =
-      AndroidLoudnessEnhancer();
-  static final AndroidEqualizer _equalizer = AndroidEqualizer();
+  static AndroidLoudnessEnhancer _loudnessEnhancer = AndroidLoudnessEnhancer();
+  static AndroidEqualizer _equalizer = AndroidEqualizer();
+
+  /// After [AudioPlayer.dispose], effect instances must be recreated before the
+  /// next player — otherwise just_audio asserts `_player == null`.
+  static void resetSharedEffectsForNativePlayerRecreate() {
+    if (!enabledByFlag) return;
+    _loudnessEnhancer = AndroidLoudnessEnhancer();
+    _equalizer = AndroidEqualizer();
+  }
 
   static AudioPipeline get sharedPipeline => AudioPipeline(
         androidAudioEffects: [_loudnessEnhancer, _equalizer],

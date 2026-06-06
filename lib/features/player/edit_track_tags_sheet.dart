@@ -11,6 +11,7 @@ import '../../audio/player_controller.dart';
 import '../../models/track_item.dart';
 import '../../services/site_audio_rename.dart';
 import '../../services/song_metadata_cache.dart';
+import '../../services/song_file_info.dart';
 import '../../services/storage_access.dart';
 import '../../services/track_metadata.dart';
 import '../../services/track_tag_writer.dart';
@@ -167,12 +168,14 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
   bool _saving = false;
   bool _siteRenameBusy = false;
   bool _coverImportBusy = false;
+  bool _tagsHydrating = false;
+  String _embeddedComposerFromFile = '';
 
-  late final String _initialTitle;
-  late final String _initialArtist;
-  late final String _initialAlbum;
-  late final String _initialGenre;
-  late final String _initialComposer;
+  late String _initialTitle;
+  late String _initialArtist;
+  late String _initialAlbum;
+  late String _initialGenre;
+  late String _initialComposer;
 
   @override
   void initState() {
@@ -186,6 +189,9 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
         unawaited(_loadEmbeddedAlbumArtPreview());
       });
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_hydrateTagFieldsFromDisk());
+    });
     _initialTitle = t.title;
     _initialArtist = t.artist == 'Unknown artist' ? '' : t.artist;
     _initialAlbum = t.metaLine == 'mp3' ? '' : t.metaLine;
@@ -210,6 +216,82 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
   void _onTagFieldChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _syncEditorsFromTrack(TrackItem t) {
+    _initialTitle = t.title;
+    _initialArtist = t.artist == 'Unknown artist' ? '' : t.artist;
+    _initialAlbum = t.metaLine == 'mp3' ? '' : t.metaLine;
+    _initialGenre = _genreTextFromTrack(t);
+    _initialComposer = _composerTextFromTrack(t);
+    _title.text = _initialTitle;
+    _artist.text = _initialArtist;
+    _album.text = _initialAlbum;
+    _genre.text = _initialGenre;
+    _composer.text = _initialComposer;
+  }
+
+  Future<void> _hydrateTagFieldsFromDisk() async {
+    final rawPath = widget.track.filePath?.trim();
+    if (rawPath == null || rawPath.isEmpty) return;
+
+    final path = p.normalize(File(rawPath).absolute.path);
+    if (mounted) setState(() => _tagsHydrating = true);
+    try {
+      var base = widget.track;
+      if (mounted) {
+        base = PlayerController.of(context).trackForLibraryPath(path);
+      }
+
+      final results = await Future.wait<Object?>([
+        readAudioMetadata(
+          base.filePath != null && base.filePath!.isNotEmpty
+              ? base
+              : TrackItem.fromFilePath(path),
+        ),
+        readEmbeddedComposer(path),
+        readSongFileInfo(path),
+      ]);
+
+      final snap = results[0]! as TrackItem;
+      final fromParser = (results[1] as String?)?.trim() ?? '';
+      final fromInfo =
+          (results[2] as SongFileInfo).composer?.trim() ?? '';
+      final embeddedComposer =
+          fromParser.isNotEmpty ? fromParser : fromInfo;
+
+      var merged = snap;
+      if (embeddedComposer.isNotEmpty) {
+        merged = merged.withEmbeddedMetadata(
+          composer: embeddedComposer,
+          replaceComposerFromFile: true,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _embeddedComposerFromFile = embeddedComposer;
+        _syncEditorsFromTrack(merged);
+        _tagsHydrating = false;
+      });
+    } catch (e, st) {
+      debugPrint(
+        'EditTrackTagsSheet: tag hydrate failed for $path: $e\n$st',
+      );
+      if (mounted) setState(() => _tagsHydrating = false);
+    }
+  }
+
+  String? get _composerFieldHelperText {
+    if (_tagsHydrating) return 'Reading embedded tags…';
+    if (_embeddedComposerFromFile.isEmpty) return null;
+    if (_composer.text.trim().isEmpty) {
+      return 'In file: $_embeddedComposerFromFile';
+    }
+    if (_composer.text.trim() == _embeddedComposerFromFile) {
+      return 'Embedded TCOM tag';
+    }
+    return null;
   }
 
   Future<void> _loadEmbeddedAlbumArtPreview() async {
@@ -667,7 +749,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
 
     setState(() => _saving = true);
 
-    final wasPlaying = player.isPlaying;
+    final wasPlaying = player.audioPlayer.playing;
     final resumePos = player.position;
     var stoppedForEdit = false;
     var saveSucceeded = false;
@@ -860,7 +942,7 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
     }
 
     setState(() => _saving = true);
-    final wasPlaying = player.isPlaying;
+    final wasPlaying = player.audioPlayer.playing;
     final resumePos = player.position;
     var stoppedForEdit = false;
     var saveSucceeded = false;
@@ -1301,8 +1383,19 @@ class _EditTrackTagsSheetState extends State<EditTrackTagsSheet> {
           enabled: !_saving,
           decoration: InputDecoration(
             labelText: 'Composer',
+            helperText: _composerFieldHelperText,
+            helperMaxLines: 2,
             border: const OutlineInputBorder(),
-            suffixIcon: _clearFieldSuffix(_composer),
+            suffixIcon: _tagsHydrating
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : _clearFieldSuffix(_composer),
           ),
           textCapitalization: TextCapitalization.words,
         ),

@@ -15,6 +15,8 @@ class SongMetadataCacheRow {
   String artist = '';
   String album = '';
   String genres = '';
+  /// Embedded TCOM / COMPOSER tag.
+  String composer = '';
   List<int> artColorValues = const <int>[];
 
   /// Embedded cover art is not cached here — storing bytes as `List<int>` mapped Isar

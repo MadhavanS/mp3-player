@@ -42,6 +42,10 @@ const SongMetadataCacheRowSchema = IsarGeneratedSchema(
         type: IsarType.string,
       ),
       IsarPropertySchema(
+        name: 'composer',
+        type: IsarType.string,
+      ),
+      IsarPropertySchema(
         name: 'artColorValues',
         type: IsarType.longList,
       ),
@@ -113,24 +117,25 @@ int serializeSongMetadataCacheRow(
   IsarCore.writeString(writer, 3, object.artist);
   IsarCore.writeString(writer, 4, object.album);
   IsarCore.writeString(writer, 5, object.genres);
+  IsarCore.writeString(writer, 6, object.composer);
   {
     final list = object.artColorValues;
-    final listWriter = IsarCore.beginList(writer, 6, list.length);
+    final listWriter = IsarCore.beginList(writer, 7, list.length);
     for (var i = 0; i < list.length; i++) {
       IsarCore.writeLong(listWriter, i, list[i]);
     }
     IsarCore.endList(writer, listWriter);
   }
-  IsarCore.writeLong(writer, 7, object.fileSizeBytes);
-  IsarCore.writeLong(writer, 8, object.updatedAtMs);
-  IsarCore.writeBool(writer, 9, object.hasArtDiskCache);
-  IsarCore.writeLong(writer, 10, object.artCachedForModifiedMs);
-  IsarCore.writeLong(writer, 11, object.artCachedForSizeBytes);
-  IsarCore.writeBool(writer, 12, object.hasReplayGainTrack);
-  IsarCore.writeDouble(writer, 13, object.replayGainTrackDb);
-  IsarCore.writeBool(writer, 14, object.hasReplayGainAlbum);
-  IsarCore.writeDouble(writer, 15, object.replayGainAlbumDb);
-  IsarCore.writeBool(writer, 16, object.isArtCacheValid);
+  IsarCore.writeLong(writer, 8, object.fileSizeBytes);
+  IsarCore.writeLong(writer, 9, object.updatedAtMs);
+  IsarCore.writeBool(writer, 10, object.hasArtDiskCache);
+  IsarCore.writeLong(writer, 11, object.artCachedForModifiedMs);
+  IsarCore.writeLong(writer, 12, object.artCachedForSizeBytes);
+  IsarCore.writeBool(writer, 13, object.hasReplayGainTrack);
+  IsarCore.writeDouble(writer, 14, object.replayGainTrackDb);
+  IsarCore.writeBool(writer, 15, object.hasReplayGainAlbum);
+  IsarCore.writeDouble(writer, 16, object.replayGainAlbumDb);
+  IsarCore.writeBool(writer, 17, object.isArtCacheValid);
   return object.id;
 }
 
@@ -143,8 +148,9 @@ SongMetadataCacheRow deserializeSongMetadataCacheRow(IsarReader reader) {
   object.artist = IsarCore.readString(reader, 3) ?? '';
   object.album = IsarCore.readString(reader, 4) ?? '';
   object.genres = IsarCore.readString(reader, 5) ?? '';
+  object.composer = IsarCore.readString(reader, 6) ?? '';
   {
-    final length = IsarCore.readList(reader, 6, IsarCore.readerPtrPtr);
+    final length = IsarCore.readList(reader, 7, IsarCore.readerPtrPtr);
     {
       final reader = IsarCore.readerPtr;
       if (reader.isNull) {
@@ -160,15 +166,15 @@ SongMetadataCacheRow deserializeSongMetadataCacheRow(IsarReader reader) {
       }
     }
   }
-  object.fileSizeBytes = IsarCore.readLong(reader, 7);
-  object.updatedAtMs = IsarCore.readLong(reader, 8);
-  object.hasArtDiskCache = IsarCore.readBool(reader, 9);
-  object.artCachedForModifiedMs = IsarCore.readLong(reader, 10);
-  object.artCachedForSizeBytes = IsarCore.readLong(reader, 11);
-  object.hasReplayGainTrack = IsarCore.readBool(reader, 12);
-  object.replayGainTrackDb = IsarCore.readDouble(reader, 13);
-  object.hasReplayGainAlbum = IsarCore.readBool(reader, 14);
-  object.replayGainAlbumDb = IsarCore.readDouble(reader, 15);
+  object.fileSizeBytes = IsarCore.readLong(reader, 8);
+  object.updatedAtMs = IsarCore.readLong(reader, 9);
+  object.hasArtDiskCache = IsarCore.readBool(reader, 10);
+  object.artCachedForModifiedMs = IsarCore.readLong(reader, 11);
+  object.artCachedForSizeBytes = IsarCore.readLong(reader, 12);
+  object.hasReplayGainTrack = IsarCore.readBool(reader, 13);
+  object.replayGainTrackDb = IsarCore.readDouble(reader, 14);
+  object.hasReplayGainAlbum = IsarCore.readBool(reader, 15);
+  object.replayGainAlbumDb = IsarCore.readDouble(reader, 16);
   return object;
 }
 
@@ -188,8 +194,10 @@ dynamic deserializeSongMetadataCacheRowProp(IsarReader reader, int property) {
     case 5:
       return IsarCore.readString(reader, 5) ?? '';
     case 6:
+      return IsarCore.readString(reader, 6) ?? '';
+    case 7:
       {
-        final length = IsarCore.readList(reader, 6, IsarCore.readerPtrPtr);
+        final length = IsarCore.readList(reader, 7, IsarCore.readerPtrPtr);
         {
           final reader = IsarCore.readerPtr;
           if (reader.isNull) {
@@ -205,26 +213,26 @@ dynamic deserializeSongMetadataCacheRowProp(IsarReader reader, int property) {
           }
         }
       }
-    case 7:
-      return IsarCore.readLong(reader, 7);
     case 8:
       return IsarCore.readLong(reader, 8);
     case 9:
-      return IsarCore.readBool(reader, 9);
+      return IsarCore.readLong(reader, 9);
     case 10:
-      return IsarCore.readLong(reader, 10);
+      return IsarCore.readBool(reader, 10);
     case 11:
       return IsarCore.readLong(reader, 11);
     case 12:
-      return IsarCore.readBool(reader, 12);
+      return IsarCore.readLong(reader, 12);
     case 13:
-      return IsarCore.readDouble(reader, 13);
+      return IsarCore.readBool(reader, 13);
     case 14:
-      return IsarCore.readBool(reader, 14);
+      return IsarCore.readDouble(reader, 14);
     case 15:
-      return IsarCore.readDouble(reader, 15);
+      return IsarCore.readBool(reader, 15);
     case 16:
-      return IsarCore.readBool(reader, 16);
+      return IsarCore.readDouble(reader, 16);
+    case 17:
+      return IsarCore.readBool(reader, 17);
     default:
       throw ArgumentError('Unknown property: $property');
   }
@@ -238,6 +246,7 @@ sealed class _SongMetadataCacheRowUpdate {
     String? artist,
     String? album,
     String? genres,
+    String? composer,
     int? fileSizeBytes,
     int? updatedAtMs,
     bool? hasArtDiskCache,
@@ -264,6 +273,7 @@ class _SongMetadataCacheRowUpdateImpl implements _SongMetadataCacheRowUpdate {
     Object? artist = ignore,
     Object? album = ignore,
     Object? genres = ignore,
+    Object? composer = ignore,
     Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
     Object? hasArtDiskCache = ignore,
@@ -283,18 +293,19 @@ class _SongMetadataCacheRowUpdateImpl implements _SongMetadataCacheRowUpdate {
           if (artist != ignore) 3: artist as String?,
           if (album != ignore) 4: album as String?,
           if (genres != ignore) 5: genres as String?,
-          if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
-          if (updatedAtMs != ignore) 8: updatedAtMs as int?,
-          if (hasArtDiskCache != ignore) 9: hasArtDiskCache as bool?,
+          if (composer != ignore) 6: composer as String?,
+          if (fileSizeBytes != ignore) 8: fileSizeBytes as int?,
+          if (updatedAtMs != ignore) 9: updatedAtMs as int?,
+          if (hasArtDiskCache != ignore) 10: hasArtDiskCache as bool?,
           if (artCachedForModifiedMs != ignore)
-            10: artCachedForModifiedMs as int?,
+            11: artCachedForModifiedMs as int?,
           if (artCachedForSizeBytes != ignore)
-            11: artCachedForSizeBytes as int?,
-          if (hasReplayGainTrack != ignore) 12: hasReplayGainTrack as bool?,
-          if (replayGainTrackDb != ignore) 13: replayGainTrackDb as double?,
-          if (hasReplayGainAlbum != ignore) 14: hasReplayGainAlbum as bool?,
-          if (replayGainAlbumDb != ignore) 15: replayGainAlbumDb as double?,
-          if (isArtCacheValid != ignore) 16: isArtCacheValid as bool?,
+            12: artCachedForSizeBytes as int?,
+          if (hasReplayGainTrack != ignore) 13: hasReplayGainTrack as bool?,
+          if (replayGainTrackDb != ignore) 14: replayGainTrackDb as double?,
+          if (hasReplayGainAlbum != ignore) 15: hasReplayGainAlbum as bool?,
+          if (replayGainAlbumDb != ignore) 16: replayGainAlbumDb as double?,
+          if (isArtCacheValid != ignore) 17: isArtCacheValid as bool?,
         }) >
         0;
   }
@@ -308,6 +319,7 @@ sealed class _SongMetadataCacheRowUpdateAll {
     String? artist,
     String? album,
     String? genres,
+    String? composer,
     int? fileSizeBytes,
     int? updatedAtMs,
     bool? hasArtDiskCache,
@@ -335,6 +347,7 @@ class _SongMetadataCacheRowUpdateAllImpl
     Object? artist = ignore,
     Object? album = ignore,
     Object? genres = ignore,
+    Object? composer = ignore,
     Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
     Object? hasArtDiskCache = ignore,
@@ -352,16 +365,17 @@ class _SongMetadataCacheRowUpdateAllImpl
       if (artist != ignore) 3: artist as String?,
       if (album != ignore) 4: album as String?,
       if (genres != ignore) 5: genres as String?,
-      if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
-      if (updatedAtMs != ignore) 8: updatedAtMs as int?,
-      if (hasArtDiskCache != ignore) 9: hasArtDiskCache as bool?,
-      if (artCachedForModifiedMs != ignore) 10: artCachedForModifiedMs as int?,
-      if (artCachedForSizeBytes != ignore) 11: artCachedForSizeBytes as int?,
-      if (hasReplayGainTrack != ignore) 12: hasReplayGainTrack as bool?,
-      if (replayGainTrackDb != ignore) 13: replayGainTrackDb as double?,
-      if (hasReplayGainAlbum != ignore) 14: hasReplayGainAlbum as bool?,
-      if (replayGainAlbumDb != ignore) 15: replayGainAlbumDb as double?,
-      if (isArtCacheValid != ignore) 16: isArtCacheValid as bool?,
+      if (composer != ignore) 6: composer as String?,
+      if (fileSizeBytes != ignore) 8: fileSizeBytes as int?,
+      if (updatedAtMs != ignore) 9: updatedAtMs as int?,
+      if (hasArtDiskCache != ignore) 10: hasArtDiskCache as bool?,
+      if (artCachedForModifiedMs != ignore) 11: artCachedForModifiedMs as int?,
+      if (artCachedForSizeBytes != ignore) 12: artCachedForSizeBytes as int?,
+      if (hasReplayGainTrack != ignore) 13: hasReplayGainTrack as bool?,
+      if (replayGainTrackDb != ignore) 14: replayGainTrackDb as double?,
+      if (hasReplayGainAlbum != ignore) 15: hasReplayGainAlbum as bool?,
+      if (replayGainAlbumDb != ignore) 16: replayGainAlbumDb as double?,
+      if (isArtCacheValid != ignore) 17: isArtCacheValid as bool?,
     });
   }
 }
@@ -382,6 +396,7 @@ sealed class _SongMetadataCacheRowQueryUpdate {
     String? artist,
     String? album,
     String? genres,
+    String? composer,
     int? fileSizeBytes,
     int? updatedAtMs,
     bool? hasArtDiskCache,
@@ -409,6 +424,7 @@ class _SongMetadataCacheRowQueryUpdateImpl
     Object? artist = ignore,
     Object? album = ignore,
     Object? genres = ignore,
+    Object? composer = ignore,
     Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
     Object? hasArtDiskCache = ignore,
@@ -426,16 +442,17 @@ class _SongMetadataCacheRowQueryUpdateImpl
       if (artist != ignore) 3: artist as String?,
       if (album != ignore) 4: album as String?,
       if (genres != ignore) 5: genres as String?,
-      if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
-      if (updatedAtMs != ignore) 8: updatedAtMs as int?,
-      if (hasArtDiskCache != ignore) 9: hasArtDiskCache as bool?,
-      if (artCachedForModifiedMs != ignore) 10: artCachedForModifiedMs as int?,
-      if (artCachedForSizeBytes != ignore) 11: artCachedForSizeBytes as int?,
-      if (hasReplayGainTrack != ignore) 12: hasReplayGainTrack as bool?,
-      if (replayGainTrackDb != ignore) 13: replayGainTrackDb as double?,
-      if (hasReplayGainAlbum != ignore) 14: hasReplayGainAlbum as bool?,
-      if (replayGainAlbumDb != ignore) 15: replayGainAlbumDb as double?,
-      if (isArtCacheValid != ignore) 16: isArtCacheValid as bool?,
+      if (composer != ignore) 6: composer as String?,
+      if (fileSizeBytes != ignore) 8: fileSizeBytes as int?,
+      if (updatedAtMs != ignore) 9: updatedAtMs as int?,
+      if (hasArtDiskCache != ignore) 10: hasArtDiskCache as bool?,
+      if (artCachedForModifiedMs != ignore) 11: artCachedForModifiedMs as int?,
+      if (artCachedForSizeBytes != ignore) 12: artCachedForSizeBytes as int?,
+      if (hasReplayGainTrack != ignore) 13: hasReplayGainTrack as bool?,
+      if (replayGainTrackDb != ignore) 14: replayGainTrackDb as double?,
+      if (hasReplayGainAlbum != ignore) 15: hasReplayGainAlbum as bool?,
+      if (replayGainAlbumDb != ignore) 16: replayGainAlbumDb as double?,
+      if (isArtCacheValid != ignore) 17: isArtCacheValid as bool?,
     });
   }
 }
@@ -463,6 +480,7 @@ class _SongMetadataCacheRowQueryBuilderUpdateImpl
     Object? artist = ignore,
     Object? album = ignore,
     Object? genres = ignore,
+    Object? composer = ignore,
     Object? fileSizeBytes = ignore,
     Object? updatedAtMs = ignore,
     Object? hasArtDiskCache = ignore,
@@ -482,17 +500,18 @@ class _SongMetadataCacheRowQueryBuilderUpdateImpl
         if (artist != ignore) 3: artist as String?,
         if (album != ignore) 4: album as String?,
         if (genres != ignore) 5: genres as String?,
-        if (fileSizeBytes != ignore) 7: fileSizeBytes as int?,
-        if (updatedAtMs != ignore) 8: updatedAtMs as int?,
-        if (hasArtDiskCache != ignore) 9: hasArtDiskCache as bool?,
+        if (composer != ignore) 6: composer as String?,
+        if (fileSizeBytes != ignore) 8: fileSizeBytes as int?,
+        if (updatedAtMs != ignore) 9: updatedAtMs as int?,
+        if (hasArtDiskCache != ignore) 10: hasArtDiskCache as bool?,
         if (artCachedForModifiedMs != ignore)
-          10: artCachedForModifiedMs as int?,
-        if (artCachedForSizeBytes != ignore) 11: artCachedForSizeBytes as int?,
-        if (hasReplayGainTrack != ignore) 12: hasReplayGainTrack as bool?,
-        if (replayGainTrackDb != ignore) 13: replayGainTrackDb as double?,
-        if (hasReplayGainAlbum != ignore) 14: hasReplayGainAlbum as bool?,
-        if (replayGainAlbumDb != ignore) 15: replayGainAlbumDb as double?,
-        if (isArtCacheValid != ignore) 16: isArtCacheValid as bool?,
+          11: artCachedForModifiedMs as int?,
+        if (artCachedForSizeBytes != ignore) 12: artCachedForSizeBytes as int?,
+        if (hasReplayGainTrack != ignore) 13: hasReplayGainTrack as bool?,
+        if (replayGainTrackDb != ignore) 14: replayGainTrackDb as double?,
+        if (hasReplayGainAlbum != ignore) 15: hasReplayGainAlbum as bool?,
+        if (replayGainAlbumDb != ignore) 16: replayGainAlbumDb as double?,
+        if (isArtCacheValid != ignore) 17: isArtCacheValid as bool?,
       });
     } finally {
       q.close();
@@ -1508,13 +1527,195 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        EqualCondition(
+          property: 6,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerGreaterThan(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        GreaterCondition(
+          property: 6,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerGreaterThanOrEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        GreaterOrEqualCondition(
+          property: 6,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerLessThan(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        LessCondition(
+          property: 6,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerLessThanOrEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        LessOrEqualCondition(
+          property: 6,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerBetween(
+    String lower,
+    String upper, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        BetweenCondition(
+          property: 6,
+          lower: lower,
+          upper: upper,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        StartsWithCondition(
+          property: 6,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        EndsWithCondition(
+          property: 6,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+          QAfterFilterCondition>
+      composerContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        ContainsCondition(
+          property: 6,
+          value: value,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+          QAfterFilterCondition>
+      composerMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        MatchesCondition(
+          property: 6,
+          wildcard: pattern,
+          caseSensitive: caseSensitive,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const EqualCondition(
+          property: 6,
+          value: '',
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
+      QAfterFilterCondition> composerIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        const GreaterCondition(
+          property: 6,
+          value: '',
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow,
       QAfterFilterCondition> artColorValuesElementEqualTo(
     int value,
   ) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 6,
+          property: 7,
           value: value,
         ),
       );
@@ -1528,7 +1729,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterCondition(
-          property: 6,
+          property: 7,
           value: value,
         ),
       );
@@ -1542,7 +1743,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterOrEqualCondition(
-          property: 6,
+          property: 7,
           value: value,
         ),
       );
@@ -1556,7 +1757,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessCondition(
-          property: 6,
+          property: 7,
           value: value,
         ),
       );
@@ -1570,7 +1771,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessOrEqualCondition(
-          property: 6,
+          property: 7,
           value: value,
         ),
       );
@@ -1585,7 +1786,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         BetweenCondition(
-          property: 6,
+          property: 7,
           lower: lower,
           upper: upper,
         ),
@@ -1602,7 +1803,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
       QAfterFilterCondition> artColorValuesIsNotEmpty() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
-        const GreaterOrEqualCondition(property: 6, value: null),
+        const GreaterOrEqualCondition(property: 7, value: null),
       );
     });
   }
@@ -1614,7 +1815,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 7,
+          property: 8,
           value: value,
         ),
       );
@@ -1628,7 +1829,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterCondition(
-          property: 7,
+          property: 8,
           value: value,
         ),
       );
@@ -1642,7 +1843,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterOrEqualCondition(
-          property: 7,
+          property: 8,
           value: value,
         ),
       );
@@ -1656,7 +1857,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessCondition(
-          property: 7,
+          property: 8,
           value: value,
         ),
       );
@@ -1670,7 +1871,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessOrEqualCondition(
-          property: 7,
+          property: 8,
           value: value,
         ),
       );
@@ -1685,7 +1886,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         BetweenCondition(
-          property: 7,
+          property: 8,
           lower: lower,
           upper: upper,
         ),
@@ -1700,7 +1901,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 8,
+          property: 9,
           value: value,
         ),
       );
@@ -1714,7 +1915,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterCondition(
-          property: 8,
+          property: 9,
           value: value,
         ),
       );
@@ -1728,7 +1929,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterOrEqualCondition(
-          property: 8,
+          property: 9,
           value: value,
         ),
       );
@@ -1742,7 +1943,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessCondition(
-          property: 8,
+          property: 9,
           value: value,
         ),
       );
@@ -1756,7 +1957,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessOrEqualCondition(
-          property: 8,
+          property: 9,
           value: value,
         ),
       );
@@ -1771,7 +1972,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         BetweenCondition(
-          property: 8,
+          property: 9,
           lower: lower,
           upper: upper,
         ),
@@ -1786,7 +1987,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 9,
+          property: 10,
           value: value,
         ),
       );
@@ -1800,7 +2001,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 10,
+          property: 11,
           value: value,
         ),
       );
@@ -1814,7 +2015,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterCondition(
-          property: 10,
+          property: 11,
           value: value,
         ),
       );
@@ -1828,7 +2029,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterOrEqualCondition(
-          property: 10,
+          property: 11,
           value: value,
         ),
       );
@@ -1842,7 +2043,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessCondition(
-          property: 10,
+          property: 11,
           value: value,
         ),
       );
@@ -1856,7 +2057,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessOrEqualCondition(
-          property: 10,
+          property: 11,
           value: value,
         ),
       );
@@ -1871,7 +2072,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         BetweenCondition(
-          property: 10,
+          property: 11,
           lower: lower,
           upper: upper,
         ),
@@ -1886,7 +2087,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 11,
+          property: 12,
           value: value,
         ),
       );
@@ -1900,7 +2101,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterCondition(
-          property: 11,
+          property: 12,
           value: value,
         ),
       );
@@ -1914,7 +2115,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterOrEqualCondition(
-          property: 11,
+          property: 12,
           value: value,
         ),
       );
@@ -1928,7 +2129,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessCondition(
-          property: 11,
+          property: 12,
           value: value,
         ),
       );
@@ -1942,7 +2143,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessOrEqualCondition(
-          property: 11,
+          property: 12,
           value: value,
         ),
       );
@@ -1957,7 +2158,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         BetweenCondition(
-          property: 11,
+          property: 12,
           lower: lower,
           upper: upper,
         ),
@@ -1972,7 +2173,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 12,
+          property: 13,
           value: value,
         ),
       );
@@ -1987,7 +2188,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 13,
+          property: 14,
           value: value,
           epsilon: epsilon,
         ),
@@ -2003,7 +2204,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterCondition(
-          property: 13,
+          property: 14,
           value: value,
           epsilon: epsilon,
         ),
@@ -2019,7 +2220,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterOrEqualCondition(
-          property: 13,
+          property: 14,
           value: value,
           epsilon: epsilon,
         ),
@@ -2035,7 +2236,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessCondition(
-          property: 13,
+          property: 14,
           value: value,
           epsilon: epsilon,
         ),
@@ -2051,7 +2252,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessOrEqualCondition(
-          property: 13,
+          property: 14,
           value: value,
           epsilon: epsilon,
         ),
@@ -2068,7 +2269,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         BetweenCondition(
-          property: 13,
+          property: 14,
           lower: lower,
           upper: upper,
           epsilon: epsilon,
@@ -2084,7 +2285,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 14,
+          property: 15,
           value: value,
         ),
       );
@@ -2099,7 +2300,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 15,
+          property: 16,
           value: value,
           epsilon: epsilon,
         ),
@@ -2115,7 +2316,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterCondition(
-          property: 15,
+          property: 16,
           value: value,
           epsilon: epsilon,
         ),
@@ -2131,7 +2332,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         GreaterOrEqualCondition(
-          property: 15,
+          property: 16,
           value: value,
           epsilon: epsilon,
         ),
@@ -2147,7 +2348,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessCondition(
-          property: 15,
+          property: 16,
           value: value,
           epsilon: epsilon,
         ),
@@ -2163,7 +2364,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         LessOrEqualCondition(
-          property: 15,
+          property: 16,
           value: value,
           epsilon: epsilon,
         ),
@@ -2180,7 +2381,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         BetweenCondition(
-          property: 15,
+          property: 16,
           lower: lower,
           upper: upper,
           epsilon: epsilon,
@@ -2196,7 +2397,7 @@ extension SongMetadataCacheRowQueryFilter on QueryBuilder<SongMetadataCacheRow,
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
         EqualCondition(
-          property: 16,
+          property: 17,
           value: value,
         ),
       );
@@ -2329,142 +2530,163 @@ extension SongMetadataCacheRowQuerySortBy
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByComposer({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(
+        6,
+        caseSensitive: caseSensitive,
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByComposerDesc({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(
+        6,
+        sort: Sort.desc,
+        caseSensitive: caseSensitive,
+      );
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
       sortByFileSizeBytes() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(7);
-    });
-  }
-
-  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByFileSizeBytesDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(7, sort: Sort.desc);
-    });
-  }
-
-  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByUpdatedAtMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(8);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByUpdatedAtMsDesc() {
+      sortByFileSizeBytesDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(8, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByHasArtDiskCache() {
+      sortByUpdatedAtMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(9);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByHasArtDiskCacheDesc() {
+      sortByUpdatedAtMsDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(9, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByArtCachedForModifiedMs() {
+      sortByHasArtDiskCache() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(10);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByArtCachedForModifiedMsDesc() {
+      sortByHasArtDiskCacheDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(10, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByArtCachedForSizeBytes() {
+      sortByArtCachedForModifiedMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(11);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByArtCachedForSizeBytesDesc() {
+      sortByArtCachedForModifiedMsDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(11, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByHasReplayGainTrack() {
+      sortByArtCachedForSizeBytes() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(12);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByHasReplayGainTrackDesc() {
+      sortByArtCachedForSizeBytesDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(12, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByReplayGainTrackDb() {
+      sortByHasReplayGainTrack() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(13);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByReplayGainTrackDbDesc() {
+      sortByHasReplayGainTrackDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(13, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByHasReplayGainAlbum() {
+      sortByReplayGainTrackDb() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(14);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByHasReplayGainAlbumDesc() {
+      sortByReplayGainTrackDbDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(14, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByReplayGainAlbumDb() {
+      sortByHasReplayGainAlbum() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(15);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByReplayGainAlbumDbDesc() {
+      sortByHasReplayGainAlbumDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(15, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByIsArtCacheValid() {
+      sortByReplayGainAlbumDb() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(16);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      sortByIsArtCacheValidDesc() {
+      sortByReplayGainAlbumDbDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(16, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByIsArtCacheValid() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(17);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      sortByIsArtCacheValidDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(17, sort: Sort.desc);
     });
   }
 }
@@ -2556,142 +2778,156 @@ extension SongMetadataCacheRowQuerySortThenBy
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByComposer({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(6, caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByComposerDesc({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(6, sort: Sort.desc, caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
       thenByFileSizeBytes() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(7);
-    });
-  }
-
-  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByFileSizeBytesDesc() {
-    return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(7, sort: Sort.desc);
-    });
-  }
-
-  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByUpdatedAtMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(8);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByUpdatedAtMsDesc() {
+      thenByFileSizeBytesDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(8, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByHasArtDiskCache() {
+      thenByUpdatedAtMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(9);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByHasArtDiskCacheDesc() {
+      thenByUpdatedAtMsDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(9, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByArtCachedForModifiedMs() {
+      thenByHasArtDiskCache() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(10);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByArtCachedForModifiedMsDesc() {
+      thenByHasArtDiskCacheDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(10, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByArtCachedForSizeBytes() {
+      thenByArtCachedForModifiedMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(11);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByArtCachedForSizeBytesDesc() {
+      thenByArtCachedForModifiedMsDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(11, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByHasReplayGainTrack() {
+      thenByArtCachedForSizeBytes() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(12);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByHasReplayGainTrackDesc() {
+      thenByArtCachedForSizeBytesDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(12, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByReplayGainTrackDb() {
+      thenByHasReplayGainTrack() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(13);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByReplayGainTrackDbDesc() {
+      thenByHasReplayGainTrackDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(13, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByHasReplayGainAlbum() {
+      thenByReplayGainTrackDb() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(14);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByHasReplayGainAlbumDesc() {
+      thenByReplayGainTrackDbDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(14, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByReplayGainAlbumDb() {
+      thenByHasReplayGainAlbum() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(15);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByReplayGainAlbumDbDesc() {
+      thenByHasReplayGainAlbumDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(15, sort: Sort.desc);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByIsArtCacheValid() {
+      thenByReplayGainAlbumDb() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(16);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
-      thenByIsArtCacheValidDesc() {
+      thenByReplayGainAlbumDbDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(16, sort: Sort.desc);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByIsArtCacheValid() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(17);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterSortBy>
+      thenByIsArtCacheValidDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(17, sort: Sort.desc);
     });
   }
 }
@@ -2734,79 +2970,86 @@ extension SongMetadataCacheRowQueryWhereDistinct
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByArtColorValues() {
+      distinctByComposer({bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(6);
+      return query.addDistinctBy(6, caseSensitive: caseSensitive);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByFileSizeBytes() {
+      distinctByArtColorValues() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(7);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByUpdatedAtMs() {
+      distinctByFileSizeBytes() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(8);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByHasArtDiskCache() {
+      distinctByUpdatedAtMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(9);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByArtCachedForModifiedMs() {
+      distinctByHasArtDiskCache() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(10);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByArtCachedForSizeBytes() {
+      distinctByArtCachedForModifiedMs() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(11);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByHasReplayGainTrack() {
+      distinctByArtCachedForSizeBytes() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(12);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByReplayGainTrackDb() {
+      distinctByHasReplayGainTrack() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(13);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByHasReplayGainAlbum() {
+      distinctByReplayGainTrackDb() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(14);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByReplayGainAlbumDb() {
+      distinctByHasReplayGainAlbum() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(15);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
-      distinctByIsArtCacheValid() {
+      distinctByReplayGainAlbumDb() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(16);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, SongMetadataCacheRow, QAfterDistinct>
+      distinctByIsArtCacheValid() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(17);
     });
   }
 }
@@ -2849,80 +3092,87 @@ extension SongMetadataCacheRowQueryProperty1
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, List<int>, QAfterProperty>
-      artColorValuesProperty() {
+  QueryBuilder<SongMetadataCacheRow, String, QAfterProperty>
+      composerProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(6);
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, int, QAfterProperty>
-      fileSizeBytesProperty() {
+  QueryBuilder<SongMetadataCacheRow, List<int>, QAfterProperty>
+      artColorValuesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(7);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, int, QAfterProperty>
-      updatedAtMsProperty() {
+      fileSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(8);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, int, QAfterProperty>
+      updatedAtMsProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, bool, QAfterProperty>
       hasArtDiskCacheProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(9);
+      return query.addProperty(10);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, int, QAfterProperty>
       artCachedForModifiedMsProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(10);
+      return query.addProperty(11);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, int, QAfterProperty>
       artCachedForSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(11);
+      return query.addProperty(12);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, bool, QAfterProperty>
       hasReplayGainTrackProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(12);
+      return query.addProperty(13);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, double, QAfterProperty>
       replayGainTrackDbProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(13);
+      return query.addProperty(14);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, bool, QAfterProperty>
       hasReplayGainAlbumProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(14);
+      return query.addProperty(15);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, double, QAfterProperty>
       replayGainAlbumDbProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(15);
+      return query.addProperty(16);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, bool, QAfterProperty>
       isArtCacheValidProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(16);
+      return query.addProperty(17);
     });
   }
 }
@@ -2970,80 +3220,87 @@ extension SongMetadataCacheRowQueryProperty2<R>
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, (R, List<int>), QAfterProperty>
-      artColorValuesProperty() {
+  QueryBuilder<SongMetadataCacheRow, (R, String), QAfterProperty>
+      composerProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(6);
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, (R, int), QAfterProperty>
-      fileSizeBytesProperty() {
+  QueryBuilder<SongMetadataCacheRow, (R, List<int>), QAfterProperty>
+      artColorValuesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(7);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, int), QAfterProperty>
-      updatedAtMsProperty() {
+      fileSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(8);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R, int), QAfterProperty>
+      updatedAtMsProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, bool), QAfterProperty>
       hasArtDiskCacheProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(9);
+      return query.addProperty(10);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, int), QAfterProperty>
       artCachedForModifiedMsProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(10);
+      return query.addProperty(11);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, int), QAfterProperty>
       artCachedForSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(11);
+      return query.addProperty(12);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, bool), QAfterProperty>
       hasReplayGainTrackProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(12);
+      return query.addProperty(13);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, double), QAfterProperty>
       replayGainTrackDbProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(13);
+      return query.addProperty(14);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, bool), QAfterProperty>
       hasReplayGainAlbumProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(14);
+      return query.addProperty(15);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, double), QAfterProperty>
       replayGainAlbumDbProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(15);
+      return query.addProperty(16);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R, bool), QAfterProperty>
       isArtCacheValidProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(16);
+      return query.addProperty(17);
     });
   }
 }
@@ -3091,80 +3348,87 @@ extension SongMetadataCacheRowQueryProperty3<R1, R2>
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, (R1, R2, List<int>), QOperations>
-      artColorValuesProperty() {
+  QueryBuilder<SongMetadataCacheRow, (R1, R2, String), QOperations>
+      composerProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(6);
     });
   }
 
-  QueryBuilder<SongMetadataCacheRow, (R1, R2, int), QOperations>
-      fileSizeBytesProperty() {
+  QueryBuilder<SongMetadataCacheRow, (R1, R2, List<int>), QOperations>
+      artColorValuesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(7);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, int), QOperations>
-      updatedAtMsProperty() {
+      fileSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addProperty(8);
+    });
+  }
+
+  QueryBuilder<SongMetadataCacheRow, (R1, R2, int), QOperations>
+      updatedAtMsProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addProperty(9);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, bool), QOperations>
       hasArtDiskCacheProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(9);
+      return query.addProperty(10);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, int), QOperations>
       artCachedForModifiedMsProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(10);
+      return query.addProperty(11);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, int), QOperations>
       artCachedForSizeBytesProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(11);
+      return query.addProperty(12);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, bool), QOperations>
       hasReplayGainTrackProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(12);
+      return query.addProperty(13);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, double), QOperations>
       replayGainTrackDbProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(13);
+      return query.addProperty(14);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, bool), QOperations>
       hasReplayGainAlbumProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(14);
+      return query.addProperty(15);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, double), QOperations>
       replayGainAlbumDbProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(15);
+      return query.addProperty(16);
     });
   }
 
   QueryBuilder<SongMetadataCacheRow, (R1, R2, bool), QOperations>
       isArtCacheValidProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addProperty(16);
+      return query.addProperty(17);
     });
   }
 }
